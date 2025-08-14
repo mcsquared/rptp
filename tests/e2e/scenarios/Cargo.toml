@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+members = [
+    "delay_request_response_roundtrip/master",
+    "delay_request_response_roundtrip/slave",
+    "sync_follow_up_roundtrip/master",
+    "sync_follow_up_roundtrip/slave",
+]

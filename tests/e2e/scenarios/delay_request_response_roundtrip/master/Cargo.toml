@@ -1,0 +1,9 @@
+[package]
+name = "delay-request-response-roundtrip-master"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rptp = { path = "../../../../../crates/rptp" }
+rptp_daemon = { package = "rptp-daemon", path = "../../../../../crates/rptp-daemon" }
+tokio = { version = "1", features = ["full"] }
