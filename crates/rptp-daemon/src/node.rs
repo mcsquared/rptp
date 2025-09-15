@@ -7,7 +7,7 @@ use rptp::{
     node::{EventInterface, GeneralInterface, MasterNode, Node, SlaveNode, SystemInterface},
 };
 
-use crate::net::MulticastPort;
+use crate::net::{MulticastPort, NetPort};
 
 const PTP_MCAST: Ipv4Addr = Ipv4Addr::new(224, 0, 1, 129);
 const EVENT_PORT: u16 = 5319;

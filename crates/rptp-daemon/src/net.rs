@@ -1,7 +1,17 @@
-use std::io;
+use std::future::Future;
+use std::io::Result;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use tokio::net::UdpSocket;
+
+pub trait NetPort {
+    fn recv<'a>(
+        &'a self,
+        buf: &'a mut [u8],
+    ) -> impl Future<Output = Result<(usize, SocketAddr)>> + 'a;
+
+    fn send<'a>(&'a self, bytes: &'a [u8]) -> impl Future<Output = Result<usize>> + 'a;
+}
 
 #[derive(Debug)]
 pub struct MulticastPort {
@@ -10,7 +20,7 @@ pub struct MulticastPort {
 }
 
 impl MulticastPort {
-    pub async fn bind_v4(multicast: Ipv4Addr, port: u16) -> io::Result<Self> {
+    pub async fn bind_v4(multicast: Ipv4Addr, port: u16) -> Result<Self> {
         let socket = UdpSocket::bind(("0.0.0.0", port)).await?;
         socket.join_multicast_v4(multicast, Ipv4Addr::UNSPECIFIED)?;
         socket.set_multicast_loop_v4(false)?;
@@ -20,15 +30,17 @@ impl MulticastPort {
             dest: SocketAddrV4::new(multicast, port),
         })
     }
+}
 
-    pub async fn recv(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-        self.socket.recv_from(buf).await
+impl NetPort for MulticastPort {
+    fn recv<'a>(
+        &'a self,
+        buf: &'a mut [u8],
+    ) -> impl Future<Output = Result<(usize, SocketAddr)>> + 'a {
+        self.socket.recv_from(buf)
     }
 
-    pub async fn send<B: AsRef<[u8]>>(&self, bytes: B) -> io::Result<()> {
-        self.socket
-            .send_to(bytes.as_ref(), self.dest)
-            .await
-            .map(|_| ())
+    fn send<'a>(&'a self, bytes: &'a [u8]) -> impl Future<Output = Result<usize>> + 'a {
+        self.socket.send_to(bytes, self.dest)
     }
 }
