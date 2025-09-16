@@ -5,6 +5,7 @@ use tokio::time::{Duration, timeout};
 
 use rptp::message::{EventMessage, GeneralMessage, SystemMessage};
 use rptp::node::{Node, SlaveNode};
+use rptp_daemon::net::MulticastPort;
 use rptp_daemon::node::{
     TokioEventInterface, TokioGeneralInterface, TokioNode, TokioSystemInterface,
 };
@@ -49,7 +50,10 @@ impl Node for SpyNode {
 async fn main() -> std::io::Result<()> {
     let notify = Rc::new(Notify::new());
 
-    let slave = TokioNode::new(|event, general, system| {
+    let event_port = MulticastPort::ptp_event_testing_port().await?;
+    let general_port = MulticastPort::ptp_general_testing_port().await?;
+
+    let slave = TokioNode::new(event_port, general_port, |event, general, system| {
         SpyNode::new(event, general, system, notify.clone())
     })
     .await?;

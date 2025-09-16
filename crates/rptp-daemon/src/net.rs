@@ -20,6 +20,24 @@ pub struct MulticastPort {
 }
 
 impl MulticastPort {
+    const PTP_MCAST: Ipv4Addr = Ipv4Addr::new(224, 0, 1, 129);
+
+    pub async fn ptp_event_port() -> Result<Self> {
+        Self::bind_v4(Self::PTP_MCAST, 319).await
+    }
+
+    pub async fn ptp_general_port() -> Result<Self> {
+        Self::bind_v4(Self::PTP_MCAST, 320).await
+    }
+
+    pub async fn ptp_event_testing_port() -> Result<Self> {
+        Self::bind_v4(Self::PTP_MCAST, 5319).await
+    }
+
+    pub async fn ptp_general_testing_port() -> Result<Self> {
+        Self::bind_v4(Self::PTP_MCAST, 5320).await
+    }
+
     pub async fn bind_v4(multicast: Ipv4Addr, port: u16) -> Result<Self> {
         let socket = UdpSocket::bind(("0.0.0.0", port)).await?;
         socket.join_multicast_v4(multicast, Ipv4Addr::UNSPECIFIED)?;

@@ -1,5 +1,3 @@
-use std::net::Ipv4Addr;
-
 use tokio::sync::mpsc;
 
 use rptp::{
@@ -7,11 +5,7 @@ use rptp::{
     node::{EventInterface, GeneralInterface, MasterNode, Node, SlaveNode, SystemInterface},
 };
 
-use crate::net::{MulticastPort, NetPort};
-
-const PTP_MCAST: Ipv4Addr = Ipv4Addr::new(224, 0, 1, 129);
-const EVENT_PORT: u16 = 5319;
-const GENERAL_PORT: u16 = 5320;
+use crate::net::NetPort;
 
 pub struct TokioEventInterface {
     tx: mpsc::UnboundedSender<EventMessage>,
@@ -79,25 +73,22 @@ impl SystemInterface for &TokioSystemInterface {
     }
 }
 
-pub struct TokioNode {
+pub struct TokioNode<P: NetPort> {
     node: Box<dyn Node>,
-    event_port: MulticastPort,
-    general_port: MulticastPort,
+    event_port: P,
+    general_port: P,
     event_rx: mpsc::UnboundedReceiver<EventMessage>,
     general_rx: mpsc::UnboundedReceiver<GeneralMessage>,
     system_rx: mpsc::UnboundedReceiver<SystemMessage>,
     timestamp_counter: u64,
 }
 
-impl TokioNode {
-    pub async fn new<N, C>(ctor: C) -> std::io::Result<Self>
+impl<P: NetPort> TokioNode<P> {
+    pub async fn new<N, C>(event_port: P, general_port: P, ctor: C) -> std::io::Result<Self>
     where
         N: Node + 'static,
         C: FnOnce(TokioEventInterface, TokioGeneralInterface, TokioSystemInterface) -> N,
     {
-        let event_port = MulticastPort::bind_v4(PTP_MCAST, EVENT_PORT).await?;
-        let general_port = MulticastPort::bind_v4(PTP_MCAST, GENERAL_PORT).await?;
-
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
@@ -119,12 +110,18 @@ impl TokioNode {
         })
     }
 
-    pub async fn master() -> std::io::Result<Self> {
-        Self::new(|event, general, system| MasterNode::new(event, general, system)).await
+    pub async fn master(event_port: P, general_port: P) -> std::io::Result<Self> {
+        Self::new(event_port, general_port, |event, general, system| {
+            MasterNode::new(event, general, system)
+        })
+        .await
     }
 
-    pub async fn slave() -> std::io::Result<Self> {
-        Self::new(|event, general, system| SlaveNode::new(event, general, system)).await
+    pub async fn slave(event_port: P, general_port: P) -> std::io::Result<Self> {
+        Self::new(event_port, general_port, |event, general, system| {
+            SlaveNode::new(event, general, system)
+        })
+        .await
     }
 
     pub async fn run(self) -> std::io::Result<()> {
