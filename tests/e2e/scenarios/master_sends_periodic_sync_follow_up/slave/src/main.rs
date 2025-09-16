@@ -10,16 +10,16 @@ use rptp_daemon::net::MulticastPort;
 use rptp_daemon::node::TokioNode;
 
 struct SpyNode {
-    received_sync: Cell<bool>,
-    received_follow_up: Cell<bool>,
+    received_sync: Cell<u32>,
+    received_follow_up: Cell<u32>,
     notify: Arc<Notify>,
 }
 
 impl SpyNode {
     fn new(notify: Arc<Notify>) -> Self {
         Self {
-            received_sync: Cell::new(false),
-            received_follow_up: Cell::new(false),
+            received_sync: Cell::new(0),
+            received_follow_up: Cell::new(0),
             notify,
         }
     }
@@ -28,8 +28,8 @@ impl SpyNode {
 impl Node for SpyNode {
     fn event_message(&self, msg: EventMessage) {
         if let EventMessage::Sync = msg {
-            self.received_sync.set(true);
-            if self.received_sync.get() && self.received_follow_up.get() {
+            self.received_sync.set(self.received_sync.get() + 1);
+            if self.received_sync.get() > 5 && self.received_follow_up.get() > 5 {
                 self.notify.notify_waiters();
             }
         }
@@ -37,8 +37,9 @@ impl Node for SpyNode {
 
     fn general_message(&self, msg: GeneralMessage) {
         if let GeneralMessage::FollowUp(_) = msg {
-            self.received_follow_up.set(true);
-            if self.received_sync.get() && self.received_follow_up.get() {
+            self.received_follow_up
+                .set(self.received_follow_up.get() + 1);
+            if self.received_sync.get() > 5 && self.received_follow_up.get() > 5 {
                 self.notify.notify_waiters();
             }
         }
@@ -58,9 +59,10 @@ async fn main() -> std::io::Result<()> {
         SpyNode::new(notify.clone())
     })
     .await?;
+
     println!("Slave ready");
 
-    timeout(Duration::from_secs(10), slave.run_until(notify.notified()))
+    timeout(Duration::from_secs(30), slave.run_until(notify.notified()))
         .await
         .map_err(|_| {
             std::io::Error::new(

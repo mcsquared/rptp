@@ -1,4 +1,7 @@
+use std::time::Duration;
+
 use tokio::sync::mpsc;
+use tokio::time::sleep;
 
 use rptp::{
     message::{EventMessage, GeneralMessage, SystemMessage},
@@ -23,12 +26,6 @@ impl EventInterface for TokioEventInterface {
     }
 }
 
-impl EventInterface for &TokioEventInterface {
-    fn send(&self, msg: EventMessage) {
-        let _ = self.tx.send(msg);
-    }
-}
-
 pub struct TokioGeneralInterface {
     tx: mpsc::UnboundedSender<GeneralMessage>,
 }
@@ -45,12 +42,6 @@ impl GeneralInterface for TokioGeneralInterface {
     }
 }
 
-impl GeneralInterface for &TokioGeneralInterface {
-    fn send(&self, msg: GeneralMessage) {
-        let _ = self.tx.send(msg);
-    }
-}
-
 pub struct TokioSystemInterface {
     tx: mpsc::UnboundedSender<SystemMessage>,
 }
@@ -62,14 +53,12 @@ impl TokioSystemInterface {
 }
 
 impl SystemInterface for TokioSystemInterface {
-    fn send(&self, msg: SystemMessage) {
-        let _ = self.tx.send(msg);
-    }
-}
-
-impl SystemInterface for &TokioSystemInterface {
-    fn send(&self, msg: SystemMessage) {
-        let _ = self.tx.send(msg);
+    fn send(&self, msg: SystemMessage, delay: Duration) {
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            sleep(delay).await;
+            let _ = tx.send(msg);
+        });
     }
 }
 
@@ -203,4 +192,55 @@ async fn terminate() {
 #[cfg(not(unix))]
 async fn terminate() {
     std::future::pending::<()>().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::net::FakeNetPort;
+    use tokio::time;
+
+    #[tokio::test(start_paused = true)]
+    async fn master_node_sends_periodic_sync_follow_up() -> std::io::Result<()> {
+        let (event_port, mut event_rx) = FakeNetPort::new();
+        let (general_port, mut general_rx) = FakeNetPort::new();
+
+        let node = TokioNode::master(event_port, general_port).await?;
+
+        tokio::task::spawn(async move { node.run().await });
+
+        let result = time::timeout(Duration::from_secs(10), async {
+            let mut sync_count = 0;
+            let mut follow_up_count = 0;
+
+            loop {
+                time::advance(Duration::from_secs(1)).await;
+
+                while let Ok(msg) = event_rx.try_recv() {
+                    if matches!(EventMessage::try_from(msg.as_ref()), Ok(EventMessage::Sync)) {
+                        sync_count += 1;
+                    }
+                }
+                while let Ok(msg) = general_rx.try_recv() {
+                    if matches!(
+                        GeneralMessage::try_from(msg.as_ref()),
+                        Ok(GeneralMessage::FollowUp(_))
+                    ) {
+                        follow_up_count += 1;
+                    }
+                }
+
+                if sync_count >= 5 && follow_up_count >= 5 {
+                    return (sync_count, follow_up_count);
+                }
+            }
+        })
+        .await;
+
+        let (sync_count, follow_up_count) = result.expect("timeout waiting for messages");
+        assert_eq!(sync_count, follow_up_count);
+        assert_eq!(sync_count, 5);
+        Ok(())
+    }
 }

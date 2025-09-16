@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use tokio::sync::Notify;
 use tokio::time::{Duration, timeout};
@@ -12,7 +12,7 @@ use rptp_daemon::node::{
 
 struct SpyNode {
     node: SlaveNode<TokioEventInterface, TokioGeneralInterface, TokioSystemInterface>,
-    notify: Rc<Notify>,
+    notify: Arc<Notify>,
 }
 
 impl SpyNode {
@@ -20,7 +20,7 @@ impl SpyNode {
         event: TokioEventInterface,
         general: TokioGeneralInterface,
         system: TokioSystemInterface,
-        notify: Rc<Notify>,
+        notify: Arc<Notify>,
     ) -> Self {
         Self {
             node: SlaveNode::new(event, general, system),
@@ -48,7 +48,7 @@ impl Node for SpyNode {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::io::Result<()> {
-    let notify = Rc::new(Notify::new());
+    let notify = Arc::new(Notify::new());
 
     let event_port = MulticastPort::ptp_event_testing_port().await?;
     let general_port = MulticastPort::ptp_general_testing_port().await?;

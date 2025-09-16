@@ -1,18 +1,20 @@
+use std::time::Duration;
+
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
-pub trait EventInterface {
+pub trait EventInterface: Send {
     fn send(&self, msg: EventMessage);
 }
 
-pub trait GeneralInterface {
+pub trait GeneralInterface: Send {
     fn send(&self, msg: GeneralMessage);
 }
 
-pub trait SystemInterface {
-    fn send(&self, msg: SystemMessage);
+pub trait SystemInterface: Send {
+    fn send(&self, msg: SystemMessage, delay: Duration);
 }
 
-pub trait Node {
+pub trait Node: Send {
     fn event_message(&self, msg: EventMessage);
     fn general_message(&self, msg: GeneralMessage);
     fn system_message(&self, msg: SystemMessage);
@@ -36,7 +38,7 @@ where
     S: SystemInterface,
 {
     pub fn new(event_interface: E, general_interface: G, system_interface: S) -> Self {
-        system_interface.send(SystemMessage::DelayCycle);
+        system_interface.send(SystemMessage::DelayCycle, Duration::ZERO);
 
         Self {
             event_interface,
@@ -80,7 +82,7 @@ where
 {
     event_interface: E,
     general_interface: G,
-    _system_interface: S,
+    system_interface: S,
 }
 
 impl<E, G, S> MasterNode<E, G, S>
@@ -90,12 +92,12 @@ where
     S: SystemInterface,
 {
     pub fn new(event_interface: E, general_interface: G, system_interface: S) -> Self {
-        system_interface.send(SystemMessage::SyncCycle);
+        system_interface.send(SystemMessage::SyncCycle, Duration::ZERO);
 
         Self {
             event_interface,
             general_interface,
-            _system_interface: system_interface,
+            system_interface,
         }
     }
 }
@@ -123,6 +125,8 @@ where
         match msg {
             SystemMessage::SyncCycle => {
                 self.event_interface.send(EventMessage::Sync);
+                self.system_interface
+                    .send(SystemMessage::SyncCycle, Duration::from_secs(1));
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::Sync => {
@@ -152,7 +156,7 @@ mod tests {
         node.event_message(EventMessage::DelayReq);
 
         assert_eq!(
-            *general_interface.sent_messages.borrow(),
+            *general_interface.sent_messages.lock().unwrap(),
             vec![GeneralMessage::DelayResp]
         );
     }
@@ -168,7 +172,7 @@ mod tests {
         );
 
         assert_eq!(
-            *system_interface.sent_messages.borrow(),
+            *system_interface.sent_messages.lock().unwrap(),
             vec![SystemMessage::SyncCycle]
         );
     }
@@ -176,18 +180,35 @@ mod tests {
     #[test]
     fn master_node_answers_sync_cycle_with_sync() {
         let event_interface = FakeEventInterface::new();
-        let general_interface = FakeGeneralInterface::new();
 
         let node = MasterNode::new(
             &event_interface,
-            &general_interface,
+            FakeGeneralInterface::new(),
             FakeSystemInterface::new(),
         );
         node.system_message(SystemMessage::SyncCycle);
 
         assert_eq!(
-            *event_interface.sent_messages.borrow(),
+            *event_interface.sent_messages.lock().unwrap(),
             vec![EventMessage::Sync],
+        );
+    }
+
+    #[test]
+    fn master_node_schedules_next_sync() {
+        let system_interface = FakeSystemInterface::new();
+
+        let node = MasterNode::new(
+            FakeEventInterface::new(),
+            FakeGeneralInterface::new(),
+            &system_interface,
+        );
+
+        node.system_message(SystemMessage::SyncCycle);
+
+        assert_eq!(
+            *system_interface.sent_messages.lock().unwrap(),
+            vec![SystemMessage::SyncCycle, SystemMessage::SyncCycle],
         );
     }
 
@@ -206,7 +227,7 @@ mod tests {
         });
 
         assert_eq!(
-            *general_interface.sent_messages.borrow(),
+            *general_interface.sent_messages.lock().unwrap(),
             vec![GeneralMessage::FollowUp(42)],
         );
     }
@@ -222,7 +243,7 @@ mod tests {
         );
 
         assert_eq!(
-            *system_interface.sent_messages.borrow(),
+            *system_interface.sent_messages.lock().unwrap(),
             vec![SystemMessage::DelayCycle]
         );
     }
@@ -239,82 +260,82 @@ mod tests {
         node.system_message(SystemMessage::DelayCycle);
 
         assert_eq!(
-            *event_interface.sent_messages.borrow(),
+            *event_interface.sent_messages.lock().unwrap(),
             vec![EventMessage::DelayReq]
         );
     }
 
-    use std::cell::RefCell;
+    use std::sync::{Arc, Mutex};
 
     struct FakeEventInterface {
-        sent_messages: RefCell<Vec<EventMessage>>,
+        sent_messages: Arc<Mutex<Vec<EventMessage>>>,
     }
 
     impl FakeEventInterface {
         fn new() -> Self {
             Self {
-                sent_messages: RefCell::new(Vec::new()),
+                sent_messages: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
 
     impl EventInterface for FakeEventInterface {
         fn send(&self, msg: EventMessage) {
-            self.sent_messages.borrow_mut().push(msg);
+            self.sent_messages.lock().unwrap().push(msg);
         }
     }
 
     impl EventInterface for &FakeEventInterface {
         fn send(&self, msg: EventMessage) {
-            self.sent_messages.borrow_mut().push(msg);
+            self.sent_messages.lock().unwrap().push(msg);
         }
     }
 
     struct FakeGeneralInterface {
-        sent_messages: RefCell<Vec<GeneralMessage>>,
+        sent_messages: Arc<Mutex<Vec<GeneralMessage>>>,
     }
 
     impl FakeGeneralInterface {
         fn new() -> Self {
             Self {
-                sent_messages: RefCell::new(Vec::new()),
+                sent_messages: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
 
     impl GeneralInterface for FakeGeneralInterface {
         fn send(&self, msg: GeneralMessage) {
-            self.sent_messages.borrow_mut().push(msg);
+            self.sent_messages.lock().unwrap().push(msg);
         }
     }
 
     impl GeneralInterface for &FakeGeneralInterface {
         fn send(&self, msg: GeneralMessage) {
-            self.sent_messages.borrow_mut().push(msg);
+            self.sent_messages.lock().unwrap().push(msg);
         }
     }
 
     struct FakeSystemInterface {
-        sent_messages: RefCell<Vec<SystemMessage>>,
+        sent_messages: Arc<Mutex<Vec<SystemMessage>>>,
     }
 
     impl FakeSystemInterface {
         fn new() -> Self {
             Self {
-                sent_messages: RefCell::new(Vec::new()),
+                sent_messages: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
 
     impl SystemInterface for FakeSystemInterface {
-        fn send(&self, msg: SystemMessage) {
-            self.sent_messages.borrow_mut().push(msg);
+        fn send(&self, msg: SystemMessage, _delay: Duration) {
+            self.sent_messages.lock().unwrap().push(msg);
         }
     }
 
     impl SystemInterface for &FakeSystemInterface {
-        fn send(&self, msg: SystemMessage) {
-            self.sent_messages.borrow_mut().push(msg);
+        fn send(&self, msg: SystemMessage, _delay: Duration) {
+            self.sent_messages.lock().unwrap().push(msg);
         }
     }
 }

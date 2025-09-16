@@ -108,6 +108,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "master-sends-periodic-sync-follow-up-master"
+version = "0.1.0"
+dependencies = [
+ "rptp",
+ "rptp-daemon",
+ "tokio",
+]
+
+[[package]]
+name = "master-sends-periodic-sync-follow-up-slave"
+version = "0.1.0"
+dependencies = [
+ "rptp",
+ "rptp-daemon",
+ "tokio",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
