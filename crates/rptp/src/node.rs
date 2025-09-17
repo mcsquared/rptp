@@ -1,6 +1,11 @@
 use std::time::Duration;
 
-use crate::message::{EventMessage, GeneralMessage, SystemMessage, TwoStepSyncMessage};
+use crate::message::{
+    DelayRequestMessage, DelayResponseMessage, EventMessage, GeneralMessage, SystemMessage,
+    TwoStepSyncMessage,
+};
+
+use crate::time::TimeStamp;
 
 pub trait EventInterface: Send {
     fn send(&self, msg: EventMessage);
@@ -62,6 +67,7 @@ where
 
     fn general_message(&self, msg: GeneralMessage) {
         match msg {
+            GeneralMessage::DelayResp(_resp) => {}
             _ => {}
         }
     }
@@ -69,10 +75,15 @@ where
     fn system_message(&self, msg: SystemMessage) {
         match msg {
             SystemMessage::DelayCycle => {
-                self.event_interface.send(EventMessage::DelayReq);
+                self.event_interface
+                    .send(EventMessage::DelayReq(DelayRequestMessage::new(0)));
                 self.system_interface
                     .send(SystemMessage::DelayCycle, Duration::from_secs(1));
             }
+            SystemMessage::Timestamp { msg, .. } => match msg {
+                EventMessage::DelayReq(_) => {}
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -114,7 +125,13 @@ where
 {
     fn event_message(&self, msg: EventMessage) {
         match msg {
-            EventMessage::DelayReq => self.general_interface.send(GeneralMessage::DelayResp),
+            EventMessage::DelayReq(_) => {
+                self.general_interface
+                    .send(GeneralMessage::DelayResp(DelayResponseMessage::new(
+                        0,
+                        TimeStamp::new(0, 0),
+                    )))
+            }
             _ => {}
         }
     }
@@ -161,11 +178,14 @@ mod tests {
             &general_interface,
             FakeSystemInterface::new(),
         );
-        node.event_message(EventMessage::DelayReq);
+        node.event_message(EventMessage::DelayReq(DelayRequestMessage::new(0)));
 
         assert_eq!(
             *general_interface.sent_messages.lock().unwrap(),
-            vec![GeneralMessage::DelayResp]
+            vec![GeneralMessage::DelayResp(DelayResponseMessage::new(
+                0,
+                TimeStamp::new(0, 0),
+            ))]
         );
     }
 
@@ -290,7 +310,7 @@ mod tests {
 
         assert_eq!(
             *event_interface.sent_messages.lock().unwrap(),
-            vec![EventMessage::DelayReq]
+            vec![EventMessage::DelayReq(DelayRequestMessage::new(0))]
         );
     }
 

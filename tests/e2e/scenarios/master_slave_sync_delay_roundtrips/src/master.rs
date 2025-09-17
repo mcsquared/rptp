@@ -73,7 +73,7 @@ impl Node for SpyNode {
     fn event_message(&self, msg: EventMessage) {
         self.node.event_message(msg);
 
-        if let EventMessage::DelayReq = msg {
+        if let EventMessage::DelayReq(_) = msg {
             self.received_delay_req
                 .set(self.received_delay_req.get() + 1);
             self.test_accept_condition();

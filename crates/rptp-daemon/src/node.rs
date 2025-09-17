@@ -264,7 +264,7 @@ mod tests {
                 while let Ok(msg) = event_rx.try_recv() {
                     if matches!(
                         EventMessage::try_from(msg.as_ref()),
-                        Ok(EventMessage::DelayReq)
+                        Ok(EventMessage::DelayReq(_))
                     ) {
                         delay_request_count += 1;
                     }

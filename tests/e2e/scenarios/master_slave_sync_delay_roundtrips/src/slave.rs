@@ -61,7 +61,7 @@ impl Node for SpyNode {
                 .set(self.received_follow_up.get() + 1);
             self.test_accept_condition();
         }
-        if let GeneralMessage::DelayResp = msg {
+        if let GeneralMessage::DelayResp(_) = msg {
             self.received_delay_resp
                 .set(self.received_delay_resp.get() + 1);
             self.test_accept_condition();
