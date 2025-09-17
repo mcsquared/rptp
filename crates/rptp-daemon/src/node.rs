@@ -243,4 +243,40 @@ mod tests {
         assert_eq!(sync_count, 5);
         Ok(())
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn slave_node_sends_periodic_delay_requests() -> std::io::Result<()> {
+        let (event_port, mut event_rx) = FakeNetPort::new();
+        let (general_port, _) = FakeNetPort::new();
+
+        let node = TokioNode::slave(event_port, general_port).await?;
+
+        tokio::task::spawn(async move { node.run().await });
+
+        let result = time::timeout(Duration::from_secs(10), async {
+            let mut delay_request_count = 0;
+
+            loop {
+                time::advance(Duration::from_secs(1)).await;
+
+                while let Ok(msg) = event_rx.try_recv() {
+                    if matches!(
+                        EventMessage::try_from(msg.as_ref()),
+                        Ok(EventMessage::DelayReq)
+                    ) {
+                        delay_request_count += 1;
+                    }
+                }
+
+                if delay_request_count >= 5 {
+                    return delay_request_count;
+                }
+            }
+        })
+        .await;
+
+        let delay_request_count = result.expect("timeout waiting for delay requests");
+        assert_eq!(delay_request_count, 5);
+        Ok(())
+    }
 }

@@ -28,7 +28,7 @@ where
 {
     event_interface: E,
     _general_interface: G,
-    _system_interface: S,
+    system_interface: S,
 }
 
 impl<E, G, S> SlaveNode<E, G, S>
@@ -43,7 +43,7 @@ where
         Self {
             event_interface,
             _general_interface: general_interface,
-            _system_interface: system_interface,
+            system_interface,
         }
     }
 }
@@ -68,7 +68,11 @@ where
 
     fn system_message(&self, msg: SystemMessage) {
         match msg {
-            SystemMessage::DelayCycle => self.event_interface.send(EventMessage::DelayReq),
+            SystemMessage::DelayCycle => {
+                self.event_interface.send(EventMessage::DelayReq);
+                self.system_interface
+                    .send(SystemMessage::DelayCycle, Duration::from_secs(1));
+            }
             _ => {}
         }
     }
@@ -245,6 +249,24 @@ mod tests {
         assert_eq!(
             *system_interface.sent_messages.lock().unwrap(),
             vec![SystemMessage::DelayCycle]
+        );
+    }
+
+    #[test]
+    fn slave_node_schedules_next_delay_request() {
+        let system_interface = FakeSystemInterface::new();
+
+        let node = SlaveNode::new(
+            FakeEventInterface::new(),
+            FakeGeneralInterface::new(),
+            &system_interface,
+        );
+
+        node.system_message(SystemMessage::DelayCycle);
+
+        assert_eq!(
+            *system_interface.sent_messages.lock().unwrap(),
+            vec![SystemMessage::DelayCycle, SystemMessage::DelayCycle],
         );
     }
 
