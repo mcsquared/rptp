@@ -1,10 +1,5 @@
 [workspace]
 resolver = "3"
 members = [
-    "delay_request_response_roundtrip/master",
-    "delay_request_response_roundtrip/slave",
-    "sync_follow_up_roundtrip/master",
-    "sync_follow_up_roundtrip/slave",
-    "master_sends_periodic_sync_follow_up/master",
-    "master_sends_periodic_sync_follow_up/slave",
+    "master_slave_sync_delay_roundtrips",
 ]

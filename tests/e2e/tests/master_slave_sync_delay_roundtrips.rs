@@ -11,7 +11,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn sync_follow_up_roundtrip() -> anyhow::Result<()> {
+    async fn master_slave_sync_delay_roundtrips() -> anyhow::Result<()> {
         let docker = Docker::connect_with_local_defaults()?;
 
         let image = TestImage::new(docker.clone(), "e2e-scenarios");
@@ -23,7 +23,7 @@ mod tests {
             GenericImage::new(image.name(), &tag)
                 .with_wait_for(WaitFor::message_on_stdout("Slave ready"))
                 .with_log_consumer(PrintLog { prefix: "slave" })
-                .with_cmd(["/app/sync-follow-up-roundtrip-slave"])
+                .with_cmd(["/app/master-slave-sync-delay-roundtrips-slave"])
                 .with_network(net.name())
                 .start()
                 .await?,
@@ -34,15 +34,27 @@ mod tests {
             GenericImage::new(image.name(), &tag)
                 .with_wait_for(WaitFor::message_on_stdout("Master ready"))
                 .with_log_consumer(PrintLog { prefix: "master" })
-                .with_cmd(["/app/sync-follow-up-roundtrip-master"])
+                .with_cmd(["/app/master-slave-sync-delay-roundtrips-master"])
                 .with_network(net.name())
                 .start()
                 .await?,
             docker.clone(),
         );
 
-        let exit_code = slave.wait_for_exit(Duration::from_secs(30)).await?;
-        assert_eq!(exit_code, 0, "Slave exited non-zero (code={exit_code})");
+        let result = tokio::try_join!(
+            master.wait_for_exit(Duration::from_secs(60)),
+            slave.wait_for_exit(Duration::from_secs(60)),
+        );
+
+        match result {
+            Ok((master_status, slave_status)) => {
+                assert!(master_status == 0);
+                assert!(slave_status == 0);
+            }
+            Err(_) => {
+                panic!("Test failed due to error or timeout");
+            }
+        }
 
         slave.rm().await?;
         master.stop().await?;

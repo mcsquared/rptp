@@ -1,0 +1,17 @@
+[package]
+name = "master-slave-sync-delay-roundtrips"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rptp = { path = "../../../../crates/rptp" }
+rptp_daemon = { package = "rptp-daemon", path = "../../../../crates/rptp-daemon" }
+tokio = { version = "1", features = ["full"] }
+
+[[bin]]
+name = "master-slave-sync-delay-roundtrips-master"
+path = "src/master.rs"
+
+[[bin]]
+name = "master-slave-sync-delay-roundtrips-slave"
+path = "src/slave.rs"
