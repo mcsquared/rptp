@@ -48,7 +48,7 @@ impl SpyNode {
 
 impl Node for SpyNode {
     fn event_message(&self, msg: EventMessage) {
-        if let EventMessage::Sync = msg {
+        if let EventMessage::TwoStepSync(_) = msg {
             self.received_sync.set(self.received_sync.get() + 1);
             self.test_accept_condition();
         }

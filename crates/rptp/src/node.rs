@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::message::{EventMessage, GeneralMessage, SystemMessage};
+use crate::message::{EventMessage, GeneralMessage, SystemMessage, TwoStepSyncMessage};
 
 pub trait EventInterface: Send {
     fn send(&self, msg: EventMessage);
@@ -128,14 +128,15 @@ where
     fn system_message(&self, msg: SystemMessage) {
         match msg {
             SystemMessage::SyncCycle => {
-                self.event_interface.send(EventMessage::Sync);
+                self.event_interface
+                    .send(EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)));
                 self.system_interface
                     .send(SystemMessage::SyncCycle, Duration::from_secs(1));
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
-                EventMessage::Sync => {
+                EventMessage::TwoStepSync(twostep) => {
                     self.general_interface
-                        .send(GeneralMessage::FollowUp(timestamp));
+                        .send(GeneralMessage::FollowUp(twostep.follow_up(timestamp)));
                 }
                 _ => {}
             },
@@ -147,6 +148,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::message::FollowUpMessage;
+    use crate::time::TimeStamp;
 
     #[test]
     fn master_node_answers_delay_request_with_delay_response() {
@@ -194,7 +198,7 @@ mod tests {
 
         assert_eq!(
             *event_interface.sent_messages.lock().unwrap(),
-            vec![EventMessage::Sync],
+            vec![EventMessage::TwoStepSync(TwoStepSyncMessage::new(0))],
         );
     }
 
@@ -226,13 +230,16 @@ mod tests {
             FakeSystemInterface::new(),
         );
         node.system_message(SystemMessage::Timestamp {
-            msg: EventMessage::Sync,
-            timestamp: 42,
+            msg: EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
+            timestamp: TimeStamp::new(0, 0),
         });
 
         assert_eq!(
             *general_interface.sent_messages.lock().unwrap(),
-            vec![GeneralMessage::FollowUp(42)],
+            vec![GeneralMessage::FollowUp(FollowUpMessage::new(
+                0,
+                TimeStamp::new(0, 0)
+            ))],
         );
     }
 

@@ -6,6 +6,7 @@ use tokio::time::sleep;
 use rptp::{
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{EventInterface, GeneralInterface, MasterNode, Node, SlaveNode, SystemInterface},
+    time::TimeStamp,
 };
 
 use crate::net::NetPort;
@@ -69,7 +70,7 @@ pub struct TokioNode<P: NetPort> {
     event_rx: mpsc::UnboundedReceiver<EventMessage>,
     general_rx: mpsc::UnboundedReceiver<GeneralMessage>,
     system_rx: mpsc::UnboundedReceiver<SystemMessage>,
-    timestamp_counter: u64,
+    timestamp: TimeStamp,
 }
 
 impl<P: NetPort> TokioNode<P> {
@@ -95,7 +96,7 @@ impl<P: NetPort> TokioNode<P> {
             event_rx,
             general_rx,
             system_rx,
-            timestamp_counter: 0,
+            timestamp: TimeStamp::new(0, 0),
         })
     }
 
@@ -151,10 +152,8 @@ impl<P: NetPort> TokioNode<P> {
 
                         self.node.system_message(SystemMessage::Timestamp {
                             msg,
-                            timestamp: self.timestamp_counter
+                            timestamp: self.timestamp
                         });
-
-                        self.timestamp_counter = self.timestamp_counter.wrapping_add(1);
                     }
                 }
                 msg = self.general_rx.recv() => {
@@ -218,7 +217,10 @@ mod tests {
                 time::advance(Duration::from_secs(1)).await;
 
                 while let Ok(msg) = event_rx.try_recv() {
-                    if matches!(EventMessage::try_from(msg.as_ref()), Ok(EventMessage::Sync)) {
+                    if matches!(
+                        EventMessage::try_from(msg.as_ref()),
+                        Ok(EventMessage::TwoStepSync(_))
+                    ) {
                         sync_count += 1;
                     }
                 }
