@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use crate::message::{
-    DelayRequestMessage, DelayResponseMessage, EventMessage, GeneralMessage, SystemMessage,
-    TwoStepSyncMessage,
+    DelayCycleMessage, DelayResponseMessage, EventMessage, GeneralMessage, SyncCycleMessage,
+    SystemMessage,
 };
 
 use crate::time::TimeStamp;
@@ -43,7 +43,10 @@ where
     S: SystemInterface,
 {
     pub fn new(event_interface: E, general_interface: G, system_interface: S) -> Self {
-        system_interface.send(SystemMessage::DelayCycle, Duration::ZERO);
+        system_interface.send(
+            SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
+            Duration::ZERO,
+        );
 
         Self {
             event_interface,
@@ -74,11 +77,16 @@ where
 
     fn system_message(&self, msg: SystemMessage) {
         match msg {
-            SystemMessage::DelayCycle => {
+            SystemMessage::DelayCycle(delay_cycle) => {
+                let delay_request = delay_cycle.delay_request();
+                let next_cycle = delay_cycle.next();
+
                 self.event_interface
-                    .send(EventMessage::DelayReq(DelayRequestMessage::new(0)));
-                self.system_interface
-                    .send(SystemMessage::DelayCycle, Duration::from_secs(1));
+                    .send(EventMessage::DelayReq(delay_request));
+                self.system_interface.send(
+                    SystemMessage::DelayCycle(next_cycle),
+                    Duration::from_secs(1),
+                );
             }
             SystemMessage::Timestamp { msg, .. } => match msg {
                 EventMessage::DelayReq(_) => {}
@@ -107,7 +115,10 @@ where
     S: SystemInterface,
 {
     pub fn new(event_interface: E, general_interface: G, system_interface: S) -> Self {
-        system_interface.send(SystemMessage::SyncCycle, Duration::ZERO);
+        system_interface.send(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
+            Duration::ZERO,
+        );
 
         Self {
             event_interface,
@@ -144,11 +155,14 @@ where
 
     fn system_message(&self, msg: SystemMessage) {
         match msg {
-            SystemMessage::SyncCycle => {
+            SystemMessage::SyncCycle(sync_cycle) => {
+                let sync_message = sync_cycle.two_step_sync();
+                let next_cycle = sync_cycle.next();
+
                 self.event_interface
-                    .send(EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)));
+                    .send(EventMessage::TwoStepSync(sync_message));
                 self.system_interface
-                    .send(SystemMessage::SyncCycle, Duration::from_secs(1));
+                    .send(SystemMessage::SyncCycle(next_cycle), Duration::from_secs(1));
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::TwoStepSync(twostep) => {
@@ -166,7 +180,7 @@ where
 mod tests {
     use super::*;
 
-    use crate::message::FollowUpMessage;
+    use crate::message::{DelayRequestMessage, FollowUpMessage, TwoStepSyncMessage};
     use crate::time::TimeStamp;
 
     #[test]
@@ -201,7 +215,7 @@ mod tests {
 
         assert_eq!(
             *system_interface.sent_messages.lock().unwrap(),
-            vec![SystemMessage::SyncCycle]
+            vec![SystemMessage::SyncCycle(SyncCycleMessage::new(0))]
         );
     }
 
@@ -214,7 +228,7 @@ mod tests {
             FakeGeneralInterface::new(),
             FakeSystemInterface::new(),
         );
-        node.system_message(SystemMessage::SyncCycle);
+        node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
         assert_eq!(
             *event_interface.sent_messages.lock().unwrap(),
@@ -232,11 +246,14 @@ mod tests {
             &system_interface,
         );
 
-        node.system_message(SystemMessage::SyncCycle);
+        node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
         assert_eq!(
             *system_interface.sent_messages.lock().unwrap(),
-            vec![SystemMessage::SyncCycle, SystemMessage::SyncCycle],
+            vec![
+                SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
+                SystemMessage::SyncCycle(SyncCycleMessage::new(1))
+            ],
         );
     }
 
@@ -275,7 +292,7 @@ mod tests {
 
         assert_eq!(
             *system_interface.sent_messages.lock().unwrap(),
-            vec![SystemMessage::DelayCycle]
+            vec![SystemMessage::DelayCycle(DelayCycleMessage::new(0))]
         );
     }
 
@@ -289,11 +306,14 @@ mod tests {
             &system_interface,
         );
 
-        node.system_message(SystemMessage::DelayCycle);
+        node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
 
         assert_eq!(
             *system_interface.sent_messages.lock().unwrap(),
-            vec![SystemMessage::DelayCycle, SystemMessage::DelayCycle],
+            vec![
+                SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
+                SystemMessage::DelayCycle(DelayCycleMessage::new(1))
+            ],
         );
     }
 
@@ -306,7 +326,7 @@ mod tests {
             FakeGeneralInterface::new(),
             FakeSystemInterface::new(),
         );
-        node.system_message(SystemMessage::DelayCycle);
+        node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
 
         assert_eq!(
             *event_interface.sent_messages.lock().unwrap(),

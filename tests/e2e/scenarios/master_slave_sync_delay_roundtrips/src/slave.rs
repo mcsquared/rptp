@@ -1,22 +1,68 @@
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use tokio::net::UdpSocket;
 use tokio::sync::Notify;
 use tokio::time::{Duration, timeout};
 
-use rptp::message::{EventMessage, GeneralMessage, SystemMessage};
+use rptp::message::{
+    EventMessage, FollowUpMessage, GeneralMessage, SystemMessage, TwoStepSyncMessage,
+};
 use rptp::node::{Node, SlaveNode};
+use rptp::time::TimeStamp;
 use rptp_daemon::net::MulticastPort;
 use rptp_daemon::node::{
     TokioEventInterface, TokioGeneralInterface, TokioNode, TokioSystemInterface,
 };
 
+enum TwoStepState {
+    None,
+    HaveSync(TwoStepSyncMessage),
+    HaveFollowUp(FollowUpMessage),
+}
+
+impl TwoStepState {
+    fn with_sync(&mut self, sync: TwoStepSyncMessage) -> bool {
+        if let TwoStepState::HaveFollowUp(follow_up) = self {
+            if follow_up
+                .master_slave_offset(sync, TimeStamp::new(0, 0))
+                .is_some()
+            {
+                *self = TwoStepState::None;
+                return true;
+            } else {
+                *self = TwoStepState::None;
+            }
+        } else {
+            *self = TwoStepState::HaveSync(sync);
+        }
+        false
+    }
+
+    fn with_follow_up(&mut self, follow_up: FollowUpMessage) -> bool {
+        if let TwoStepState::HaveSync(sync) = *self {
+            if follow_up
+                .master_slave_offset(sync, TimeStamp::new(0, 0))
+                .is_some()
+            {
+                *self = TwoStepState::None;
+                return true;
+            } else {
+                *self = TwoStepState::None;
+            }
+        } else {
+            *self = TwoStepState::HaveFollowUp(follow_up);
+        }
+        false
+    }
+}
+
 struct SpyNode {
     node: SlaveNode<TokioEventInterface, TokioGeneralInterface, TokioSystemInterface>,
-    received_sync: Cell<u32>,
-    received_follow_up: Cell<u32>,
-    received_delay_resp: Cell<u32>,
+    two_step_state: RefCell<TwoStepState>,
+    received_sync: RefCell<u32>,
+    follow_ups_matched: RefCell<u32>,
+    received_delay_resp: RefCell<u32>,
     notify: Arc<Notify>,
 }
 
@@ -29,17 +75,18 @@ impl SpyNode {
     ) -> Self {
         Self {
             node: SlaveNode::new(event, general, system),
-            received_sync: Cell::new(0),
-            received_follow_up: Cell::new(0),
-            received_delay_resp: Cell::new(0),
+            two_step_state: RefCell::new(TwoStepState::None),
+            received_sync: RefCell::new(0),
+            follow_ups_matched: RefCell::new(0),
+            received_delay_resp: RefCell::new(0),
             notify,
         }
     }
 
     fn test_accept_condition(&self) {
-        if self.received_sync.get() > 5
-            && self.received_follow_up.get() > 5
-            && self.received_delay_resp.get() > 5
+        if *self.received_sync.borrow() > 5
+            && *self.received_sync.borrow() == *self.follow_ups_matched.borrow()
+            && *self.received_delay_resp.borrow() > 5
         {
             self.notify.notify_waiters();
         }
@@ -48,23 +95,33 @@ impl SpyNode {
 
 impl Node for SpyNode {
     fn event_message(&self, msg: EventMessage) {
-        if let EventMessage::TwoStepSync(_) = msg {
-            self.received_sync.set(self.received_sync.get() + 1);
-            self.test_accept_condition();
+        match msg {
+            EventMessage::TwoStepSync(sync) => {
+                *self.received_sync.borrow_mut() += 1;
+
+                if self.two_step_state.borrow_mut().with_sync(sync) {
+                    *self.follow_ups_matched.borrow_mut() += 1;
+                }
+
+                self.test_accept_condition();
+            }
+            _ => {}
         }
         self.node.event_message(msg)
     }
 
     fn general_message(&self, msg: GeneralMessage) {
-        if let GeneralMessage::FollowUp(_) = msg {
-            self.received_follow_up
-                .set(self.received_follow_up.get() + 1);
-            self.test_accept_condition();
-        }
-        if let GeneralMessage::DelayResp(_) = msg {
-            self.received_delay_resp
-                .set(self.received_delay_resp.get() + 1);
-            self.test_accept_condition();
+        match msg {
+            GeneralMessage::FollowUp(follow_up) => {
+                if self.two_step_state.borrow_mut().with_follow_up(follow_up) {
+                    *self.follow_ups_matched.borrow_mut() += 1;
+                }
+                self.test_accept_condition();
+            }
+            GeneralMessage::DelayResp(_) => {
+                *self.received_delay_resp.borrow_mut() += 1;
+                self.test_accept_condition();
+            }
         }
         self.node.general_message(msg)
     }

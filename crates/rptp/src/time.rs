@@ -10,6 +10,14 @@ impl TimeStamp {
         assert!(nanos < 1_000_000_000);
         Self { seconds, nanos }
     }
+
+    pub fn to_wire(&self) -> [u8; 10] {
+        let mut buf = [0; 10];
+        buf[0..2].copy_from_slice(&((self.seconds >> 32) as u16).to_be_bytes());
+        buf[2..6].copy_from_slice(&(self.seconds as u32).to_be_bytes());
+        buf[6..10].copy_from_slice(&self.nanos.to_be_bytes());
+        buf
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

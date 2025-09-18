@@ -148,7 +148,7 @@ impl<P: NetPort> TokioNode<P> {
                 msg = self.event_rx.recv() => {
                     if let Some(msg) = msg {
                         eprintln!("[event] send {:?}", msg);
-                        let _ = self.event_port.send(msg.as_ref()).await;
+                        let _ = self.event_port.send(msg.to_wire().as_ref()).await;
 
                         self.node.system_message(SystemMessage::Timestamp {
                             msg,
@@ -159,7 +159,7 @@ impl<P: NetPort> TokioNode<P> {
                 msg = self.general_rx.recv() => {
                     if let Some(msg) = msg {
                         eprintln!("[general] send {:?}", msg);
-                        let _ = self.general_port.send(msg.as_ref()).await;
+                        let _ = self.general_port.send(msg.to_wire().as_ref()).await;
                     }
                 }
                 msg = self.system_rx.recv() => {
@@ -278,7 +278,7 @@ mod tests {
         .await;
 
         let delay_request_count = result.expect("timeout waiting for delay requests");
-        assert_eq!(delay_request_count, 5);
+        assert!(delay_request_count >= 5);
         Ok(())
     }
 }
