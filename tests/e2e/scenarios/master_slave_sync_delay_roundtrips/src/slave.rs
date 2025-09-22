@@ -5,61 +5,18 @@ use tokio::net::UdpSocket;
 use tokio::sync::Notify;
 use tokio::time::{Duration, timeout};
 
-use rptp::message::{
-    EventMessage, FollowUpMessage, GeneralMessage, SystemMessage, TwoStepSyncMessage,
-};
+use rptp::message::{EventMessage, GeneralMessage, SystemMessage};
 use rptp::node::{Node, SlaveNode};
+use rptp::offsets::MasterSlaveOffset;
 use rptp::time::TimeStamp;
 use rptp_daemon::net::MulticastPort;
 use rptp_daemon::node::{
     TokioEventInterface, TokioGeneralInterface, TokioNode, TokioSystemInterface,
 };
 
-enum TwoStepState {
-    None,
-    HaveSync(TwoStepSyncMessage),
-    HaveFollowUp(FollowUpMessage),
-}
-
-impl TwoStepState {
-    fn with_sync(&mut self, sync: TwoStepSyncMessage) -> bool {
-        if let TwoStepState::HaveFollowUp(follow_up) = self {
-            if follow_up
-                .master_slave_offset(sync, TimeStamp::new(0, 0))
-                .is_some()
-            {
-                *self = TwoStepState::None;
-                return true;
-            } else {
-                *self = TwoStepState::None;
-            }
-        } else {
-            *self = TwoStepState::HaveSync(sync);
-        }
-        false
-    }
-
-    fn with_follow_up(&mut self, follow_up: FollowUpMessage) -> bool {
-        if let TwoStepState::HaveSync(sync) = *self {
-            if follow_up
-                .master_slave_offset(sync, TimeStamp::new(0, 0))
-                .is_some()
-            {
-                *self = TwoStepState::None;
-                return true;
-            } else {
-                *self = TwoStepState::None;
-            }
-        } else {
-            *self = TwoStepState::HaveFollowUp(follow_up);
-        }
-        false
-    }
-}
-
 struct SpyNode {
     node: SlaveNode<TokioEventInterface, TokioGeneralInterface, TokioSystemInterface>,
-    two_step_state: RefCell<TwoStepState>,
+    master_slave_offset: RefCell<MasterSlaveOffset>,
     received_sync: RefCell<u32>,
     follow_ups_matched: RefCell<u32>,
     received_delay_resp: RefCell<u32>,
@@ -75,7 +32,7 @@ impl SpyNode {
     ) -> Self {
         Self {
             node: SlaveNode::new(event, general, system),
-            two_step_state: RefCell::new(TwoStepState::None),
+            master_slave_offset: RefCell::new(MasterSlaveOffset::new()),
             received_sync: RefCell::new(0),
             follow_ups_matched: RefCell::new(0),
             received_delay_resp: RefCell::new(0),
@@ -99,7 +56,10 @@ impl Node for SpyNode {
             EventMessage::TwoStepSync(sync) => {
                 *self.received_sync.borrow_mut() += 1;
 
-                if self.two_step_state.borrow_mut().with_sync(sync) {
+                self.master_slave_offset
+                    .borrow_mut()
+                    .with_sync(sync, TimeStamp::new(0, 0));
+                if self.master_slave_offset.borrow().duration().is_some() {
                     *self.follow_ups_matched.borrow_mut() += 1;
                 }
 
@@ -113,9 +73,14 @@ impl Node for SpyNode {
     fn general_message(&self, msg: GeneralMessage) {
         match msg {
             GeneralMessage::FollowUp(follow_up) => {
-                if self.two_step_state.borrow_mut().with_follow_up(follow_up) {
+                self.master_slave_offset
+                    .borrow_mut()
+                    .with_follow_up(follow_up);
+
+                if self.master_slave_offset.borrow().duration().is_some() {
                     *self.follow_ups_matched.borrow_mut() += 1;
                 }
+
                 self.test_accept_condition();
             }
             GeneralMessage::DelayResp(_) => {
