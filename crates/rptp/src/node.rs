@@ -1,9 +1,9 @@
 use std::time::Duration;
 
+use crate::clock::{SynchronizableClock, SynchronizedClock};
 use crate::message::{
     DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage, SystemMessage,
 };
-use crate::offsets::{MasterSlaveOffset, SlaveMasterOffset};
 use crate::time::TimeStamp;
 
 pub trait EventInterface {
@@ -24,43 +24,49 @@ pub trait Node {
     fn system_message(&self, msg: SystemMessage);
 }
 
-pub struct SlaveNode<E, G, S>
+pub struct SlaveNode<C, E, G, S>
 where
+    C: SynchronizableClock,
     E: EventInterface,
     G: GeneralInterface,
     S: SystemInterface,
 {
+    clock: SynchronizedClock<C>,
     event_interface: E,
     _general_interface: G,
     system_interface: S,
-    master_slave_offset: MasterSlaveOffset,
-    slave_master_offset: SlaveMasterOffset,
 }
 
-impl<E, G, S> SlaveNode<E, G, S>
+impl<C, E, G, S> SlaveNode<C, E, G, S>
 where
+    C: SynchronizableClock,
     E: EventInterface,
     G: GeneralInterface,
     S: SystemInterface,
 {
-    pub fn new(event_interface: E, general_interface: G, system_interface: S) -> Self {
+    pub fn new(
+        clock: SynchronizedClock<C>,
+        event_interface: E,
+        general_interface: G,
+        system_interface: S,
+    ) -> Self {
         system_interface.send(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
             Duration::ZERO,
         );
 
         Self {
+            clock,
             event_interface,
             _general_interface: general_interface,
             system_interface,
-            master_slave_offset: MasterSlaveOffset::new(),
-            slave_master_offset: SlaveMasterOffset::new(),
         }
     }
 }
 
-impl<E, G, S> Node for SlaveNode<E, G, S>
+impl<C, E, G, S> Node for SlaveNode<C, E, G, S>
 where
+    C: SynchronizableClock,
     E: EventInterface,
     G: GeneralInterface,
     S: SystemInterface,
@@ -68,7 +74,7 @@ where
     fn event_message(&self, msg: EventMessage, timestamp: TimeStamp) {
         match msg {
             EventMessage::TwoStepSync(sync) => {
-                self.master_slave_offset.with_sync(sync, timestamp);
+                self.clock.ingest_two_step_sync(sync, timestamp);
             }
             _ => {}
         }
@@ -77,10 +83,10 @@ where
     fn general_message(&self, msg: GeneralMessage) {
         match msg {
             GeneralMessage::FollowUp(follow_up) => {
-                self.master_slave_offset.with_follow_up(follow_up);
+                self.clock.ingest_follow_up(follow_up);
             }
             GeneralMessage::DelayResp(resp) => {
-                self.slave_master_offset.with_delay_response(resp);
+                self.clock.ingest_delay_response(resp);
             }
         }
     }
@@ -100,7 +106,7 @@ where
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::DelayReq(req) => {
-                    self.slave_master_offset.with_delay_request(req, timestamp);
+                    self.clock.ingest_delay_request(req, timestamp);
                 }
                 _ => {}
             },
@@ -188,10 +194,44 @@ where
 mod tests {
     use super::*;
 
+    use std::rc::Rc;
+
+    use crate::clock::{Clock, FakeClock};
     use crate::message::{
         DelayRequestMessage, DelayResponseMessage, FollowUpMessage, TwoStepSyncMessage,
     };
     use crate::time::TimeStamp;
+
+    #[test]
+    fn slave_node_synchronizes_clock() {
+        let local_clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
+
+        let slave = SlaveNode::new(
+            SynchronizedClock::new(local_clock.clone()),
+            FakeEventInterface::new(),
+            FakeGeneralInterface::new(),
+            FakeSystemInterface::new(),
+        );
+
+        slave.event_message(
+            EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
+            TimeStamp::new(1, 0),
+        );
+        slave.general_message(GeneralMessage::FollowUp(FollowUpMessage::new(
+            0,
+            TimeStamp::new(1, 0),
+        )));
+        slave.system_message(SystemMessage::Timestamp {
+            msg: EventMessage::DelayReq(DelayRequestMessage::new(0)),
+            timestamp: TimeStamp::new(0, 0),
+        });
+        slave.general_message(GeneralMessage::DelayResp(DelayResponseMessage::new(
+            0,
+            TimeStamp::new(2, 0),
+        )));
+
+        assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
+    }
 
     #[test]
     fn master_node_answers_delay_request_with_delay_response() {
@@ -298,6 +338,7 @@ mod tests {
         let system_interface = FakeSystemInterface::new();
 
         let _ = SlaveNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakeEventInterface::new(),
             FakeGeneralInterface::new(),
             &system_interface,
@@ -314,6 +355,7 @@ mod tests {
         let system_interface = FakeSystemInterface::new();
 
         let node = SlaveNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakeEventInterface::new(),
             FakeGeneralInterface::new(),
             &system_interface,
@@ -335,6 +377,7 @@ mod tests {
         let event_interface = FakeEventInterface::new();
 
         let node = SlaveNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &event_interface,
             FakeGeneralInterface::new(),
             FakeSystemInterface::new(),

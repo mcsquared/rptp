@@ -11,7 +11,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn master_slave_sync_delay_roundtrips() -> anyhow::Result<()> {
+    async fn slave_syncs_to_master() -> anyhow::Result<()> {
         let docker = Docker::connect_with_local_defaults()?;
 
         let image = TestImage::new(docker.clone(), "e2e-scenarios");
@@ -23,7 +23,7 @@ mod tests {
             GenericImage::new(image.name(), &tag)
                 .with_wait_for(WaitFor::message_on_stdout("Slave ready"))
                 .with_log_consumer(PrintLog { prefix: "slave" })
-                .with_cmd(["/app/master-slave-sync-delay-roundtrips-slave"])
+                .with_cmd(["/app/slave-syncs-to-master-slave"])
                 .with_network(net.name())
                 .start()
                 .await?,
@@ -34,7 +34,7 @@ mod tests {
             GenericImage::new(image.name(), &tag)
                 .with_wait_for(WaitFor::message_on_stdout("Master ready"))
                 .with_log_consumer(PrintLog { prefix: "master" })
-                .with_cmd(["/app/master-slave-sync-delay-roundtrips-master"])
+                .with_cmd(["/app/slave-syncs-to-master-master"])
                 .with_network(net.name())
                 .start()
                 .await?,

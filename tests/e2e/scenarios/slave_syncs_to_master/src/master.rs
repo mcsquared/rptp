@@ -1,0 +1,38 @@
+use std::rc::Rc;
+
+use tokio::net::UdpSocket;
+use tokio::time::{Duration, timeout};
+
+use rptp::clock::FakeClock;
+use rptp::time::TimeStamp;
+use rptp_daemon::net::MulticastPort;
+use rptp_daemon::node::TokioNode;
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> std::io::Result<()> {
+    let clock = Rc::new(FakeClock::new(TimeStamp::new(10, 500_000_000)));
+    let event_port = MulticastPort::ptp_event_testing_port().await?;
+    let general_port = MulticastPort::ptp_general_testing_port().await?;
+
+    let master = TokioNode::master(clock, event_port, general_port).await?;
+
+    println!("Master ready");
+
+    let slave_accepted = async {
+        let socket = UdpSocket::bind("0.0.0.0:12345").await.unwrap();
+
+        let mut buf = [0; 1024];
+        loop {
+            let size = socket.recv(&mut buf).await.unwrap();
+            if let Ok(message) = std::str::from_utf8(&buf[..size]) {
+                if message == "accept" {
+                    break;
+                }
+            }
+        }
+    };
+
+    let _ = timeout(Duration::from_secs(30), master.run_until(slave_accepted)).await;
+
+    Ok(())
+}

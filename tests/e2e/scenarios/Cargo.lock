@@ -90,15 +90,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "master-slave-sync-delay-roundtrips"
-version = "0.1.0"
-dependencies = [
- "rptp",
- "rptp-daemon",
- "tokio",
-]
-
-[[package]]
 name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -227,6 +218,15 @@ name = "slab"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
+
+[[package]]
+name = "slave-syncs-to-master"
+version = "0.1.0"
+dependencies = [
+ "rptp",
+ "rptp-daemon",
+ "tokio",
+]
 
 [[package]]
 name = "smallvec"

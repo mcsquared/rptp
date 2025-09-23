@@ -1,5 +1,5 @@
 [workspace]
 resolver = "3"
 members = [
-    "master_slave_sync_delay_roundtrips",
+    "slave_syncs_to_master",
 ]

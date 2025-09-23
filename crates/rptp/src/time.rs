@@ -20,15 +20,20 @@ impl TimeStamp {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Duration {
-    _seconds: i64,
-    _nanos: u32,
-}
+impl std::ops::Sub<Duration> for TimeStamp {
+    type Output = TimeStamp;
 
-impl Duration {
-    pub fn new(_seconds: i64, _nanos: u32) -> Self {
-        Self { _seconds, _nanos }
+    fn sub(self, rhs: Duration) -> Self::Output {
+        let mut seconds = self.seconds as i64 - rhs.seconds;
+        let mut nanos = self.nanos as i32 - rhs.nanos as i32;
+
+        if nanos < 0 {
+            seconds -= 1;
+            nanos += 1_000_000_000;
+        }
+
+        assert!(seconds >= 0);
+        TimeStamp::new(seconds as u64, nanos as u32)
     }
 }
 
@@ -37,6 +42,56 @@ impl std::ops::Sub for TimeStamp {
 
     fn sub(self, rhs: Self) -> Self::Output {
         let mut delta_seconds = self.seconds as i64 - rhs.seconds as i64;
+        let mut delta_nanos = self.nanos as i32 - rhs.nanos as i32;
+
+        if delta_nanos < 0 {
+            delta_seconds -= 1;
+            delta_nanos += 1_000_000_000;
+        }
+
+        Duration::new(delta_seconds, delta_nanos as u32)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Duration {
+    seconds: i64,
+    nanos: u32,
+}
+
+impl Duration {
+    pub fn new(seconds: i64, nanos: u32) -> Self {
+        Self { seconds, nanos }
+    }
+
+    pub fn from_secs_f64(secs_f64: f64) -> Self {
+        // Round to nearest nanosecond
+        let total_nanos = (secs_f64 * 1_000_000_000.0).round();
+
+        // Split total nanoseconds into integral seconds and nanoseconds
+        let mut seconds = (total_nanos / 1_000_000_000.0).trunc() as i64;
+        let mut nanos = (total_nanos % 1_000_000_000.0).abs() as u32;
+
+        // Normalize negative durations:
+        // If secs < 0 and nanos > 0, "borrow" one second to make nanos positive
+        if total_nanos < 0.0 && nanos > 0 {
+            seconds -= 1;
+            nanos = 1_000_000_000 - nanos;
+        }
+
+        Self { seconds, nanos }
+    }
+
+    pub fn as_secs_f64(&self) -> f64 {
+        self.seconds as f64 + (self.nanos as f64 / 1_000_000_000 as f64)
+    }
+}
+
+impl std::ops::Sub for Duration {
+    type Output = Duration;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        let mut delta_seconds = self.seconds - rhs.seconds;
         let mut delta_nanos = self.nanos as i32 - rhs.nanos as i32;
 
         if delta_nanos < 0 {

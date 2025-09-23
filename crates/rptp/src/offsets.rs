@@ -6,7 +6,8 @@ use crate::message::{
 use crate::time::{Duration, TimeStamp};
 
 pub struct MasterSlaveOffset {
-    sync: RefCell<Option<(TwoStepSyncMessage, TimeStamp)>>,
+    sync: RefCell<Option<TwoStepSyncMessage>>,
+    sync_timestamp: RefCell<Option<TimeStamp>>,
     follow_up: RefCell<Option<FollowUpMessage>>,
     offset: RefCell<Option<Duration>>,
 }
@@ -15,31 +16,50 @@ impl MasterSlaveOffset {
     pub fn new() -> Self {
         Self {
             sync: RefCell::new(None),
+            sync_timestamp: RefCell::new(None),
             follow_up: RefCell::new(None),
             offset: RefCell::new(None),
         }
     }
 
-    pub fn with_sync(&self, sync: TwoStepSyncMessage, timestamp: TimeStamp) {
+    pub fn ingest_two_step_sync(&self, sync: TwoStepSyncMessage, timestamp: TimeStamp) {
         if let Some(follow_up) = self.follow_up.borrow_mut().take() {
             self.offset
                 .replace(follow_up.master_slave_offset(sync, timestamp));
         } else {
-            self.sync.replace(Some((sync, timestamp)));
+            self.sync.replace(Some(sync));
+            self.sync_timestamp.replace(Some(timestamp));
         }
     }
 
-    pub fn with_follow_up(&self, follow_up: FollowUpMessage) {
-        if let Some((sync, timestamp)) = self.sync.borrow_mut().take() {
+    pub fn ingest_follow_up(&self, follow_up: FollowUpMessage) {
+        if let (Some(sync), Some(timestamp)) = (
+            self.sync.borrow_mut().take(),
+            self.sync_timestamp.borrow().as_ref(),
+        ) {
             self.offset
-                .replace(follow_up.master_slave_offset(sync, timestamp));
+                .replace(follow_up.master_slave_offset(sync, *timestamp));
         } else {
             self.follow_up.replace(Some(follow_up));
         }
     }
 
-    pub fn duration(&self) -> Option<Duration> {
-        self.offset.borrow_mut().take()
+    pub fn master_estimate(&self, sm_offset: &SlaveMasterOffset) -> Option<TimeStamp> {
+        if let (Some(ms_offset), Some(sm_offset), Some(t2)) = (
+            self.current(),
+            sm_offset.current(),
+            self.sync_timestamp.borrow().clone(),
+        ) {
+            let offset_from_master = (ms_offset - sm_offset).as_secs_f64() / 2.0;
+            let estimate = t2 - Duration::from_secs_f64(offset_from_master);
+            Some(estimate)
+        } else {
+            None
+        }
+    }
+
+    pub fn current(&self) -> Option<Duration> {
+        self.offset.borrow().clone()
     }
 }
 
@@ -58,7 +78,7 @@ impl SlaveMasterOffset {
         }
     }
 
-    pub fn with_delay_request(&self, req: DelayRequestMessage, timestamp: TimeStamp) {
+    pub fn ingest_delay_request(&self, req: DelayRequestMessage, timestamp: TimeStamp) {
         if let Some(resp) = self.resp.borrow_mut().take() {
             self.offset
                 .replace(resp.slave_master_offset(req, timestamp));
@@ -67,7 +87,7 @@ impl SlaveMasterOffset {
         }
     }
 
-    pub fn with_delay_response(&self, resp: DelayResponseMessage) {
+    pub fn ingest_delay_response(&self, resp: DelayResponseMessage) {
         if let Some((req, timestamp)) = self.req.borrow_mut().take() {
             self.offset
                 .replace(resp.slave_master_offset(req, timestamp));
@@ -76,8 +96,8 @@ impl SlaveMasterOffset {
         }
     }
 
-    pub fn duration(&self) -> Option<Duration> {
-        self.offset.borrow_mut().take()
+    pub fn current(&self) -> Option<Duration> {
+        self.offset.borrow().clone()
     }
 }
 
@@ -88,7 +108,7 @@ mod tests {
     #[test]
     fn master_slave_offset_new() {
         let offset = MasterSlaveOffset::new();
-        assert_eq!(offset.duration(), None);
+        assert_eq!(offset.current(), None);
     }
 
     #[test]
@@ -96,9 +116,9 @@ mod tests {
         let offset = MasterSlaveOffset::new();
         let sync = TwoStepSyncMessage::new(42);
 
-        offset.with_sync(sync, TimeStamp::new(1, 0));
+        offset.ingest_two_step_sync(sync, TimeStamp::new(1, 0));
 
-        assert_eq!(offset.duration(), None);
+        assert_eq!(offset.current(), None);
     }
 
     #[test]
@@ -106,9 +126,9 @@ mod tests {
         let offset = MasterSlaveOffset::new();
         let follow_up = FollowUpMessage::new(42, TimeStamp::new(1, 0));
 
-        offset.with_follow_up(follow_up);
+        offset.ingest_follow_up(follow_up);
 
-        assert_eq!(offset.duration(), None);
+        assert_eq!(offset.current(), None);
     }
 
     #[test]
@@ -117,10 +137,10 @@ mod tests {
         let sync = TwoStepSyncMessage::new(42);
         let follow_up = FollowUpMessage::new(42, TimeStamp::new(2, 0));
 
-        offset.with_sync(sync, TimeStamp::new(3, 0));
-        offset.with_follow_up(follow_up);
+        offset.ingest_two_step_sync(sync, TimeStamp::new(3, 0));
+        offset.ingest_follow_up(follow_up);
 
-        assert_eq!(offset.duration(), Some(Duration::new(1, 0)));
+        assert_eq!(offset.current(), Some(Duration::new(1, 0)));
     }
 
     #[test]
@@ -129,10 +149,10 @@ mod tests {
         let sync = TwoStepSyncMessage::new(42);
         let follow_up = FollowUpMessage::new(42, TimeStamp::new(3, 0));
 
-        offset.with_follow_up(follow_up);
-        offset.with_sync(sync, TimeStamp::new(5, 0));
+        offset.ingest_follow_up(follow_up);
+        offset.ingest_two_step_sync(sync, TimeStamp::new(5, 0));
 
-        assert_eq!(offset.duration(), Some(Duration::new(2, 0)));
+        assert_eq!(offset.current(), Some(Duration::new(2, 0)));
     }
 
     #[test]
@@ -141,10 +161,10 @@ mod tests {
         let sync = TwoStepSyncMessage::new(42);
         let follow_up = FollowUpMessage::new(43, TimeStamp::new(1, 0));
 
-        offset.with_sync(sync, TimeStamp::new(2, 0));
-        offset.with_follow_up(follow_up);
+        offset.ingest_two_step_sync(sync, TimeStamp::new(2, 0));
+        offset.ingest_follow_up(follow_up);
 
-        assert_eq!(offset.duration(), None);
+        assert_eq!(offset.current(), None);
     }
 
     #[test]
@@ -153,16 +173,31 @@ mod tests {
         let sync = TwoStepSyncMessage::new(42);
         let follow_up = FollowUpMessage::new(43, TimeStamp::new(1, 0));
 
-        offset.with_follow_up(follow_up);
-        offset.with_sync(sync, TimeStamp::new(2, 0));
+        offset.ingest_follow_up(follow_up);
+        offset.ingest_two_step_sync(sync, TimeStamp::new(2, 0));
 
-        assert_eq!(offset.duration(), None);
+        assert_eq!(offset.current(), None);
+    }
+
+    #[test]
+    fn master_slave_offset_produces_estimate() {
+        let sm_offset = SlaveMasterOffset::new();
+        sm_offset.ingest_delay_request(DelayRequestMessage::new(42), TimeStamp::new(0, 0));
+        sm_offset.ingest_delay_response(DelayResponseMessage::new(42, TimeStamp::new(2, 0)));
+
+        let ms_offset = MasterSlaveOffset::new();
+        ms_offset.ingest_two_step_sync(TwoStepSyncMessage::new(42), TimeStamp::new(1, 0));
+        ms_offset.ingest_follow_up(FollowUpMessage::new(42, TimeStamp::new(1, 0)));
+
+        let estimate = ms_offset.master_estimate(&sm_offset);
+
+        assert_eq!(estimate, Some(TimeStamp::new(2, 0)));
     }
 
     #[test]
     fn slave_master_offset_new() {
         let offset = SlaveMasterOffset::new();
-        assert_eq!(offset.duration(), None);
+        assert_eq!(offset.current(), None);
     }
 
     #[test]
@@ -170,9 +205,9 @@ mod tests {
         let offset = SlaveMasterOffset::new();
         let req = DelayRequestMessage::new(42);
 
-        offset.with_delay_request(req, TimeStamp::new(1, 0));
+        offset.ingest_delay_request(req, TimeStamp::new(1, 0));
 
-        assert_eq!(offset.duration(), None);
+        assert_eq!(offset.current(), None);
     }
 
     #[test]
@@ -180,9 +215,9 @@ mod tests {
         let offset = SlaveMasterOffset::new();
         let resp = DelayResponseMessage::new(42, TimeStamp::new(1, 0));
 
-        offset.with_delay_response(resp);
+        offset.ingest_delay_response(resp);
 
-        assert_eq!(offset.duration(), None);
+        assert_eq!(offset.current(), None);
     }
 
     #[test]
@@ -191,10 +226,10 @@ mod tests {
         let req = DelayRequestMessage::new(42);
         let resp = DelayResponseMessage::new(42, TimeStamp::new(2, 0));
 
-        offset.with_delay_request(req, TimeStamp::new(1, 0));
-        offset.with_delay_response(resp);
+        offset.ingest_delay_request(req, TimeStamp::new(1, 0));
+        offset.ingest_delay_response(resp);
 
-        assert_eq!(offset.duration(), Some(Duration::new(1, 0)));
+        assert_eq!(offset.current(), Some(Duration::new(1, 0)));
     }
 
     #[test]
@@ -203,10 +238,10 @@ mod tests {
         let req = DelayRequestMessage::new(42);
         let resp = DelayResponseMessage::new(42, TimeStamp::new(4, 0));
 
-        offset.with_delay_response(resp);
-        offset.with_delay_request(req, TimeStamp::new(3, 0));
+        offset.ingest_delay_response(resp);
+        offset.ingest_delay_request(req, TimeStamp::new(3, 0));
 
-        assert_eq!(offset.duration(), Some(Duration::new(1, 0)));
+        assert_eq!(offset.current(), Some(Duration::new(1, 0)));
     }
 
     #[test]
@@ -215,10 +250,10 @@ mod tests {
         let req = DelayRequestMessage::new(42);
         let resp = DelayResponseMessage::new(43, TimeStamp::new(2, 0));
 
-        offset.with_delay_request(req, TimeStamp::new(1, 0));
-        offset.with_delay_response(resp);
+        offset.ingest_delay_request(req, TimeStamp::new(1, 0));
+        offset.ingest_delay_response(resp);
 
-        assert_eq!(offset.duration(), None);
+        assert_eq!(offset.current(), None);
     }
 
     #[test]
@@ -227,9 +262,9 @@ mod tests {
         let req = DelayRequestMessage::new(42);
         let resp = DelayResponseMessage::new(43, TimeStamp::new(2, 0));
 
-        offset.with_delay_response(resp);
-        offset.with_delay_request(req, TimeStamp::new(4, 0));
+        offset.ingest_delay_response(resp);
+        offset.ingest_delay_request(req, TimeStamp::new(4, 0));
 
-        assert_eq!(offset.duration(), None);
+        assert_eq!(offset.current(), None);
     }
 }

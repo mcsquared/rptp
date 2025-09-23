@@ -1,13 +1,13 @@
+use std::rc::Rc;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 
 use rptp::{
-    clock::Clock,
+    clock::{Clock, SynchronizableClock, SynchronizedClock},
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{EventInterface, GeneralInterface, MasterNode, Node, SlaveNode, SystemInterface},
-    time::TimeStamp,
 };
 
 use crate::net::NetPort;
@@ -66,7 +66,7 @@ impl SystemInterface for TokioSystemInterface {
 
 pub struct TokioNode<P: NetPort> {
     node: Box<dyn Node>,
-    clock: Box<dyn Clock>,
+    clock: Rc<dyn SynchronizableClock>,
     event_port: P,
     general_port: P,
     event_rx: mpsc::UnboundedReceiver<EventMessage>,
@@ -75,21 +75,16 @@ pub struct TokioNode<P: NetPort> {
 }
 
 impl<P: NetPort> TokioNode<P> {
-    pub async fn new<N, C>(
-        clock: Box<dyn Clock>,
+    pub async fn master(
+        clock: Rc<dyn SynchronizableClock>,
         event_port: P,
         general_port: P,
-        ctor: C,
-    ) -> std::io::Result<Self>
-    where
-        N: Node + 'static,
-        C: FnOnce(TokioEventInterface, TokioGeneralInterface, TokioSystemInterface) -> N,
-    {
+    ) -> std::io::Result<Self> {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let node = Box::new(ctor(
+        let node = Box::new(MasterNode::new(
             TokioEventInterface::new(event_tx),
             TokioGeneralInterface::new(general_tx),
             TokioSystemInterface::new(system_tx),
@@ -106,26 +101,31 @@ impl<P: NetPort> TokioNode<P> {
         })
     }
 
-    pub async fn master(
-        clock: Box<dyn Clock>,
-        event_port: P,
-        general_port: P,
-    ) -> std::io::Result<Self> {
-        Self::new(clock, event_port, general_port, |event, general, system| {
-            MasterNode::new(event, general, system)
-        })
-        .await
-    }
-
     pub async fn slave(
-        clock: Box<dyn Clock>,
+        clock: Rc<dyn SynchronizableClock>,
         event_port: P,
         general_port: P,
     ) -> std::io::Result<Self> {
-        Self::new(clock, event_port, general_port, |event, general, system| {
-            SlaveNode::new(event, general, system)
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (general_tx, general_rx) = mpsc::unbounded_channel();
+        let (system_tx, system_rx) = mpsc::unbounded_channel();
+
+        let node = Box::new(SlaveNode::new(
+            SynchronizedClock::new(clock.clone()),
+            TokioEventInterface::new(event_tx),
+            TokioGeneralInterface::new(general_tx),
+            TokioSystemInterface::new(system_tx),
+        ));
+
+        Ok(Self {
+            node,
+            clock,
+            event_port,
+            general_port,
+            event_rx,
+            general_rx,
+            system_rx,
         })
-        .await
     }
 
     pub async fn run(self) -> std::io::Result<()> {
@@ -147,7 +147,7 @@ impl<P: NetPort> TokioNode<P> {
                     if let Ok((size, _peer)) = recv {
                         if let Ok(msg) = EventMessage::try_from(&event_buf[..size]) {
                             eprintln!("[event] recv {:?}", msg);
-                            self.node.event_message(msg, TimeStamp::new(0, 0));
+                            self.node.event_message(msg, self.clock.now());
                         }
                     }
                 }
@@ -215,6 +215,7 @@ mod tests {
     use tokio::time;
 
     use rptp::clock::FakeClock;
+    use rptp::time::TimeStamp;
 
     use crate::net::FakeNetPort;
 
@@ -223,7 +224,7 @@ mod tests {
         let (event_port, mut event_rx) = FakeNetPort::new();
         let (general_port, mut general_rx) = FakeNetPort::new();
 
-        let clock = Box::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
         let node = TokioNode::master(clock, event_port, general_port).await?;
 
         let mut sync_count = 0;
@@ -269,7 +270,7 @@ mod tests {
         let (event_port, mut event_rx) = FakeNetPort::new();
         let (general_port, _) = FakeNetPort::new();
 
-        let clock = Box::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
         let node = TokioNode::slave(clock, event_port, general_port).await?;
 
         let mut delay_request_count = 0;
