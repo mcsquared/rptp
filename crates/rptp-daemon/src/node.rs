@@ -211,10 +211,12 @@ async fn terminate() {
 mod tests {
     use super::*;
 
+    use futures::FutureExt;
+    use tokio::time;
+
     use rptp::clock::FakeClock;
 
     use crate::net::FakeNetPort;
-    use tokio::time;
 
     #[tokio::test(start_paused = true)]
     async fn master_node_sends_periodic_sync_follow_up() -> std::io::Result<()> {
@@ -224,14 +226,12 @@ mod tests {
         let clock = Box::new(FakeClock::new(TimeStamp::new(0, 0)));
         let node = TokioNode::master(clock, event_port, general_port).await?;
 
-        tokio::task::spawn(async move { node.run().await });
+        let mut sync_count = 0;
+        let mut follow_up_count = 0;
 
-        let result = time::timeout(Duration::from_secs(10), async {
-            let mut sync_count = 0;
-            let mut follow_up_count = 0;
-
+        let cond = time::timeout(Duration::from_secs(10), async {
             loop {
-                time::advance(Duration::from_secs(1)).await;
+                time::advance(Duration::from_millis(100)).await;
 
                 while let Ok(msg) = event_rx.try_recv() {
                     if matches!(
@@ -251,13 +251,14 @@ mod tests {
                 }
 
                 if sync_count >= 5 && follow_up_count >= 5 {
-                    return (sync_count, follow_up_count);
+                    return;
                 }
             }
         })
-        .await;
+        .map(|_| {});
 
-        let (sync_count, follow_up_count) = result.expect("timeout waiting for messages");
+        node.run_until(cond).await?;
+
         assert_eq!(sync_count, follow_up_count);
         assert_eq!(sync_count, 5);
         Ok(())
@@ -271,13 +272,11 @@ mod tests {
         let clock = Box::new(FakeClock::new(TimeStamp::new(0, 0)));
         let node = TokioNode::slave(clock, event_port, general_port).await?;
 
-        tokio::task::spawn(async move { node.run().await });
+        let mut delay_request_count = 0;
 
-        let result = time::timeout(Duration::from_secs(10), async {
-            let mut delay_request_count = 0;
-
+        let cond = time::timeout(Duration::from_secs(10), async {
             loop {
-                time::advance(Duration::from_secs(1)).await;
+                time::advance(Duration::from_millis(100)).await;
 
                 while let Ok(msg) = event_rx.try_recv() {
                     if matches!(
@@ -289,13 +288,14 @@ mod tests {
                 }
 
                 if delay_request_count >= 5 {
-                    return delay_request_count;
+                    return;
                 }
             }
         })
-        .await;
+        .map(|_result| {});
 
-        let delay_request_count = result.expect("timeout waiting for delay requests");
+        node.run_until(cond).await?;
+
         assert!(delay_request_count >= 5);
         Ok(())
     }

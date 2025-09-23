@@ -1,6 +1,6 @@
 use crate::time::TimeStamp;
 
-pub trait Clock: Send {
+pub trait Clock {
     fn now(&self) -> TimeStamp;
 }
 

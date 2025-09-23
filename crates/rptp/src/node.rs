@@ -6,19 +6,19 @@ use crate::message::{
 use crate::offsets::{MasterSlaveOffset, SlaveMasterOffset};
 use crate::time::TimeStamp;
 
-pub trait EventInterface: Send {
+pub trait EventInterface {
     fn send(&self, msg: EventMessage);
 }
 
-pub trait GeneralInterface: Send {
+pub trait GeneralInterface {
     fn send(&self, msg: GeneralMessage);
 }
 
-pub trait SystemInterface: Send {
+pub trait SystemInterface {
     fn send(&self, msg: SystemMessage, delay: Duration);
 }
 
-pub trait Node: Send {
+pub trait Node {
     fn event_message(&self, msg: EventMessage, timestamp: TimeStamp);
     fn general_message(&self, msg: GeneralMessage);
     fn system_message(&self, msg: SystemMessage);
