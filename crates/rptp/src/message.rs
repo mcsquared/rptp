@@ -148,6 +148,10 @@ impl DelayRequestMessage {
         Self { sequence_id }
     }
 
+    pub fn response(self, receive_timestamp: TimeStamp) -> DelayResponseMessage {
+        DelayResponseMessage::new(self.sequence_id, receive_timestamp)
+    }
+
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x01 & 0x0F;
@@ -160,14 +164,14 @@ impl DelayRequestMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayResponseMessage {
     sequence_id: u16,
-    origin_timestamp: TimeStamp,
+    receive_timestamp: TimeStamp,
 }
 
 impl DelayResponseMessage {
-    pub fn new(sequence_id: u16, origin_timestamp: TimeStamp) -> Self {
+    pub fn new(sequence_id: u16, receive_timestamp: TimeStamp) -> Self {
         Self {
             sequence_id,
-            origin_timestamp,
+            receive_timestamp,
         }
     }
 
@@ -177,7 +181,7 @@ impl DelayResponseMessage {
         delay_req_egress_timestamp: TimeStamp,
     ) -> Option<Duration> {
         if self.sequence_id == delay_req.sequence_id {
-            Some(self.origin_timestamp - delay_req_egress_timestamp)
+            Some(self.receive_timestamp - delay_req_egress_timestamp)
         } else {
             None
         }
@@ -187,7 +191,7 @@ impl DelayResponseMessage {
         let mut buf = [0; 64];
         buf[0] = 0x09 & 0x0F;
         buf[30..32].copy_from_slice(&self.sequence_id.to_be_bytes());
-        buf[34..44].copy_from_slice(&self.origin_timestamp.to_wire());
+        buf[34..44].copy_from_slice(&self.receive_timestamp.to_wire());
 
         buf
     }
@@ -429,5 +433,16 @@ mod tests {
         let next = delay_cycle.next();
 
         assert_eq!(next, DelayCycleMessage::new(0));
+    }
+
+    #[test]
+    fn delay_request_message_produces_delay_response_message() {
+        let delay_req = DelayRequestMessage::new(42);
+        let delay_resp = delay_req.response(TimeStamp::new(4, 0));
+
+        assert_eq!(
+            delay_resp,
+            DelayResponseMessage::new(42, TimeStamp::new(4, 0))
+        );
     }
 }

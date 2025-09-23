@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use crate::message::{
-    DelayCycleMessage, DelayResponseMessage, EventMessage, GeneralMessage, SyncCycleMessage,
-    SystemMessage,
+    DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage, SystemMessage,
 };
 use crate::offsets::MasterSlaveOffset;
 use crate::time::TimeStamp;
@@ -143,12 +142,9 @@ where
 {
     fn event_message(&self, msg: EventMessage, timestamp: TimeStamp) {
         match msg {
-            EventMessage::DelayReq(_) => {
-                self.general_interface
-                    .send(GeneralMessage::DelayResp(DelayResponseMessage::new(
-                        0, timestamp,
-                    )))
-            }
+            EventMessage::DelayReq(req) => self
+                .general_interface
+                .send(GeneralMessage::DelayResp(req.response(timestamp))),
             _ => {}
         }
     }
@@ -186,7 +182,9 @@ where
 mod tests {
     use super::*;
 
-    use crate::message::{DelayRequestMessage, FollowUpMessage, TwoStepSyncMessage};
+    use crate::message::{
+        DelayRequestMessage, DelayResponseMessage, FollowUpMessage, TwoStepSyncMessage,
+    };
     use crate::time::TimeStamp;
 
     #[test]
