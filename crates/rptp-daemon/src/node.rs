@@ -4,6 +4,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 
 use rptp::{
+    clock::Clock,
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{EventInterface, GeneralInterface, MasterNode, Node, SlaveNode, SystemInterface},
     time::TimeStamp,
@@ -65,16 +66,21 @@ impl SystemInterface for TokioSystemInterface {
 
 pub struct TokioNode<P: NetPort> {
     node: Box<dyn Node>,
+    clock: Box<dyn Clock>,
     event_port: P,
     general_port: P,
     event_rx: mpsc::UnboundedReceiver<EventMessage>,
     general_rx: mpsc::UnboundedReceiver<GeneralMessage>,
     system_rx: mpsc::UnboundedReceiver<SystemMessage>,
-    timestamp: TimeStamp,
 }
 
 impl<P: NetPort> TokioNode<P> {
-    pub async fn new<N, C>(event_port: P, general_port: P, ctor: C) -> std::io::Result<Self>
+    pub async fn new<N, C>(
+        clock: Box<dyn Clock>,
+        event_port: P,
+        general_port: P,
+        ctor: C,
+    ) -> std::io::Result<Self>
     where
         N: Node + 'static,
         C: FnOnce(TokioEventInterface, TokioGeneralInterface, TokioSystemInterface) -> N,
@@ -91,24 +97,32 @@ impl<P: NetPort> TokioNode<P> {
 
         Ok(Self {
             node,
+            clock,
             event_port,
             general_port,
             event_rx,
             general_rx,
             system_rx,
-            timestamp: TimeStamp::new(0, 0),
         })
     }
 
-    pub async fn master(event_port: P, general_port: P) -> std::io::Result<Self> {
-        Self::new(event_port, general_port, |event, general, system| {
+    pub async fn master(
+        clock: Box<dyn Clock>,
+        event_port: P,
+        general_port: P,
+    ) -> std::io::Result<Self> {
+        Self::new(clock, event_port, general_port, |event, general, system| {
             MasterNode::new(event, general, system)
         })
         .await
     }
 
-    pub async fn slave(event_port: P, general_port: P) -> std::io::Result<Self> {
-        Self::new(event_port, general_port, |event, general, system| {
+    pub async fn slave(
+        clock: Box<dyn Clock>,
+        event_port: P,
+        general_port: P,
+    ) -> std::io::Result<Self> {
+        Self::new(clock, event_port, general_port, |event, general, system| {
             SlaveNode::new(event, general, system)
         })
         .await
@@ -152,7 +166,7 @@ impl<P: NetPort> TokioNode<P> {
 
                         self.node.system_message(SystemMessage::Timestamp {
                             msg,
-                            timestamp: self.timestamp
+                            timestamp: self.clock.now(),
                         });
                     }
                 }
@@ -197,6 +211,8 @@ async fn terminate() {
 mod tests {
     use super::*;
 
+    use rptp::clock::FakeClock;
+
     use crate::net::FakeNetPort;
     use tokio::time;
 
@@ -205,7 +221,8 @@ mod tests {
         let (event_port, mut event_rx) = FakeNetPort::new();
         let (general_port, mut general_rx) = FakeNetPort::new();
 
-        let node = TokioNode::master(event_port, general_port).await?;
+        let clock = Box::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let node = TokioNode::master(clock, event_port, general_port).await?;
 
         tokio::task::spawn(async move { node.run().await });
 
@@ -251,7 +268,8 @@ mod tests {
         let (event_port, mut event_rx) = FakeNetPort::new();
         let (general_port, _) = FakeNetPort::new();
 
-        let node = TokioNode::slave(event_port, general_port).await?;
+        let clock = Box::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let node = TokioNode::slave(clock, event_port, general_port).await?;
 
         tokio::task::spawn(async move { node.run().await });
 

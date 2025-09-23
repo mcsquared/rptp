@@ -5,6 +5,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::Notify;
 use tokio::time::{Duration, timeout};
 
+use rptp::clock::FakeClock;
 use rptp::message::{EventMessage, GeneralMessage, SystemMessage};
 use rptp::node::{Node, SlaveNode};
 use rptp::offsets::MasterSlaveOffset;
@@ -100,10 +101,12 @@ impl Node for SpyNode {
 async fn main() -> std::io::Result<()> {
     let notify = Arc::new(Notify::new());
 
+    let clock = Box::new(FakeClock::new(TimeStamp::new(0, 0)));
+
     let event_port = MulticastPort::ptp_event_testing_port().await?;
     let general_port = MulticastPort::ptp_general_testing_port().await?;
 
-    let slave = TokioNode::new(event_port, general_port, |event, general, system| {
+    let slave = TokioNode::new(clock, event_port, general_port, |event, general, system| {
         SpyNode::new(event, general, system, notify.clone())
     })
     .await?;
