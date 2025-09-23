@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::message::{
     DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage, SystemMessage,
 };
-use crate::offsets::MasterSlaveOffset;
+use crate::offsets::{MasterSlaveOffset, SlaveMasterOffset};
 use crate::time::TimeStamp;
 
 pub trait EventInterface: Send {
@@ -34,6 +34,7 @@ where
     _general_interface: G,
     system_interface: S,
     master_slave_offset: MasterSlaveOffset,
+    slave_master_offset: SlaveMasterOffset,
 }
 
 impl<E, G, S> SlaveNode<E, G, S>
@@ -53,6 +54,7 @@ where
             _general_interface: general_interface,
             system_interface,
             master_slave_offset: MasterSlaveOffset::new(),
+            slave_master_offset: SlaveMasterOffset::new(),
         }
     }
 }
@@ -77,7 +79,9 @@ where
             GeneralMessage::FollowUp(follow_up) => {
                 self.master_slave_offset.with_follow_up(follow_up);
             }
-            GeneralMessage::DelayResp(_resp) => {}
+            GeneralMessage::DelayResp(resp) => {
+                self.slave_master_offset.with_delay_response(resp);
+            }
         }
     }
 
@@ -94,8 +98,10 @@ where
                     Duration::from_secs(1),
                 );
             }
-            SystemMessage::Timestamp { msg, .. } => match msg {
-                EventMessage::DelayReq(_) => {}
+            SystemMessage::Timestamp { msg, timestamp } => match msg {
+                EventMessage::DelayReq(req) => {
+                    self.slave_master_offset.with_delay_request(req, timestamp);
+                }
                 _ => {}
             },
             _ => {}
