@@ -133,7 +133,7 @@ impl<P: NetPort> TokioNode<P> {
                     if let Ok((size, _peer)) = recv {
                         if let Ok(msg) = EventMessage::try_from(&event_buf[..size]) {
                             eprintln!("[event] recv {:?}", msg);
-                            self.node.event_message(msg);
+                            self.node.event_message(msg, TimeStamp::new(0, 0));
                         }
                     }
                 }

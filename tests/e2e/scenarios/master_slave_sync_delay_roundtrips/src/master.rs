@@ -7,6 +7,7 @@ use tokio::time::{Duration, timeout};
 
 use rptp::message::{EventMessage, GeneralMessage, SystemMessage};
 use rptp::node::{MasterNode, Node};
+use rptp::time::TimeStamp;
 use rptp_daemon::net::MulticastPort;
 use rptp_daemon::node::{
     TokioEventInterface, TokioGeneralInterface, TokioNode, TokioSystemInterface,
@@ -70,8 +71,8 @@ impl SpyNode {
 }
 
 impl Node for SpyNode {
-    fn event_message(&self, msg: EventMessage) {
-        self.node.event_message(msg);
+    fn event_message(&self, msg: EventMessage, timestamp: TimeStamp) {
+        self.node.event_message(msg, timestamp);
 
         if let EventMessage::DelayReq(_) = msg {
             self.received_delay_req

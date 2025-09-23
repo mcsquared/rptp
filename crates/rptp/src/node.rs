@@ -20,7 +20,7 @@ pub trait SystemInterface: Send {
 }
 
 pub trait Node: Send {
-    fn event_message(&self, msg: EventMessage);
+    fn event_message(&self, msg: EventMessage, timestamp: TimeStamp);
     fn general_message(&self, msg: GeneralMessage);
     fn system_message(&self, msg: SystemMessage);
 }
@@ -64,11 +64,10 @@ where
     G: GeneralInterface,
     S: SystemInterface,
 {
-    fn event_message(&self, msg: EventMessage) {
+    fn event_message(&self, msg: EventMessage, timestamp: TimeStamp) {
         match msg {
             EventMessage::TwoStepSync(sync) => {
-                self.master_slave_offset
-                    .with_sync(sync, TimeStamp::new(0, 0));
+                self.master_slave_offset.with_sync(sync, timestamp);
             }
             _ => {}
         }
@@ -142,13 +141,12 @@ where
     G: GeneralInterface,
     S: SystemInterface,
 {
-    fn event_message(&self, msg: EventMessage) {
+    fn event_message(&self, msg: EventMessage, timestamp: TimeStamp) {
         match msg {
             EventMessage::DelayReq(_) => {
                 self.general_interface
                     .send(GeneralMessage::DelayResp(DelayResponseMessage::new(
-                        0,
-                        TimeStamp::new(0, 0),
+                        0, timestamp,
                     )))
             }
             _ => {}
@@ -200,7 +198,10 @@ mod tests {
             &general_interface,
             FakeSystemInterface::new(),
         );
-        node.event_message(EventMessage::DelayReq(DelayRequestMessage::new(0)));
+        node.event_message(
+            EventMessage::DelayReq(DelayRequestMessage::new(0)),
+            TimeStamp::new(0, 0),
+        );
 
         assert_eq!(
             *general_interface.sent_messages.lock().unwrap(),

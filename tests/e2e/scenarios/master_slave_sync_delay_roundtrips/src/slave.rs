@@ -51,7 +51,7 @@ impl SpyNode {
 }
 
 impl Node for SpyNode {
-    fn event_message(&self, msg: EventMessage) {
+    fn event_message(&self, msg: EventMessage, timestamp: TimeStamp) {
         match msg {
             EventMessage::TwoStepSync(sync) => {
                 *self.received_sync.borrow_mut() += 1;
@@ -67,7 +67,7 @@ impl Node for SpyNode {
             }
             _ => {}
         }
-        self.node.event_message(msg)
+        self.node.event_message(msg, timestamp);
     }
 
     fn general_message(&self, msg: GeneralMessage) {
