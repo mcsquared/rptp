@@ -18,10 +18,134 @@ pub trait SystemInterface {
     fn send(&self, msg: SystemMessage, delay: Duration);
 }
 
-pub trait Node {
-    fn event_message(&self, msg: EventMessage, timestamp: TimeStamp);
-    fn general_message(&self, msg: GeneralMessage);
-    fn system_message(&self, msg: SystemMessage);
+pub enum NodeState<C, E, G, S>
+where
+    C: SynchronizableClock,
+    E: EventInterface,
+    G: GeneralInterface,
+    S: SystemInterface,
+{
+    Initializing(InitializingNode<C, E, G, S>),
+    Listening(ListeningNode<C, E, G, S>),
+    Slave(SlaveNode<C, E, G, S>),
+    Master(MasterNode<C, E, G, S>),
+}
+
+impl<C, E, G, S> NodeState<C, E, G, S>
+where
+    C: SynchronizableClock,
+    E: EventInterface,
+    G: GeneralInterface,
+    S: SystemInterface,
+{
+    pub fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> Self {
+        match self {
+            NodeState::Initializing(_) => self,
+            NodeState::Listening(_) => self,
+            NodeState::Slave(node) => node.event_message(msg, timestamp),
+            NodeState::Master(node) => node.event_message(msg, timestamp),
+        }
+    }
+
+    pub fn general_message(self, msg: GeneralMessage) -> Self {
+        match self {
+            NodeState::Initializing(_) => self,
+            NodeState::Listening(_) => self,
+            NodeState::Slave(node) => node.general_message(msg),
+            NodeState::Master(node) => node.general_message(msg),
+        }
+    }
+
+    pub fn system_message(self, msg: SystemMessage) -> Self {
+        match self {
+            NodeState::Initializing(node) => node.system_message(msg),
+            NodeState::Listening(_) => self,
+            NodeState::Slave(node) => node.system_message(msg),
+            NodeState::Master(node) => node.system_message(msg),
+        }
+    }
+}
+
+pub struct InitializingNode<C, E, G, S>
+where
+    C: SynchronizableClock,
+    E: EventInterface,
+    G: GeneralInterface,
+    S: SystemInterface,
+{
+    clock: SynchronizedClock<C>,
+    event_interface: E,
+    general_interface: G,
+    system_interface: S,
+}
+
+impl<C, E, G, S> InitializingNode<C, E, G, S>
+where
+    C: SynchronizableClock,
+    E: EventInterface,
+    G: GeneralInterface,
+    S: SystemInterface,
+{
+    pub fn new(
+        clock: SynchronizedClock<C>,
+        event_interface: E,
+        general_interface: G,
+        system_interface: S,
+    ) -> Self {
+        Self {
+            clock,
+            event_interface,
+            general_interface,
+            system_interface,
+        }
+    }
+
+    fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
+        match msg {
+            SystemMessage::Initialized => NodeState::Listening(ListeningNode::new(
+                self.clock,
+                self.event_interface,
+                self.general_interface,
+                self.system_interface,
+            )),
+            _ => NodeState::Initializing(self),
+        }
+    }
+}
+
+pub struct ListeningNode<C, E, G, S>
+where
+    C: SynchronizableClock,
+    E: EventInterface,
+    G: GeneralInterface,
+    S: SystemInterface,
+{
+    _clock: SynchronizedClock<C>,
+    _event_interface: E,
+    _general_interface: G,
+    _system_interface: S,
+}
+
+impl<C, E, G, S> ListeningNode<C, E, G, S>
+where
+    C: SynchronizableClock,
+    E: EventInterface,
+    G: GeneralInterface,
+    S: SystemInterface,
+{
+    pub fn new(
+        _clock: SynchronizedClock<C>,
+        _event_interface: E,
+        _general_interface: G,
+        _system_interface: S,
+    ) -> Self {
+        Self {
+            _clock,
+            _event_interface,
+            _general_interface,
+            _system_interface,
+        }
+    }
 }
 
 pub struct SlaveNode<C, E, G, S>
@@ -62,25 +186,19 @@ where
             system_interface,
         }
     }
-}
 
-impl<C, E, G, S> Node for SlaveNode<C, E, G, S>
-where
-    C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
-{
-    fn event_message(&self, msg: EventMessage, timestamp: TimeStamp) {
+    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<C, E, G, S> {
         match msg {
             EventMessage::TwoStepSync(sync) => {
                 self.clock.ingest_two_step_sync(sync, timestamp);
             }
             _ => {}
         }
+
+        NodeState::Slave(self)
     }
 
-    fn general_message(&self, msg: GeneralMessage) {
+    fn general_message(self, msg: GeneralMessage) -> NodeState<C, E, G, S> {
         match msg {
             GeneralMessage::FollowUp(follow_up) => {
                 self.clock.ingest_follow_up(follow_up);
@@ -89,9 +207,11 @@ where
                 self.clock.ingest_delay_response(resp);
             }
         }
+
+        NodeState::Slave(self)
     }
 
-    fn system_message(&self, msg: SystemMessage) {
+    fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
         match msg {
             SystemMessage::DelayCycle(delay_cycle) => {
                 let delay_request = delay_cycle.delay_request();
@@ -112,62 +232,70 @@ where
             },
             _ => {}
         }
+
+        NodeState::Slave(self)
     }
 }
 
-pub struct MasterNode<E, G, S>
+pub struct MasterNode<C, E, G, S>
 where
+    C: SynchronizableClock,
     E: EventInterface,
     G: GeneralInterface,
     S: SystemInterface,
 {
+    _clock: SynchronizedClock<C>,
     event_interface: E,
     general_interface: G,
     system_interface: S,
 }
 
-impl<E, G, S> MasterNode<E, G, S>
+impl<C, E, G, S> MasterNode<C, E, G, S>
 where
+    C: SynchronizableClock,
     E: EventInterface,
     G: GeneralInterface,
     S: SystemInterface,
 {
-    pub fn new(event_interface: E, general_interface: G, system_interface: S) -> Self {
+    pub fn new(
+        _clock: SynchronizedClock<C>,
+        event_interface: E,
+        general_interface: G,
+        system_interface: S,
+    ) -> Self {
         system_interface.send(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
             Duration::ZERO,
         );
 
         Self {
+            _clock,
             event_interface,
             general_interface,
             system_interface,
         }
     }
-}
 
-impl<E, G, S> Node for MasterNode<E, G, S>
-where
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
-{
-    fn event_message(&self, msg: EventMessage, timestamp: TimeStamp) {
+    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<C, E, G, S> {
         match msg {
             EventMessage::DelayReq(req) => self
                 .general_interface
                 .send(GeneralMessage::DelayResp(req.response(timestamp))),
             _ => {}
         }
+
+        NodeState::Master(self)
     }
 
-    fn general_message(&self, _msg: GeneralMessage) {
+    fn general_message(self, _msg: GeneralMessage) -> NodeState<C, E, G, S> {
         match _msg {
             _ => {}
         }
+
+        NodeState::Master(self)
     }
 
-    fn system_message(&self, msg: SystemMessage) {
+    fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
         match msg {
             SystemMessage::SyncCycle(sync_cycle) => {
                 let sync_message = sync_cycle.two_step_sync();
@@ -187,6 +315,8 @@ where
             },
             _ => {}
         }
+
+        NodeState::Master(self)
     }
 }
 
@@ -206,26 +336,26 @@ mod tests {
     fn slave_node_synchronizes_clock() {
         let local_clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let slave = SlaveNode::new(
+        let mut slave = NodeState::Slave(SlaveNode::new(
             SynchronizedClock::new(local_clock.clone()),
             FakeEventInterface::new(),
             FakeGeneralInterface::new(),
             FakeSystemInterface::new(),
-        );
+        ));
 
-        slave.event_message(
+        slave = slave.event_message(
             EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
             TimeStamp::new(1, 0),
         );
-        slave.general_message(GeneralMessage::FollowUp(FollowUpMessage::new(
+        slave = slave.general_message(GeneralMessage::FollowUp(FollowUpMessage::new(
             0,
             TimeStamp::new(1, 0),
         )));
-        slave.system_message(SystemMessage::Timestamp {
+        slave = slave.system_message(SystemMessage::Timestamp {
             msg: EventMessage::DelayReq(DelayRequestMessage::new(0)),
             timestamp: TimeStamp::new(0, 0),
         });
-        slave.general_message(GeneralMessage::DelayResp(DelayResponseMessage::new(
+        let _ = slave.general_message(GeneralMessage::DelayResp(DelayResponseMessage::new(
             0,
             TimeStamp::new(2, 0),
         )));
@@ -238,6 +368,7 @@ mod tests {
         let general_interface = FakeGeneralInterface::new();
 
         let node = MasterNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakeEventInterface::new(),
             &general_interface,
             FakeSystemInterface::new(),
@@ -261,6 +392,7 @@ mod tests {
         let system_interface = FakeSystemInterface::new();
 
         let _ = MasterNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakeEventInterface::new(),
             FakeGeneralInterface::new(),
             &system_interface,
@@ -277,6 +409,7 @@ mod tests {
         let event_interface = FakeEventInterface::new();
 
         let node = MasterNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &event_interface,
             FakeGeneralInterface::new(),
             FakeSystemInterface::new(),
@@ -294,6 +427,7 @@ mod tests {
         let system_interface = FakeSystemInterface::new();
 
         let node = MasterNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakeEventInterface::new(),
             FakeGeneralInterface::new(),
             &system_interface,
@@ -315,6 +449,7 @@ mod tests {
         let general_interface = FakeGeneralInterface::new();
 
         let node = MasterNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakeEventInterface::new(),
             &general_interface,
             FakeSystemInterface::new(),
@@ -388,6 +523,23 @@ mod tests {
             *event_interface.sent_messages.lock().unwrap(),
             vec![EventMessage::DelayReq(DelayRequestMessage::new(0))]
         );
+    }
+
+    #[test]
+    fn initializing_node_to_listening_transition() {
+        let node = InitializingNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakeEventInterface::new(),
+            FakeGeneralInterface::new(),
+            FakeSystemInterface::new(),
+        );
+
+        let node = node.system_message(SystemMessage::Initialized);
+
+        match node {
+            NodeState::Listening(_) => {}
+            _ => panic!("Expected Listening state"),
+        }
     }
 
     use std::sync::{Arc, Mutex};

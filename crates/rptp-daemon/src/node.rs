@@ -7,7 +7,7 @@ use tokio::time::sleep;
 use rptp::{
     clock::{Clock, SynchronizableClock, SynchronizedClock},
     message::{EventMessage, GeneralMessage, SystemMessage},
-    node::{EventInterface, GeneralInterface, MasterNode, Node, SlaveNode, SystemInterface},
+    node::{EventInterface, GeneralInterface, MasterNode, NodeState, SlaveNode, SystemInterface},
 };
 
 use crate::net::NetPort;
@@ -65,7 +65,12 @@ impl SystemInterface for TokioSystemInterface {
 }
 
 pub struct TokioNode<P: NetPort> {
-    node: Box<dyn Node>,
+    node: NodeState<
+        Rc<dyn SynchronizableClock>,
+        TokioEventInterface,
+        TokioGeneralInterface,
+        TokioSystemInterface,
+    >,
     clock: Rc<dyn SynchronizableClock>,
     event_port: P,
     general_port: P,
@@ -84,7 +89,8 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let node = Box::new(MasterNode::new(
+        let node = NodeState::Master(MasterNode::new(
+            SynchronizedClock::new(clock.clone()),
             TokioEventInterface::new(event_tx),
             TokioGeneralInterface::new(general_tx),
             TokioSystemInterface::new(system_tx),
@@ -110,7 +116,7 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let node = Box::new(SlaveNode::new(
+        let node = NodeState::Slave(SlaveNode::new(
             SynchronizedClock::new(clock.clone()),
             TokioEventInterface::new(event_tx),
             TokioGeneralInterface::new(general_tx),
@@ -147,7 +153,7 @@ impl<P: NetPort> TokioNode<P> {
                     if let Ok((size, _peer)) = recv {
                         if let Ok(msg) = EventMessage::try_from(&event_buf[..size]) {
                             eprintln!("[event] recv {:?}", msg);
-                            self.node.event_message(msg, self.clock.now());
+                            self.node = self.node.event_message(msg, self.clock.now());
                         }
                     }
                 }
@@ -155,7 +161,7 @@ impl<P: NetPort> TokioNode<P> {
                     if let Ok((size, _peer)) = recv {
                         if let Ok(msg) = GeneralMessage::try_from(&general_buf[..size]) {
                             eprintln!("[general] recv {:?}", msg);
-                            self.node.general_message(msg);
+                            self.node = self.node.general_message(msg);
                         }
                     }
                 }
@@ -164,7 +170,7 @@ impl<P: NetPort> TokioNode<P> {
                         eprintln!("[event] send {:?}", msg);
                         let _ = self.event_port.send(msg.to_wire().as_ref()).await;
 
-                        self.node.system_message(SystemMessage::Timestamp {
+                        self.node = self.node.system_message(SystemMessage::Timestamp {
                             msg,
                             timestamp: self.clock.now(),
                         });
@@ -178,7 +184,7 @@ impl<P: NetPort> TokioNode<P> {
                 }
                 msg = self.system_rx.recv() => {
                     if let Some(msg) = msg {
-                        self.node.system_message(msg);
+                        self.node = self.node.system_message(msg);
                     }
                 }
                 _ = tokio::signal::ctrl_c() => {

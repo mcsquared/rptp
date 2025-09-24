@@ -20,6 +20,7 @@ pub enum SystemMessage {
         msg: EventMessage,
         timestamp: TimeStamp,
     },
+    Initialized,
 }
 
 impl EventMessage {
