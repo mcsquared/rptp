@@ -59,7 +59,7 @@ where
     pub fn system_message(self, msg: SystemMessage) -> Self {
         match self {
             NodeState::Initializing(node) => node.system_message(msg),
-            NodeState::Listening(_) => self,
+            NodeState::Listening(node) => node.system_message(msg),
             NodeState::Slave(node) => node.system_message(msg),
             NodeState::Master(node) => node.system_message(msg),
         }
@@ -120,10 +120,10 @@ where
     G: GeneralInterface,
     S: SystemInterface,
 {
-    _clock: SynchronizedClock<C>,
-    _event_interface: E,
-    _general_interface: G,
-    _system_interface: S,
+    clock: SynchronizedClock<C>,
+    event_interface: E,
+    general_interface: G,
+    system_interface: S,
 }
 
 impl<C, E, G, S> ListeningNode<C, E, G, S>
@@ -134,16 +134,33 @@ where
     S: SystemInterface,
 {
     pub fn new(
-        _clock: SynchronizedClock<C>,
-        _event_interface: E,
-        _general_interface: G,
-        _system_interface: S,
+        clock: SynchronizedClock<C>,
+        event_interface: E,
+        general_interface: G,
+        system_interface: S,
     ) -> Self {
+        system_interface.send(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+
         Self {
-            _clock,
-            _event_interface,
-            _general_interface,
-            _system_interface,
+            clock,
+            event_interface,
+            general_interface,
+            system_interface,
+        }
+    }
+
+    fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
+        match msg {
+            SystemMessage::AnnounceReceiptTimeout => NodeState::Master(MasterNode::new(
+                self.clock,
+                self.event_interface,
+                self.general_interface,
+                self.system_interface,
+            )),
+            _ => NodeState::Listening(self),
         }
     }
 }
@@ -539,6 +556,23 @@ mod tests {
         match node {
             NodeState::Listening(_) => {}
             _ => panic!("Expected Listening state"),
+        }
+    }
+
+    #[test]
+    fn listening_node_to_master_transition_on_announce_receipt_timeout() {
+        let node = ListeningNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakeEventInterface::new(),
+            FakeGeneralInterface::new(),
+            FakeSystemInterface::new(),
+        );
+
+        let node = node.system_message(SystemMessage::AnnounceReceiptTimeout);
+
+        match node {
+            NodeState::Master(_) => {}
+            _ => panic!("Expected Master state"),
         }
     }
 

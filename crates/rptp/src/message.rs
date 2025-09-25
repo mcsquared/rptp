@@ -21,6 +21,7 @@ pub enum SystemMessage {
         timestamp: TimeStamp,
     },
     Initialized,
+    AnnounceReceiptTimeout,
 }
 
 impl EventMessage {
