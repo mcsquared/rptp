@@ -7,7 +7,10 @@ use tokio::time::sleep;
 use rptp::{
     clock::{Clock, SynchronizableClock, SynchronizedClock},
     message::{EventMessage, GeneralMessage, SystemMessage},
-    node::{EventInterface, GeneralInterface, MasterNode, NodeState, SlaveNode, SystemInterface},
+    node::{
+        EventInterface, GeneralInterface, InitializingNode, MasterNode, NodeState, SlaveNode,
+        SystemInterface,
+    },
 };
 
 use crate::net::NetPort;
@@ -80,6 +83,33 @@ pub struct TokioNode<P: NetPort> {
 }
 
 impl<P: NetPort> TokioNode<P> {
+    pub async fn initializing(
+        clock: Rc<dyn SynchronizableClock>,
+        event_port: P,
+        general_port: P,
+    ) -> std::io::Result<Self> {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (general_tx, general_rx) = mpsc::unbounded_channel();
+        let (system_tx, system_rx) = mpsc::unbounded_channel();
+
+        let node = NodeState::Initializing(InitializingNode::new(
+            SynchronizedClock::new(clock.clone()),
+            TokioEventInterface::new(event_tx),
+            TokioGeneralInterface::new(general_tx),
+            TokioSystemInterface::new(system_tx),
+        ));
+
+        Ok(Self {
+            node: node.system_message(SystemMessage::Initialized),
+            clock,
+            event_port,
+            general_port,
+            event_rx,
+            general_rx,
+            system_rx,
+        })
+    }
+
     pub async fn master(
         clock: Rc<dyn SynchronizableClock>,
         event_port: P,

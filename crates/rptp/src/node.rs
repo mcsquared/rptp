@@ -576,6 +576,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn listening_node_schedules_announce_receipt_timeout() {
+        let system_interface = FakeSystemInterface::new();
+
+        let _ = ListeningNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakeEventInterface::new(),
+            FakeGeneralInterface::new(),
+            &system_interface,
+        );
+
+        assert_eq!(
+            *system_interface.sent_messages.lock().unwrap(),
+            vec![SystemMessage::AnnounceReceiptTimeout]
+        );
+    }
+
     use std::sync::{Arc, Mutex};
 
     struct FakeEventInterface {
