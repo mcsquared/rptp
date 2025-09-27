@@ -50,7 +50,7 @@ where
     pub fn general_message(self, msg: GeneralMessage) -> Self {
         match self {
             NodeState::Initializing(_) => self,
-            NodeState::Listening(_) => self,
+            NodeState::Listening(node) => node.general_message(msg),
             NodeState::Slave(node) => node.general_message(msg),
             NodeState::Master(node) => node.general_message(msg),
         }
@@ -152,6 +152,10 @@ where
         }
     }
 
+    fn general_message(self, _msg: GeneralMessage) -> NodeState<C, E, G, S> {
+        NodeState::Listening(self)
+    }
+
     fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
         match msg {
             SystemMessage::AnnounceReceiptTimeout => NodeState::Master(MasterNode::new(
@@ -217,6 +221,7 @@ where
 
     fn general_message(self, msg: GeneralMessage) -> NodeState<C, E, G, S> {
         match msg {
+            GeneralMessage::Announce(_) => {}
             GeneralMessage::FollowUp(follow_up) => {
                 self.clock.ingest_follow_up(follow_up);
             }
@@ -345,7 +350,8 @@ mod tests {
 
     use crate::clock::{Clock, FakeClock};
     use crate::message::{
-        DelayRequestMessage, DelayResponseMessage, FollowUpMessage, TwoStepSyncMessage,
+        AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
+        TwoStepSyncMessage,
     };
     use crate::time::TimeStamp;
 
@@ -573,6 +579,23 @@ mod tests {
         match node {
             NodeState::Master(_) => {}
             _ => panic!("Expected Master state"),
+        }
+    }
+
+    #[test]
+    fn listening_node_stays_in_listening_on_single_announce() {
+        let node = ListeningNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakeEventInterface::new(),
+            FakeGeneralInterface::new(),
+            FakeSystemInterface::new(),
+        );
+
+        let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
+
+        match node {
+            NodeState::Listening(_) => {}
+            _ => panic!("Expected Listening state"),
         }
     }
 

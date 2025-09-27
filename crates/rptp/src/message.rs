@@ -8,6 +8,7 @@ pub enum EventMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneralMessage {
+    Announce(AnnounceMessage),
     DelayResp(DelayResponseMessage),
     FollowUp(FollowUpMessage),
 }
@@ -51,6 +52,7 @@ impl TryFrom<&[u8]> for EventMessage {
 impl GeneralMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         match self {
+            GeneralMessage::Announce(msg) => msg.to_wire(),
             GeneralMessage::DelayResp(msg) => msg.to_wire(),
             GeneralMessage::FollowUp(msg) => msg.to_wire(),
         }
@@ -69,6 +71,7 @@ impl TryFrom<&[u8]> for GeneralMessage {
             WireTimeStamp::new(buf.get(34..44).ok_or(())?.try_into().map_err(|_| ())?);
 
         match msgtype {
+            0x0B => Ok(Self::Announce(AnnounceMessage::new(sequence_id))),
             0x08 => Ok(Self::FollowUp(FollowUpMessage::new(
                 sequence_id,
                 wire_timestamp.timestamp().ok_or(())?,
@@ -79,6 +82,25 @@ impl TryFrom<&[u8]> for GeneralMessage {
             ))),
             _ => Err(()),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnnounceMessage {
+    sequence_id: u16,
+}
+
+impl AnnounceMessage {
+    pub fn new(sequence_id: u16) -> Self {
+        Self { sequence_id }
+    }
+
+    pub fn to_wire(&self) -> [u8; 64] {
+        let mut buf = [0; 64];
+        buf[0] = 0x0B & 0x0F;
+        buf[30..32].copy_from_slice(&self.sequence_id.to_be_bytes());
+
+        buf
     }
 }
 
@@ -269,6 +291,15 @@ impl<'a> WireTimeStamp<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn announce_message_wire_roundtrip() {
+        let announce = AnnounceMessage::new(42);
+        let wire = announce.to_wire();
+        let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
+
+        assert_eq!(parsed, GeneralMessage::Announce(announce));
+    }
 
     #[test]
     fn two_step_sync_message_wire_roundtrip() {
