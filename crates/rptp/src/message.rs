@@ -23,6 +23,7 @@ pub enum SystemMessage {
     },
     Initialized,
     AnnounceReceiptTimeout,
+    QualificationTimeout,
 }
 
 impl EventMessage {

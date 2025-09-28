@@ -66,7 +66,7 @@ where
             NodeState::Listening(node) => node.system_message(msg),
             NodeState::Slave(node) => node.system_message(msg),
             NodeState::Master(node) => node.system_message(msg),
-            NodeState::PreMaster(_) => self,
+            NodeState::PreMaster(node) => node.system_message(msg),
         }
     }
 }
@@ -376,10 +376,10 @@ where
     G: GeneralInterface,
     S: SystemInterface,
 {
-    _clock: SynchronizedClock<C>,
-    _event_interface: E,
-    _general_interface: G,
-    _system_interface: S,
+    clock: SynchronizedClock<C>,
+    event_interface: E,
+    general_interface: G,
+    system_interface: S,
 }
 
 impl<C, E, G, S> PreMasterNode<C, E, G, S>
@@ -390,16 +390,30 @@ where
     S: SystemInterface,
 {
     pub fn new(
-        _clock: SynchronizedClock<C>,
-        _event_interface: E,
-        _general_interface: G,
-        _system_interface: S,
+        clock: SynchronizedClock<C>,
+        event_interface: E,
+        general_interface: G,
+        system_interface: S,
     ) -> Self {
+        system_interface.send(SystemMessage::QualificationTimeout, Duration::from_secs(2));
+
         Self {
-            _clock,
-            _event_interface,
-            _general_interface,
-            _system_interface,
+            clock,
+            event_interface,
+            general_interface,
+            system_interface,
+        }
+    }
+
+    fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
+        match msg {
+            SystemMessage::QualificationTimeout => NodeState::Master(MasterNode::new(
+                self.clock,
+                self.event_interface,
+                self.general_interface,
+                self.system_interface,
+            )),
+            _ => NodeState::PreMaster(self),
         }
     }
 }
@@ -694,6 +708,44 @@ mod tests {
             *system_interface.sent_messages.lock().unwrap(),
             vec![SystemMessage::AnnounceReceiptTimeout]
         );
+    }
+
+    #[test]
+    fn pre_master_node_schedules_qualification_timeout() {
+        let system_interface = FakeSystemInterface::new();
+
+        let _ = PreMasterNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakeEventInterface::new(),
+            FakeGeneralInterface::new(),
+            &system_interface,
+        );
+
+        assert!(
+            system_interface
+                .sent_messages
+                .lock()
+                .unwrap()
+                .contains(&SystemMessage::QualificationTimeout),
+            "Expected QualificationTimeout to be sent"
+        );
+    }
+
+    #[test]
+    fn pre_master_node_to_master_transition_on_qualification_timeout() {
+        let node = PreMasterNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakeEventInterface::new(),
+            FakeGeneralInterface::new(),
+            FakeSystemInterface::new(),
+        );
+
+        let node = node.system_message(SystemMessage::QualificationTimeout);
+
+        match node {
+            NodeState::Master(_) => {}
+            _ => panic!("Expected Master state"),
+        }
     }
 
     use std::sync::{Arc, Mutex};
