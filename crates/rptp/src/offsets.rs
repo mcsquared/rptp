@@ -23,12 +23,12 @@ impl MasterSlaveOffset {
     }
 
     pub fn ingest_two_step_sync(&self, sync: TwoStepSyncMessage, timestamp: TimeStamp) {
+        self.sync_timestamp.replace(Some(timestamp));
         if let Some(follow_up) = self.follow_up.borrow_mut().take() {
             self.offset
                 .replace(follow_up.master_slave_offset(sync, timestamp));
         } else {
             self.sync.replace(Some(sync));
-            self.sync_timestamp.replace(Some(timestamp));
         }
     }
 
@@ -188,6 +188,21 @@ mod tests {
         let ms_offset = MasterSlaveOffset::new();
         ms_offset.ingest_two_step_sync(TwoStepSyncMessage::new(42), TimeStamp::new(1, 0));
         ms_offset.ingest_follow_up(FollowUpMessage::new(42, TimeStamp::new(1, 0)));
+
+        let estimate = ms_offset.master_estimate(&sm_offset);
+
+        assert_eq!(estimate, Some(TimeStamp::new(2, 0)));
+    }
+
+    #[test]
+    fn master_slave_offset_produces_estimate_with_reversed_sync_follow_up() {
+        let sm_offset = SlaveMasterOffset::new();
+        sm_offset.ingest_delay_request(DelayRequestMessage::new(42), TimeStamp::new(0, 0));
+        sm_offset.ingest_delay_response(DelayResponseMessage::new(42, TimeStamp::new(2, 0)));
+
+        let ms_offset = MasterSlaveOffset::new();
+        ms_offset.ingest_follow_up(FollowUpMessage::new(42, TimeStamp::new(1, 0)));
+        ms_offset.ingest_two_step_sync(TwoStepSyncMessage::new(42), TimeStamp::new(1, 0));
 
         let estimate = ms_offset.master_estimate(&sm_offset);
 
