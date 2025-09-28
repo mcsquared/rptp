@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::time::Duration;
 
 use crate::clock::{SynchronizableClock, SynchronizedClock};
@@ -29,6 +30,7 @@ where
     Listening(ListeningNode<C, E, G, S>),
     Slave(SlaveNode<C, E, G, S>),
     Master(MasterNode<C, E, G, S>),
+    PreMaster(PreMasterNode<C, E, G, S>),
 }
 
 impl<C, E, G, S> NodeState<C, E, G, S>
@@ -44,6 +46,7 @@ where
             NodeState::Listening(_) => self,
             NodeState::Slave(node) => node.event_message(msg, timestamp),
             NodeState::Master(node) => node.event_message(msg, timestamp),
+            NodeState::PreMaster(_) => self,
         }
     }
 
@@ -53,6 +56,7 @@ where
             NodeState::Listening(node) => node.general_message(msg),
             NodeState::Slave(node) => node.general_message(msg),
             NodeState::Master(node) => node.general_message(msg),
+            NodeState::PreMaster(_) => self,
         }
     }
 
@@ -62,6 +66,7 @@ where
             NodeState::Listening(node) => node.system_message(msg),
             NodeState::Slave(node) => node.system_message(msg),
             NodeState::Master(node) => node.system_message(msg),
+            NodeState::PreMaster(_) => self,
         }
     }
 }
@@ -124,6 +129,7 @@ where
     event_interface: E,
     general_interface: G,
     system_interface: S,
+    announce_count: RefCell<u8>,
 }
 
 impl<C, E, G, S> ListeningNode<C, E, G, S>
@@ -149,11 +155,32 @@ where
             event_interface,
             general_interface,
             system_interface,
+            announce_count: RefCell::new(0),
         }
     }
 
-    fn general_message(self, _msg: GeneralMessage) -> NodeState<C, E, G, S> {
-        NodeState::Listening(self)
+    fn general_message(self, msg: GeneralMessage) -> NodeState<C, E, G, S> {
+        match msg {
+            GeneralMessage::Announce(_) => {
+                let announce_threshold_reached = {
+                    let mut count = self.announce_count.borrow_mut();
+                    *count += 1;
+                    *count >= 2
+                };
+
+                if announce_threshold_reached {
+                    NodeState::PreMaster(PreMasterNode::new(
+                        self.clock,
+                        self.event_interface,
+                        self.general_interface,
+                        self.system_interface,
+                    ))
+                } else {
+                    NodeState::Listening(self)
+                }
+            }
+            _ => NodeState::Listening(self),
+        }
     }
 
     fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
@@ -339,6 +366,41 @@ where
         }
 
         NodeState::Master(self)
+    }
+}
+
+pub struct PreMasterNode<C, E, G, S>
+where
+    C: SynchronizableClock,
+    E: EventInterface,
+    G: GeneralInterface,
+    S: SystemInterface,
+{
+    _clock: SynchronizedClock<C>,
+    _event_interface: E,
+    _general_interface: G,
+    _system_interface: S,
+}
+
+impl<C, E, G, S> PreMasterNode<C, E, G, S>
+where
+    C: SynchronizableClock,
+    E: EventInterface,
+    G: GeneralInterface,
+    S: SystemInterface,
+{
+    pub fn new(
+        _clock: SynchronizedClock<C>,
+        _event_interface: E,
+        _general_interface: G,
+        _system_interface: S,
+    ) -> Self {
+        Self {
+            _clock,
+            _event_interface,
+            _general_interface,
+            _system_interface,
+        }
     }
 }
 
@@ -596,6 +658,24 @@ mod tests {
         match node {
             NodeState::Listening(_) => {}
             _ => panic!("Expected Listening state"),
+        }
+    }
+
+    #[test]
+    fn listening_node_to_pre_master_transition_on_two_announces() {
+        let node = ListeningNode::new(
+            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakeEventInterface::new(),
+            FakeGeneralInterface::new(),
+            FakeSystemInterface::new(),
+        );
+
+        let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
+        let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(1)));
+
+        match node {
+            NodeState::PreMaster(_) => {}
+            _ => panic!("Expected PreMaster state"),
         }
     }
 
