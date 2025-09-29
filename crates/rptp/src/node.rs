@@ -6,6 +6,7 @@ use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
     SystemMessage,
 };
+use crate::port::PortIo;
 use crate::time::TimeStamp;
 
 pub trait EventInterface {
@@ -20,26 +21,22 @@ pub trait SystemInterface {
     fn send(&self, msg: SystemMessage, delay: Duration);
 }
 
-pub enum NodeState<C, E, G, S>
+pub enum NodeState<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
-    Initializing(InitializingNode<C, E, G, S>),
-    Listening(ListeningNode<C, E, G, S>),
-    Slave(SlaveNode<C, E, G, S>),
-    Master(MasterNode<C, E, G, S>),
-    PreMaster(PreMasterNode<C, E, G, S>),
+    Initializing(InitializingNode<C, P>),
+    Listening(ListeningNode<C, P>),
+    Slave(SlaveNode<C, P>),
+    Master(MasterNode<C, P>),
+    PreMaster(PreMasterNode<C, P>),
 }
 
-impl<C, E, G, S> NodeState<C, E, G, S>
+impl<C, P> NodeState<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
     pub fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> Self {
         match self {
@@ -72,95 +69,63 @@ where
     }
 }
 
-pub struct InitializingNode<C, E, G, S>
+pub struct InitializingNode<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
     clock: SynchronizedClock<C>,
-    event_interface: E,
-    general_interface: G,
-    system_interface: S,
+    portio: P,
 }
 
-impl<C, E, G, S> InitializingNode<C, E, G, S>
+impl<C, P> InitializingNode<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
-    pub fn new(
-        clock: SynchronizedClock<C>,
-        event_interface: E,
-        general_interface: G,
-        system_interface: S,
-    ) -> Self {
-        Self {
-            clock,
-            event_interface,
-            general_interface,
-            system_interface,
-        }
+    pub fn new(clock: SynchronizedClock<C>, portio: P) -> Self {
+        Self { clock, portio }
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
         match msg {
-            SystemMessage::Initialized => NodeState::Listening(ListeningNode::new(
-                self.clock,
-                self.event_interface,
-                self.general_interface,
-                self.system_interface,
-            )),
+            SystemMessage::Initialized => {
+                NodeState::Listening(ListeningNode::new(self.clock, self.portio))
+            }
             _ => NodeState::Initializing(self),
         }
     }
 }
 
-pub struct ListeningNode<C, E, G, S>
+pub struct ListeningNode<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
     clock: SynchronizedClock<C>,
-    event_interface: E,
-    general_interface: G,
-    system_interface: S,
+    portio: P,
     announce_count: RefCell<u8>,
 }
 
-impl<C, E, G, S> ListeningNode<C, E, G, S>
+impl<C, P> ListeningNode<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
-    pub fn new(
-        clock: SynchronizedClock<C>,
-        event_interface: E,
-        general_interface: G,
-        system_interface: S,
-    ) -> Self {
-        system_interface.send(
+    pub fn new(clock: SynchronizedClock<C>, portio: P) -> Self {
+        portio.system().send(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
 
         Self {
             clock,
-            event_interface,
-            general_interface,
-            system_interface,
+            portio,
             announce_count: RefCell::new(0),
         }
     }
 
-    fn general_message(self, msg: GeneralMessage) -> NodeState<C, E, G, S> {
+    fn general_message(self, msg: GeneralMessage) -> NodeState<C, P> {
         match msg {
             GeneralMessage::Announce(_) => {
                 let announce_threshold_reached = {
@@ -170,12 +135,7 @@ where
                 };
 
                 if announce_threshold_reached {
-                    NodeState::PreMaster(PreMasterNode::new(
-                        self.clock,
-                        self.event_interface,
-                        self.general_interface,
-                        self.system_interface,
-                    ))
+                    NodeState::PreMaster(PreMasterNode::new(self.clock, self.portio))
                 } else {
                     NodeState::Listening(self)
                 }
@@ -184,63 +144,44 @@ where
         }
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
         match msg {
-            SystemMessage::AnnounceReceiptTimeout => NodeState::Master(MasterNode::new(
-                self.clock,
-                self.event_interface,
-                self.general_interface,
-                self.system_interface,
-            )),
+            SystemMessage::AnnounceReceiptTimeout => {
+                NodeState::Master(MasterNode::new(self.clock, self.portio))
+            }
             _ => NodeState::Listening(self),
         }
     }
 }
 
-pub struct SlaveNode<C, E, G, S>
+pub struct SlaveNode<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
     clock: SynchronizedClock<C>,
-    event_interface: E,
-    general_interface: G,
-    system_interface: S,
+    portio: P,
 }
 
-impl<C, E, G, S> SlaveNode<C, E, G, S>
+impl<C, P> SlaveNode<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
-    pub fn new(
-        clock: SynchronizedClock<C>,
-        event_interface: E,
-        general_interface: G,
-        system_interface: S,
-    ) -> Self {
-        system_interface.send(
+    pub fn new(clock: SynchronizedClock<C>, portio: P) -> Self {
+        portio.system().send(
             SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)),
             Duration::ZERO,
         );
-        system_interface.send(
+        portio.system().send(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
             Duration::ZERO,
         );
 
-        Self {
-            clock,
-            event_interface,
-            general_interface,
-            system_interface,
-        }
+        Self { clock, portio }
     }
 
-    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<C, E, G, S> {
+    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<C, P> {
         match msg {
             EventMessage::TwoStepSync(sync) => {
                 self.clock.ingest_two_step_sync(sync, timestamp);
@@ -251,7 +192,7 @@ where
         NodeState::Slave(self)
     }
 
-    fn general_message(self, msg: GeneralMessage) -> NodeState<C, E, G, S> {
+    fn general_message(self, msg: GeneralMessage) -> NodeState<C, P> {
         match msg {
             GeneralMessage::Announce(_) => {}
             GeneralMessage::FollowUp(follow_up) => {
@@ -265,15 +206,16 @@ where
         NodeState::Slave(self)
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
         match msg {
             SystemMessage::AnnounceCycle(announce_cycle) => {
                 let announce_message = announce_cycle.announce();
                 let next_cycle = announce_cycle.next();
 
-                self.general_interface
+                self.portio
+                    .general()
                     .send(GeneralMessage::Announce(announce_message));
-                self.system_interface.send(
+                self.portio.system().send(
                     SystemMessage::AnnounceCycle(next_cycle),
                     Duration::from_secs(1),
                 );
@@ -282,9 +224,10 @@ where
                 let delay_request = delay_cycle.delay_request();
                 let next_cycle = delay_cycle.next();
 
-                self.event_interface
+                self.portio
+                    .event()
                     .send(EventMessage::DelayReq(delay_request));
-                self.system_interface.send(
+                self.portio.system().send(
                     SystemMessage::DelayCycle(next_cycle),
                     Duration::from_secs(1),
                 );
@@ -302,49 +245,34 @@ where
     }
 }
 
-pub struct MasterNode<C, E, G, S>
+pub struct MasterNode<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
     _clock: SynchronizedClock<C>,
-    event_interface: E,
-    general_interface: G,
-    system_interface: S,
+    portio: P,
 }
 
-impl<C, E, G, S> MasterNode<C, E, G, S>
+impl<C, P> MasterNode<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
-    pub fn new(
-        _clock: SynchronizedClock<C>,
-        event_interface: E,
-        general_interface: G,
-        system_interface: S,
-    ) -> Self {
-        system_interface.send(
+    pub fn new(_clock: SynchronizedClock<C>, portio: P) -> Self {
+        portio.system().send(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
             Duration::ZERO,
         );
 
-        Self {
-            _clock,
-            event_interface,
-            general_interface,
-            system_interface,
-        }
+        Self { _clock, portio }
     }
 
-    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<C, E, G, S> {
+    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<C, P> {
         match msg {
             EventMessage::DelayReq(req) => self
-                .general_interface
+                .portio
+                .general()
                 .send(GeneralMessage::DelayResp(req.response(timestamp))),
             _ => {}
         }
@@ -352,7 +280,7 @@ where
         NodeState::Master(self)
     }
 
-    fn general_message(self, _msg: GeneralMessage) -> NodeState<C, E, G, S> {
+    fn general_message(self, _msg: GeneralMessage) -> NodeState<C, P> {
         match _msg {
             _ => {}
         }
@@ -360,20 +288,23 @@ where
         NodeState::Master(self)
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
         match msg {
             SystemMessage::SyncCycle(sync_cycle) => {
                 let sync_message = sync_cycle.two_step_sync();
                 let next_cycle = sync_cycle.next();
 
-                self.event_interface
+                self.portio
+                    .event()
                     .send(EventMessage::TwoStepSync(sync_message));
-                self.system_interface
+                self.portio
+                    .system()
                     .send(SystemMessage::SyncCycle(next_cycle), Duration::from_secs(1));
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::TwoStepSync(twostep) => {
-                    self.general_interface
+                    self.portio
+                        .general()
                         .send(GeneralMessage::FollowUp(twostep.follow_up(timestamp)));
                 }
                 _ => {}
@@ -385,50 +316,33 @@ where
     }
 }
 
-pub struct PreMasterNode<C, E, G, S>
+pub struct PreMasterNode<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
     clock: SynchronizedClock<C>,
-    event_interface: E,
-    general_interface: G,
-    system_interface: S,
+    portio: P,
 }
 
-impl<C, E, G, S> PreMasterNode<C, E, G, S>
+impl<C, P> PreMasterNode<C, P>
 where
     C: SynchronizableClock,
-    E: EventInterface,
-    G: GeneralInterface,
-    S: SystemInterface,
+    P: PortIo,
 {
-    pub fn new(
-        clock: SynchronizedClock<C>,
-        event_interface: E,
-        general_interface: G,
-        system_interface: S,
-    ) -> Self {
-        system_interface.send(SystemMessage::QualificationTimeout, Duration::from_secs(2));
+    pub fn new(clock: SynchronizedClock<C>, portio: P) -> Self {
+        portio
+            .system()
+            .send(SystemMessage::QualificationTimeout, Duration::from_secs(2));
 
-        Self {
-            clock,
-            event_interface,
-            general_interface,
-            system_interface,
-        }
+        Self { clock, portio }
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<C, E, G, S> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
         match msg {
-            SystemMessage::QualificationTimeout => NodeState::Master(MasterNode::new(
-                self.clock,
-                self.event_interface,
-                self.general_interface,
-                self.system_interface,
-            )),
+            SystemMessage::QualificationTimeout => {
+                NodeState::Master(MasterNode::new(self.clock, self.portio))
+            }
             _ => NodeState::PreMaster(self),
         }
     }
@@ -453,9 +367,11 @@ mod tests {
 
         let mut slave = NodeState::Slave(SlaveNode::new(
             SynchronizedClock::new(local_clock.clone()),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                FakeSystemInterface::new(),
+            ),
         ));
 
         slave = slave.event_message(
@@ -484,9 +400,11 @@ mod tests {
 
         let node = MasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            &general_interface,
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                &general_interface,
+                FakeSystemInterface::new(),
+            ),
         );
         node.event_message(
             EventMessage::DelayReq(DelayRequestMessage::new(0)),
@@ -508,9 +426,11 @@ mod tests {
 
         let _ = MasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            &system_interface,
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                &system_interface,
+            ),
         );
 
         assert_eq!(
@@ -525,9 +445,11 @@ mod tests {
 
         let node = MasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &event_interface,
-            FakeGeneralInterface::new(),
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                &event_interface,
+                FakeGeneralInterface::new(),
+                FakeSystemInterface::new(),
+            ),
         );
         node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
@@ -543,9 +465,11 @@ mod tests {
 
         let node = MasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            &system_interface,
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                &system_interface,
+            ),
         );
 
         node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
@@ -565,9 +489,11 @@ mod tests {
 
         let node = MasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            &general_interface,
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                &general_interface,
+                FakeSystemInterface::new(),
+            ),
         );
         node.system_message(SystemMessage::Timestamp {
             msg: EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
@@ -589,9 +515,11 @@ mod tests {
 
         let _ = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            &system_interface,
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                &system_interface,
+            ),
         );
 
         assert!(
@@ -609,9 +537,11 @@ mod tests {
 
         let node = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            &system_interface,
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                &system_interface,
+            ),
         );
 
         node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
@@ -631,9 +561,11 @@ mod tests {
 
         let node = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            &general_interface,
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                &general_interface,
+                FakeSystemInterface::new(),
+            ),
         );
 
         node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
@@ -653,9 +585,11 @@ mod tests {
 
         let _ = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            &system_interface,
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                &system_interface,
+            ),
         );
 
         assert!(
@@ -673,9 +607,11 @@ mod tests {
 
         let node = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            &system_interface,
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                &system_interface,
+            ),
         );
 
         node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
@@ -696,9 +632,11 @@ mod tests {
 
         let node = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &event_interface,
-            FakeGeneralInterface::new(),
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                &event_interface,
+                FakeGeneralInterface::new(),
+                FakeSystemInterface::new(),
+            ),
         );
         node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
 
@@ -712,9 +650,11 @@ mod tests {
     fn initializing_node_to_listening_transition() {
         let node = InitializingNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                FakeSystemInterface::new(),
+            ),
         );
 
         let node = node.system_message(SystemMessage::Initialized);
@@ -729,9 +669,11 @@ mod tests {
     fn listening_node_to_master_transition_on_announce_receipt_timeout() {
         let node = ListeningNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                FakeSystemInterface::new(),
+            ),
         );
 
         let node = node.system_message(SystemMessage::AnnounceReceiptTimeout);
@@ -746,9 +688,11 @@ mod tests {
     fn listening_node_stays_in_listening_on_single_announce() {
         let node = ListeningNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                FakeSystemInterface::new(),
+            ),
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
@@ -763,9 +707,11 @@ mod tests {
     fn listening_node_to_pre_master_transition_on_two_announces() {
         let node = ListeningNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                FakeSystemInterface::new(),
+            ),
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
@@ -783,9 +729,11 @@ mod tests {
 
         let _ = ListeningNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            &system_interface,
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                &system_interface,
+            ),
         );
 
         assert_eq!(
@@ -800,9 +748,11 @@ mod tests {
 
         let _ = PreMasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            &system_interface,
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                &system_interface,
+            ),
         );
 
         assert!(
@@ -819,9 +769,11 @@ mod tests {
     fn pre_master_node_to_master_transition_on_qualification_timeout() {
         let node = PreMasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakeEventInterface::new(),
-            FakeGeneralInterface::new(),
-            FakeSystemInterface::new(),
+            FakePortIo::new(
+                FakeEventInterface::new(),
+                FakeGeneralInterface::new(),
+                FakeSystemInterface::new(),
+            ),
         );
 
         let node = node.system_message(SystemMessage::QualificationTimeout);
@@ -903,6 +855,53 @@ mod tests {
     impl SystemInterface for &FakeSystemInterface {
         fn send(&self, msg: SystemMessage, _delay: Duration) {
             self.sent_messages.lock().unwrap().push(msg);
+        }
+    }
+
+    struct FakePortIo<E, G, S>
+    where
+        E: EventInterface,
+        G: GeneralInterface,
+        S: SystemInterface,
+    {
+        event: E,
+        general: G,
+        system: S,
+    }
+
+    impl<E, G, S> FakePortIo<E, G, S>
+    where
+        E: EventInterface,
+        G: GeneralInterface,
+        S: SystemInterface,
+    {
+        pub fn new(event: E, general: G, system: S) -> Self {
+            Self {
+                event,
+                general,
+                system,
+            }
+        }
+    }
+
+    impl<E, G, S> PortIo for FakePortIo<E, G, S>
+    where
+        E: EventInterface,
+        G: GeneralInterface,
+        S: SystemInterface,
+    {
+        type Event = E;
+        type General = G;
+        type System = S;
+
+        fn event(&self) -> &Self::Event {
+            &self.event
+        }
+        fn general(&self) -> &Self::General {
+            &self.general
+        }
+        fn system(&self) -> &Self::System {
+            &self.system
         }
     }
 }

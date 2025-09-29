@@ -11,6 +11,7 @@ use rptp::{
         EventInterface, GeneralInterface, InitializingNode, MasterNode, NodeState, SlaveNode,
         SystemInterface,
     },
+    port::PortIo,
 };
 
 use crate::net::NetPort;
@@ -67,13 +68,44 @@ impl SystemInterface for TokioSystemInterface {
     }
 }
 
+struct TokioPortIo {
+    event: TokioEventInterface,
+    general: TokioGeneralInterface,
+    system: TokioSystemInterface,
+}
+
+impl TokioPortIo {
+    fn new(
+        event: TokioEventInterface,
+        general: TokioGeneralInterface,
+        system: TokioSystemInterface,
+    ) -> Self {
+        Self {
+            event,
+            general,
+            system,
+        }
+    }
+}
+
+impl PortIo for TokioPortIo {
+    type Event = TokioEventInterface;
+    type General = TokioGeneralInterface;
+    type System = TokioSystemInterface;
+
+    fn event(&self) -> &Self::Event {
+        &self.event
+    }
+    fn general(&self) -> &Self::General {
+        &self.general
+    }
+    fn system(&self) -> &Self::System {
+        &self.system
+    }
+}
+
 pub struct TokioNode<P: NetPort> {
-    node: NodeState<
-        Rc<dyn SynchronizableClock>,
-        TokioEventInterface,
-        TokioGeneralInterface,
-        TokioSystemInterface,
-    >,
+    node: NodeState<Rc<dyn SynchronizableClock>, TokioPortIo>,
     clock: Rc<dyn SynchronizableClock>,
     event_port: P,
     general_port: P,
@@ -94,9 +126,11 @@ impl<P: NetPort> TokioNode<P> {
 
         let node = NodeState::Initializing(InitializingNode::new(
             SynchronizedClock::new(clock.clone()),
-            TokioEventInterface::new(event_tx),
-            TokioGeneralInterface::new(general_tx),
-            TokioSystemInterface::new(system_tx),
+            TokioPortIo::new(
+                TokioEventInterface::new(event_tx),
+                TokioGeneralInterface::new(general_tx),
+                TokioSystemInterface::new(system_tx),
+            ),
         ));
 
         Ok(Self {
@@ -121,9 +155,11 @@ impl<P: NetPort> TokioNode<P> {
 
         let node = NodeState::Master(MasterNode::new(
             SynchronizedClock::new(clock.clone()),
-            TokioEventInterface::new(event_tx),
-            TokioGeneralInterface::new(general_tx),
-            TokioSystemInterface::new(system_tx),
+            TokioPortIo::new(
+                TokioEventInterface::new(event_tx),
+                TokioGeneralInterface::new(general_tx),
+                TokioSystemInterface::new(system_tx),
+            ),
         ));
 
         Ok(Self {
@@ -148,9 +184,11 @@ impl<P: NetPort> TokioNode<P> {
 
         let node = NodeState::Slave(SlaveNode::new(
             SynchronizedClock::new(clock.clone()),
-            TokioEventInterface::new(event_tx),
-            TokioGeneralInterface::new(general_tx),
-            TokioSystemInterface::new(system_tx),
+            TokioPortIo::new(
+                TokioEventInterface::new(event_tx),
+                TokioGeneralInterface::new(general_tx),
+                TokioSystemInterface::new(system_tx),
+            ),
         ));
 
         Ok(Self {
