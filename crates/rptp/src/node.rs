@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::time::Duration;
 
 use crate::clock::{SynchronizableClock, SynchronizedClock};
@@ -90,7 +89,7 @@ where
     fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
         match msg {
             SystemMessage::Initialized => {
-                NodeState::Listening(ListeningNode::new(self.clock, self.portio))
+                NodeState::Listening(ListeningNode::new(self.clock, self.portio, 0))
             }
             _ => NodeState::Initializing(self),
         }
@@ -104,7 +103,7 @@ where
 {
     clock: SynchronizedClock<C>,
     portio: P,
-    announce_count: RefCell<u8>,
+    announce_count: u8,
 }
 
 impl<C, P> ListeningNode<C, P>
@@ -112,7 +111,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    pub fn new(clock: SynchronizedClock<C>, portio: P) -> Self {
+    pub fn new(clock: SynchronizedClock<C>, portio: P, announce_count: u8) -> Self {
         portio.system().send(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -121,23 +120,21 @@ where
         Self {
             clock,
             portio,
-            announce_count: RefCell::new(0),
+            announce_count,
         }
     }
 
     fn general_message(self, msg: GeneralMessage) -> NodeState<C, P> {
         match msg {
             GeneralMessage::Announce(_) => {
-                let announce_threshold_reached = {
-                    let mut count = self.announce_count.borrow_mut();
-                    *count += 1;
-                    *count >= 2
-                };
-
-                if announce_threshold_reached {
+                if self.announce_count >= 1 {
                     NodeState::PreMaster(PreMasterNode::new(self.clock, self.portio))
                 } else {
-                    NodeState::Listening(self)
+                    NodeState::Listening(ListeningNode::new(
+                        self.clock,
+                        self.portio,
+                        self.announce_count + 1,
+                    ))
                 }
             }
             _ => NodeState::Listening(self),
@@ -674,6 +671,7 @@ mod tests {
                 FakeGeneralInterface::new(),
                 FakeSystemInterface::new(),
             ),
+            0,
         );
 
         let node = node.system_message(SystemMessage::AnnounceReceiptTimeout);
@@ -693,6 +691,7 @@ mod tests {
                 FakeGeneralInterface::new(),
                 FakeSystemInterface::new(),
             ),
+            0,
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
@@ -712,6 +711,7 @@ mod tests {
                 FakeGeneralInterface::new(),
                 FakeSystemInterface::new(),
             ),
+            0,
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
@@ -734,6 +734,7 @@ mod tests {
                 FakeGeneralInterface::new(),
                 &system_interface,
             ),
+            0,
         );
 
         assert_eq!(
