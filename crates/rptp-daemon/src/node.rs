@@ -7,100 +7,47 @@ use tokio::time::sleep;
 use rptp::{
     clock::{Clock, SynchronizableClock, SynchronizedClock},
     message::{EventMessage, GeneralMessage, SystemMessage},
-    node::{
-        EventInterface, GeneralInterface, InitializingNode, MasterNode, NodeState, SlaveNode,
-        SystemInterface,
-    },
+    node::{InitializingNode, MasterNode, NodeState, SlaveNode},
     port::PortIo,
 };
 
 use crate::net::NetPort;
 
-pub struct TokioEventInterface {
-    tx: mpsc::UnboundedSender<EventMessage>,
-}
-
-impl TokioEventInterface {
-    pub fn new(tx: mpsc::UnboundedSender<EventMessage>) -> Self {
-        Self { tx }
-    }
-}
-
-impl EventInterface for TokioEventInterface {
-    fn send(&self, msg: EventMessage) {
-        let _ = self.tx.send(msg);
-    }
-}
-
-pub struct TokioGeneralInterface {
-    tx: mpsc::UnboundedSender<GeneralMessage>,
-}
-
-impl TokioGeneralInterface {
-    pub fn new(tx: mpsc::UnboundedSender<GeneralMessage>) -> Self {
-        Self { tx }
-    }
-}
-
-impl GeneralInterface for TokioGeneralInterface {
-    fn send(&self, msg: GeneralMessage) {
-        let _ = self.tx.send(msg);
-    }
-}
-
-pub struct TokioSystemInterface {
-    tx: mpsc::UnboundedSender<SystemMessage>,
-}
-
-impl TokioSystemInterface {
-    pub fn new(tx: mpsc::UnboundedSender<SystemMessage>) -> Self {
-        Self { tx }
-    }
-}
-
-impl SystemInterface for TokioSystemInterface {
-    fn send(&self, msg: SystemMessage, delay: Duration) {
-        let tx = self.tx.clone();
-        tokio::spawn(async move {
-            sleep(delay).await;
-            let _ = tx.send(msg);
-        });
-    }
-}
-
 struct TokioPortIo {
-    event: TokioEventInterface,
-    general: TokioGeneralInterface,
-    system: TokioSystemInterface,
+    event_tx: mpsc::UnboundedSender<EventMessage>,
+    general_tx: mpsc::UnboundedSender<GeneralMessage>,
+    system_tx: mpsc::UnboundedSender<SystemMessage>,
 }
 
 impl TokioPortIo {
     fn new(
-        event: TokioEventInterface,
-        general: TokioGeneralInterface,
-        system: TokioSystemInterface,
+        event_tx: mpsc::UnboundedSender<EventMessage>,
+        general_tx: mpsc::UnboundedSender<GeneralMessage>,
+        system_tx: mpsc::UnboundedSender<SystemMessage>,
     ) -> Self {
         Self {
-            event,
-            general,
-            system,
+            event_tx,
+            general_tx,
+            system_tx,
         }
     }
 }
 
 impl PortIo for TokioPortIo {
-    type Event = TokioEventInterface;
-    type General = TokioGeneralInterface;
-    type System = TokioSystemInterface;
+    fn send_event(&self, msg: EventMessage) {
+        let _ = self.event_tx.send(msg);
+    }
 
-    fn event(&self) -> &Self::Event {
-        &self.event
+    fn send_general(&self, msg: GeneralMessage) {
+        let _ = self.general_tx.send(msg);
     }
-    fn general(&self) -> &Self::General {
-        &self.general
-    }
-    fn system(&self) -> &Self::System {
-        &self.system
+
+    fn schedule(&self, msg: SystemMessage, delay: Duration) {
+        let tx = self.system_tx.clone();
+        tokio::spawn(async move {
+            sleep(delay).await;
+            let _ = tx.send(msg);
+        });
     }
 }
 
@@ -126,11 +73,7 @@ impl<P: NetPort> TokioNode<P> {
 
         let node = NodeState::Initializing(InitializingNode::new(
             SynchronizedClock::new(clock.clone()),
-            TokioPortIo::new(
-                TokioEventInterface::new(event_tx),
-                TokioGeneralInterface::new(general_tx),
-                TokioSystemInterface::new(system_tx),
-            ),
+            TokioPortIo::new(event_tx, general_tx, system_tx),
         ));
 
         Ok(Self {
@@ -155,11 +98,7 @@ impl<P: NetPort> TokioNode<P> {
 
         let node = NodeState::Master(MasterNode::new(
             SynchronizedClock::new(clock.clone()),
-            TokioPortIo::new(
-                TokioEventInterface::new(event_tx),
-                TokioGeneralInterface::new(general_tx),
-                TokioSystemInterface::new(system_tx),
-            ),
+            TokioPortIo::new(event_tx, general_tx, system_tx),
         ));
 
         Ok(Self {
@@ -184,11 +123,7 @@ impl<P: NetPort> TokioNode<P> {
 
         let node = NodeState::Slave(SlaveNode::new(
             SynchronizedClock::new(clock.clone()),
-            TokioPortIo::new(
-                TokioEventInterface::new(event_tx),
-                TokioGeneralInterface::new(general_tx),
-                TokioSystemInterface::new(system_tx),
-            ),
+            TokioPortIo::new(event_tx, general_tx, system_tx),
         ));
 
         Ok(Self {

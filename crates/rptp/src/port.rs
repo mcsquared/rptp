@@ -1,11 +1,7 @@
-use crate::node::{EventInterface, GeneralInterface, SystemInterface};
+use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
 pub trait PortIo {
-    type Event: EventInterface;
-    type General: GeneralInterface;
-    type System: SystemInterface;
-
-    fn event(&self) -> &Self::Event;
-    fn general(&self) -> &Self::General;
-    fn system(&self) -> &Self::System;
+    fn send_event(&self, msg: EventMessage);
+    fn send_general(&self, msg: GeneralMessage);
+    fn schedule(&self, msg: SystemMessage, delay: std::time::Duration);
 }

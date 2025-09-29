@@ -8,18 +8,6 @@ use crate::message::{
 use crate::port::PortIo;
 use crate::time::TimeStamp;
 
-pub trait EventInterface {
-    fn send(&self, msg: EventMessage);
-}
-
-pub trait GeneralInterface {
-    fn send(&self, msg: GeneralMessage);
-}
-
-pub trait SystemInterface {
-    fn send(&self, msg: SystemMessage, delay: Duration);
-}
-
 pub enum NodeState<C, P>
 where
     C: SynchronizableClock,
@@ -112,7 +100,7 @@ where
     P: PortIo,
 {
     pub fn new(clock: SynchronizedClock<C>, portio: P, announce_count: u8) -> Self {
-        portio.system().send(
+        portio.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
@@ -166,11 +154,11 @@ where
     P: PortIo,
 {
     pub fn new(clock: SynchronizedClock<C>, portio: P) -> Self {
-        portio.system().send(
+        portio.schedule(
             SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)),
             Duration::ZERO,
         );
-        portio.system().send(
+        portio.schedule(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
             Duration::ZERO,
         );
@@ -210,9 +198,8 @@ where
                 let next_cycle = announce_cycle.next();
 
                 self.portio
-                    .general()
-                    .send(GeneralMessage::Announce(announce_message));
-                self.portio.system().send(
+                    .send_general(GeneralMessage::Announce(announce_message));
+                self.portio.schedule(
                     SystemMessage::AnnounceCycle(next_cycle),
                     Duration::from_secs(1),
                 );
@@ -222,9 +209,8 @@ where
                 let next_cycle = delay_cycle.next();
 
                 self.portio
-                    .event()
-                    .send(EventMessage::DelayReq(delay_request));
-                self.portio.system().send(
+                    .send_event(EventMessage::DelayReq(delay_request));
+                self.portio.schedule(
                     SystemMessage::DelayCycle(next_cycle),
                     Duration::from_secs(1),
                 );
@@ -257,7 +243,7 @@ where
     P: PortIo,
 {
     pub fn new(_clock: SynchronizedClock<C>, portio: P) -> Self {
-        portio.system().send(
+        portio.schedule(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
             Duration::ZERO,
         );
@@ -269,8 +255,7 @@ where
         match msg {
             EventMessage::DelayReq(req) => self
                 .portio
-                .general()
-                .send(GeneralMessage::DelayResp(req.response(timestamp))),
+                .send_general(GeneralMessage::DelayResp(req.response(timestamp))),
             _ => {}
         }
 
@@ -292,17 +277,14 @@ where
                 let next_cycle = sync_cycle.next();
 
                 self.portio
-                    .event()
-                    .send(EventMessage::TwoStepSync(sync_message));
+                    .send_event(EventMessage::TwoStepSync(sync_message));
                 self.portio
-                    .system()
-                    .send(SystemMessage::SyncCycle(next_cycle), Duration::from_secs(1));
+                    .schedule(SystemMessage::SyncCycle(next_cycle), Duration::from_secs(1));
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::TwoStepSync(twostep) => {
                     self.portio
-                        .general()
-                        .send(GeneralMessage::FollowUp(twostep.follow_up(timestamp)));
+                        .send_general(GeneralMessage::FollowUp(twostep.follow_up(timestamp)));
                 }
                 _ => {}
             },
@@ -328,9 +310,7 @@ where
     P: PortIo,
 {
     pub fn new(clock: SynchronizedClock<C>, portio: P) -> Self {
-        portio
-            .system()
-            .send(SystemMessage::QualificationTimeout, Duration::from_secs(2));
+        portio.schedule(SystemMessage::QualificationTimeout, Duration::from_secs(2));
 
         Self { clock, portio }
     }
@@ -349,6 +329,7 @@ where
 mod tests {
     use super::*;
 
+    use std::cell::RefCell;
     use std::rc::Rc;
 
     use crate::clock::{Clock, FakeClock};
@@ -364,11 +345,7 @@ mod tests {
 
         let mut slave = NodeState::Slave(SlaveNode::new(
             SynchronizedClock::new(local_clock.clone()),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                FakeSystemInterface::new(),
-            ),
+            FakePortIo::new(),
         ));
 
         slave = slave.event_message(
@@ -393,253 +370,216 @@ mod tests {
 
     #[test]
     fn master_node_answers_delay_request_with_delay_response() {
-        let general_interface = FakeGeneralInterface::new();
+        let portio = FakePortIo::new();
 
         let node = MasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                &general_interface,
-                FakeSystemInterface::new(),
-            ),
+            &portio,
         );
+
         node.event_message(
             EventMessage::DelayReq(DelayRequestMessage::new(0)),
             TimeStamp::new(0, 0),
         );
 
-        assert_eq!(
-            *general_interface.sent_messages.lock().unwrap(),
-            vec![GeneralMessage::DelayResp(DelayResponseMessage::new(
-                0,
-                TimeStamp::new(0, 0),
-            ))]
+        assert!(
+            portio
+                .general_messages
+                .borrow()
+                .contains(&GeneralMessage::DelayResp(DelayResponseMessage::new(
+                    0,
+                    TimeStamp::new(0, 0)
+                )))
         );
     }
 
     #[test]
     fn master_node_schedules_initial_sync() {
-        let system_interface = FakeSystemInterface::new();
+        let portio = FakePortIo::new();
 
         let _ = MasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                &system_interface,
-            ),
+            &portio,
         );
 
-        assert_eq!(
-            *system_interface.sent_messages.lock().unwrap(),
-            vec![SystemMessage::SyncCycle(SyncCycleMessage::new(0))]
+        assert!(
+            portio
+                .system_messages
+                .borrow()
+                .contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0)))
         );
     }
 
     #[test]
     fn master_node_answers_sync_cycle_with_sync() {
-        let event_interface = FakeEventInterface::new();
+        let portio = FakePortIo::new();
 
         let node = MasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                &event_interface,
-                FakeGeneralInterface::new(),
-                FakeSystemInterface::new(),
-            ),
+            &portio,
         );
+
         node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
-        assert_eq!(
-            *event_interface.sent_messages.lock().unwrap(),
-            vec![EventMessage::TwoStepSync(TwoStepSyncMessage::new(0))],
+        assert!(
+            portio
+                .event_messages
+                .borrow()
+                .contains(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)))
         );
     }
 
     #[test]
     fn master_node_schedules_next_sync() {
-        let system_interface = FakeSystemInterface::new();
+        let portio = FakePortIo::new();
 
         let node = MasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                &system_interface,
-            ),
+            &portio,
         );
 
         node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
-        assert_eq!(
-            *system_interface.sent_messages.lock().unwrap(),
-            vec![
-                SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
-                SystemMessage::SyncCycle(SyncCycleMessage::new(1))
-            ],
+        assert!(
+            portio
+                .system_messages
+                .borrow()
+                .contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(1)))
         );
     }
 
     #[test]
     fn master_node_answers_timestamped_sync_with_follow_up() {
-        let general_interface = FakeGeneralInterface::new();
+        let portio = FakePortIo::new();
 
         let node = MasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                &general_interface,
-                FakeSystemInterface::new(),
-            ),
+            &portio,
         );
+
         node.system_message(SystemMessage::Timestamp {
             msg: EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
             timestamp: TimeStamp::new(0, 0),
         });
 
-        assert_eq!(
-            *general_interface.sent_messages.lock().unwrap(),
-            vec![GeneralMessage::FollowUp(FollowUpMessage::new(
-                0,
-                TimeStamp::new(0, 0)
-            ))],
+        assert!(
+            portio
+                .general_messages
+                .borrow()
+                .contains(&GeneralMessage::FollowUp(FollowUpMessage::new(
+                    0,
+                    TimeStamp::new(0, 0)
+                )))
         );
     }
 
     #[test]
     fn slave_node_schedules_initial_announce_cycle() {
-        let system_interface = FakeSystemInterface::new();
+        let portio = FakePortIo::new();
 
         let _ = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                &system_interface,
-            ),
+            &portio,
         );
 
         assert!(
-            system_interface
-                .sent_messages
-                .lock()
-                .unwrap()
-                .contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0))),
+            portio
+                .system_messages
+                .borrow()
+                .contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)))
         );
     }
 
     #[test]
     fn slave_node_schedules_next_announce() {
-        let system_interface = FakeSystemInterface::new();
+        let portio = FakePortIo::new();
 
         let node = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                &system_interface,
-            ),
+            &portio,
         );
 
         node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
 
         assert!(
-            system_interface
-                .sent_messages
-                .lock()
-                .unwrap()
-                .contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(1))),
+            portio
+                .system_messages
+                .borrow()
+                .contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(1)))
         );
     }
 
     #[test]
     fn slave_node_answers_announce_cycle_with_announce() {
-        let general_interface = FakeGeneralInterface::new();
+        let portio = FakePortIo::new();
 
         let node = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                &general_interface,
-                FakeSystemInterface::new(),
-            ),
+            &portio,
         );
 
         node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
 
         assert!(
-            general_interface
-                .sent_messages
-                .lock()
-                .unwrap()
-                .contains(&GeneralMessage::Announce(AnnounceMessage::new(0))),
+            portio
+                .general_messages
+                .borrow()
+                .contains(&GeneralMessage::Announce(AnnounceMessage::new(0)))
         );
     }
 
     #[test]
     fn slave_node_schedules_initial_delay_cycle() {
-        let system_interface = FakeSystemInterface::new();
+        let portio = FakePortIo::new();
 
         let _ = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                &system_interface,
-            ),
+            &portio,
         );
 
         assert!(
-            system_interface
-                .sent_messages
-                .lock()
-                .unwrap()
-                .contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(0))),
+            portio
+                .system_messages
+                .borrow()
+                .contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(0)))
         );
     }
 
     #[test]
     fn slave_node_schedules_next_delay_request() {
-        let system_interface = FakeSystemInterface::new();
+        let portio = FakePortIo::new();
 
         let node = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                &system_interface,
-            ),
+            &portio,
         );
 
         node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
 
         assert!(
-            system_interface
-                .sent_messages
-                .lock()
-                .unwrap()
-                .contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(1))),
-            "Expected DelayCycle(1) to be sent"
+            portio
+                .system_messages
+                .borrow()
+                .contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(1)))
         );
     }
 
     #[test]
     fn slave_node_answers_delay_request_cycle_with_delay_request() {
-        let event_interface = FakeEventInterface::new();
+        let portio = FakePortIo::new();
 
         let node = SlaveNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                &event_interface,
-                FakeGeneralInterface::new(),
-                FakeSystemInterface::new(),
-            ),
+            &portio,
         );
+
         node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
 
-        assert_eq!(
-            *event_interface.sent_messages.lock().unwrap(),
-            vec![EventMessage::DelayReq(DelayRequestMessage::new(0))]
+        assert!(
+            portio
+                .event_messages
+                .borrow()
+                .contains(&EventMessage::DelayReq(DelayRequestMessage::new(0)))
         );
     }
 
@@ -647,11 +587,7 @@ mod tests {
     fn initializing_node_to_listening_transition() {
         let node = InitializingNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                FakeSystemInterface::new(),
-            ),
+            FakePortIo::new(),
         );
 
         let node = node.system_message(SystemMessage::Initialized);
@@ -666,11 +602,7 @@ mod tests {
     fn listening_node_to_master_transition_on_announce_receipt_timeout() {
         let node = ListeningNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                FakeSystemInterface::new(),
-            ),
+            FakePortIo::new(),
             0,
         );
 
@@ -686,11 +618,7 @@ mod tests {
     fn listening_node_stays_in_listening_on_single_announce() {
         let node = ListeningNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                FakeSystemInterface::new(),
-            ),
+            FakePortIo::new(),
             0,
         );
 
@@ -706,11 +634,7 @@ mod tests {
     fn listening_node_to_pre_master_transition_on_two_announces() {
         let node = ListeningNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                FakeSystemInterface::new(),
-            ),
+            FakePortIo::new(),
             0,
         );
 
@@ -725,44 +649,36 @@ mod tests {
 
     #[test]
     fn listening_node_schedules_announce_receipt_timeout() {
-        let system_interface = FakeSystemInterface::new();
+        let portio = FakePortIo::new();
 
         let _ = ListeningNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                &system_interface,
-            ),
+            &portio,
             0,
         );
 
-        assert_eq!(
-            *system_interface.sent_messages.lock().unwrap(),
-            vec![SystemMessage::AnnounceReceiptTimeout]
+        assert!(
+            portio
+                .system_messages
+                .borrow()
+                .contains(&SystemMessage::AnnounceReceiptTimeout)
         );
     }
 
     #[test]
     fn pre_master_node_schedules_qualification_timeout() {
-        let system_interface = FakeSystemInterface::new();
+        let portio = FakePortIo::new();
 
         let _ = PreMasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                &system_interface,
-            ),
+            &portio,
         );
 
         assert!(
-            system_interface
-                .sent_messages
-                .lock()
-                .unwrap()
-                .contains(&SystemMessage::QualificationTimeout),
-            "Expected QualificationTimeout to be sent"
+            portio
+                .system_messages
+                .borrow()
+                .contains(&SystemMessage::QualificationTimeout)
         );
     }
 
@@ -770,11 +686,7 @@ mod tests {
     fn pre_master_node_to_master_transition_on_qualification_timeout() {
         let node = PreMasterNode::new(
             SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(
-                FakeEventInterface::new(),
-                FakeGeneralInterface::new(),
-                FakeSystemInterface::new(),
-            ),
+            FakePortIo::new(),
         );
 
         let node = node.system_message(SystemMessage::QualificationTimeout);
@@ -785,124 +697,47 @@ mod tests {
         }
     }
 
-    use std::sync::{Arc, Mutex};
-
-    struct FakeEventInterface {
-        sent_messages: Arc<Mutex<Vec<EventMessage>>>,
+    struct FakePortIo {
+        event_messages: RefCell<Vec<EventMessage>>,
+        general_messages: RefCell<Vec<GeneralMessage>>,
+        system_messages: RefCell<Vec<SystemMessage>>,
     }
 
-    impl FakeEventInterface {
-        fn new() -> Self {
+    impl FakePortIo {
+        pub fn new() -> Self {
             Self {
-                sent_messages: Arc::new(Mutex::new(Vec::new())),
+                event_messages: RefCell::new(Vec::new()),
+                general_messages: RefCell::new(Vec::new()),
+                system_messages: RefCell::new(Vec::new()),
             }
         }
     }
 
-    impl EventInterface for FakeEventInterface {
-        fn send(&self, msg: EventMessage) {
-            self.sent_messages.lock().unwrap().push(msg);
+    impl PortIo for FakePortIo {
+        fn send_event(&self, msg: EventMessage) {
+            self.event_messages.borrow_mut().push(msg);
+        }
+
+        fn send_general(&self, msg: GeneralMessage) {
+            self.general_messages.borrow_mut().push(msg);
+        }
+
+        fn schedule(&self, msg: SystemMessage, _delay: Duration) {
+            self.system_messages.borrow_mut().push(msg);
         }
     }
 
-    impl EventInterface for &FakeEventInterface {
-        fn send(&self, msg: EventMessage) {
-            self.sent_messages.lock().unwrap().push(msg);
+    impl PortIo for &FakePortIo {
+        fn send_event(&self, msg: EventMessage) {
+            self.event_messages.borrow_mut().push(msg);
         }
-    }
 
-    struct FakeGeneralInterface {
-        sent_messages: Arc<Mutex<Vec<GeneralMessage>>>,
-    }
-
-    impl FakeGeneralInterface {
-        fn new() -> Self {
-            Self {
-                sent_messages: Arc::new(Mutex::new(Vec::new())),
-            }
+        fn send_general(&self, msg: GeneralMessage) {
+            self.general_messages.borrow_mut().push(msg);
         }
-    }
 
-    impl GeneralInterface for FakeGeneralInterface {
-        fn send(&self, msg: GeneralMessage) {
-            self.sent_messages.lock().unwrap().push(msg);
-        }
-    }
-
-    impl GeneralInterface for &FakeGeneralInterface {
-        fn send(&self, msg: GeneralMessage) {
-            self.sent_messages.lock().unwrap().push(msg);
-        }
-    }
-
-    struct FakeSystemInterface {
-        sent_messages: Arc<Mutex<Vec<SystemMessage>>>,
-    }
-
-    impl FakeSystemInterface {
-        fn new() -> Self {
-            Self {
-                sent_messages: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-    }
-
-    impl SystemInterface for FakeSystemInterface {
-        fn send(&self, msg: SystemMessage, _delay: Duration) {
-            self.sent_messages.lock().unwrap().push(msg);
-        }
-    }
-
-    impl SystemInterface for &FakeSystemInterface {
-        fn send(&self, msg: SystemMessage, _delay: Duration) {
-            self.sent_messages.lock().unwrap().push(msg);
-        }
-    }
-
-    struct FakePortIo<E, G, S>
-    where
-        E: EventInterface,
-        G: GeneralInterface,
-        S: SystemInterface,
-    {
-        event: E,
-        general: G,
-        system: S,
-    }
-
-    impl<E, G, S> FakePortIo<E, G, S>
-    where
-        E: EventInterface,
-        G: GeneralInterface,
-        S: SystemInterface,
-    {
-        pub fn new(event: E, general: G, system: S) -> Self {
-            Self {
-                event,
-                general,
-                system,
-            }
-        }
-    }
-
-    impl<E, G, S> PortIo for FakePortIo<E, G, S>
-    where
-        E: EventInterface,
-        G: GeneralInterface,
-        S: SystemInterface,
-    {
-        type Event = E;
-        type General = G;
-        type System = S;
-
-        fn event(&self) -> &Self::Event {
-            &self.event
-        }
-        fn general(&self) -> &Self::General {
-            &self.general
-        }
-        fn system(&self) -> &Self::System {
-            &self.system
+        fn schedule(&self, msg: SystemMessage, _delay: Duration) {
+            self.system_messages.borrow_mut().push(msg);
         }
     }
 }
