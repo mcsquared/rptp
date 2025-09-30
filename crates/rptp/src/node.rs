@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::bmca::BestForeignClock;
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
@@ -76,9 +77,11 @@ where
 
     fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
         match msg {
-            SystemMessage::Initialized => {
-                NodeState::Listening(ListeningNode::new(self.clock, self.portio, 0))
-            }
+            SystemMessage::Initialized => NodeState::Listening(ListeningNode::new(
+                self.clock,
+                self.portio,
+                BestForeignClock::new(),
+            )),
             _ => NodeState::Initializing(self),
         }
     }
@@ -91,7 +94,7 @@ where
 {
     clock: LocalClock<C>,
     portio: P,
-    announce_count: u8,
+    best_foreign: BestForeignClock,
 }
 
 impl<C, P> ListeningNode<C, P>
@@ -99,7 +102,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    pub fn new(clock: LocalClock<C>, portio: P, announce_count: u8) -> Self {
+    pub fn new(clock: LocalClock<C>, portio: P, best_foreign: BestForeignClock) -> Self {
         portio.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -108,21 +111,22 @@ where
         Self {
             clock,
             portio,
-            announce_count,
+            best_foreign,
         }
     }
 
     fn general_message(self, msg: GeneralMessage) -> NodeState<C, P> {
         match msg {
-            GeneralMessage::Announce(_) => {
-                if self.announce_count >= 1 {
-                    NodeState::PreMaster(PreMasterNode::new(self.clock, self.portio))
+            GeneralMessage::Announce(msg) => {
+                self.best_foreign.consider(msg);
+                if let Some(best_foreign) = self.best_foreign.best() {
+                    if best_foreign.outranks_local(&self.clock) {
+                        NodeState::Listening(self) // TODO: implement transition to Uncalibrated as pre-stage to Slave
+                    } else {
+                        NodeState::PreMaster(PreMasterNode::new(self.clock, self.portio))
+                    }
                 } else {
-                    NodeState::Listening(ListeningNode::new(
-                        self.clock,
-                        self.portio,
-                        self.announce_count + 1,
-                    ))
+                    NodeState::Listening(self)
                 }
             }
             _ => NodeState::Listening(self),
@@ -603,7 +607,7 @@ mod tests {
         let node = ListeningNode::new(
             LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakePortIo::new(),
-            0,
+            BestForeignClock::new(),
         );
 
         let node = node.system_message(SystemMessage::AnnounceReceiptTimeout);
@@ -619,7 +623,7 @@ mod tests {
         let node = ListeningNode::new(
             LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakePortIo::new(),
-            0,
+            BestForeignClock::new(),
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
@@ -635,7 +639,7 @@ mod tests {
         let node = ListeningNode::new(
             LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakePortIo::new(),
-            0,
+            BestForeignClock::new(),
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
@@ -654,7 +658,7 @@ mod tests {
         let _ = ListeningNode::new(
             LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
-            0,
+            BestForeignClock::new(),
         );
 
         assert!(
