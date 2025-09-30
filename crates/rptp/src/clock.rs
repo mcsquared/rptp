@@ -15,13 +15,13 @@ pub trait SynchronizableClock: Clock {
     fn synchronize(&self, to: TimeStamp);
 }
 
-pub struct SynchronizedClock<C: SynchronizableClock> {
+pub struct LocalClock<C: SynchronizableClock> {
     clock: C,
     master_slave_offset: MasterSlaveOffset,
     slave_master_offset: SlaveMasterOffset,
 }
 
-impl<C: SynchronizableClock> SynchronizedClock<C> {
+impl<C: SynchronizableClock> LocalClock<C> {
     pub fn new(clock: C) -> Self {
         Self {
             clock,
@@ -62,7 +62,7 @@ impl<C: SynchronizableClock> SynchronizedClock<C> {
     }
 }
 
-impl<C: SynchronizableClock> Clock for SynchronizedClock<C> {
+impl<C: SynchronizableClock> Clock for LocalClock<C> {
     fn now(&self) -> TimeStamp {
         self.clock.now()
     }
@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn synchronized_clock_adjusts_wrapped_clock() {
         let clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
-        let sync_clock = SynchronizedClock::new(clock.clone());
+        let sync_clock = LocalClock::new(clock.clone());
 
         sync_clock.ingest_two_step_sync(TwoStepSyncMessage::new(0), TimeStamp::new(1, 0));
         sync_clock.ingest_follow_up(FollowUpMessage::new(0, TimeStamp::new(1, 0)));

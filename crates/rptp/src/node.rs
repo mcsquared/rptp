@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::clock::{SynchronizableClock, SynchronizedClock};
+use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
     SystemMessage,
@@ -61,7 +61,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    clock: SynchronizedClock<C>,
+    clock: LocalClock<C>,
     portio: P,
 }
 
@@ -70,7 +70,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    pub fn new(clock: SynchronizedClock<C>, portio: P) -> Self {
+    pub fn new(clock: LocalClock<C>, portio: P) -> Self {
         Self { clock, portio }
     }
 
@@ -89,7 +89,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    clock: SynchronizedClock<C>,
+    clock: LocalClock<C>,
     portio: P,
     announce_count: u8,
 }
@@ -99,7 +99,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    pub fn new(clock: SynchronizedClock<C>, portio: P, announce_count: u8) -> Self {
+    pub fn new(clock: LocalClock<C>, portio: P, announce_count: u8) -> Self {
         portio.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -144,7 +144,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    clock: SynchronizedClock<C>,
+    clock: LocalClock<C>,
     portio: P,
 }
 
@@ -153,7 +153,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    pub fn new(clock: SynchronizedClock<C>, portio: P) -> Self {
+    pub fn new(clock: LocalClock<C>, portio: P) -> Self {
         portio.schedule(
             SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)),
             Duration::ZERO,
@@ -233,7 +233,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    _clock: SynchronizedClock<C>,
+    _clock: LocalClock<C>,
     portio: P,
 }
 
@@ -242,7 +242,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    pub fn new(_clock: SynchronizedClock<C>, portio: P) -> Self {
+    pub fn new(_clock: LocalClock<C>, portio: P) -> Self {
         portio.schedule(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
             Duration::ZERO,
@@ -300,7 +300,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    clock: SynchronizedClock<C>,
+    clock: LocalClock<C>,
     portio: P,
 }
 
@@ -309,7 +309,7 @@ where
     C: SynchronizableClock,
     P: PortIo,
 {
-    pub fn new(clock: SynchronizedClock<C>, portio: P) -> Self {
+    pub fn new(clock: LocalClock<C>, portio: P) -> Self {
         portio.schedule(SystemMessage::QualificationTimeout, Duration::from_secs(2));
 
         Self { clock, portio }
@@ -344,7 +344,7 @@ mod tests {
         let local_clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let mut slave = NodeState::Slave(SlaveNode::new(
-            SynchronizedClock::new(local_clock.clone()),
+            LocalClock::new(local_clock.clone()),
             FakePortIo::new(),
         ));
 
@@ -373,7 +373,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let node = MasterNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -398,7 +398,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let _ = MasterNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -415,7 +415,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let node = MasterNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -434,7 +434,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let node = MasterNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -453,7 +453,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let node = MasterNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -478,7 +478,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let _ = SlaveNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -495,7 +495,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let node = SlaveNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -514,7 +514,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let node = SlaveNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -533,7 +533,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let _ = SlaveNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -550,7 +550,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let node = SlaveNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -569,7 +569,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let node = SlaveNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -586,7 +586,7 @@ mod tests {
     #[test]
     fn initializing_node_to_listening_transition() {
         let node = InitializingNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakePortIo::new(),
         );
 
@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn listening_node_to_master_transition_on_announce_receipt_timeout() {
         let node = ListeningNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakePortIo::new(),
             0,
         );
@@ -617,7 +617,7 @@ mod tests {
     #[test]
     fn listening_node_stays_in_listening_on_single_announce() {
         let node = ListeningNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakePortIo::new(),
             0,
         );
@@ -633,7 +633,7 @@ mod tests {
     #[test]
     fn listening_node_to_pre_master_transition_on_two_announces() {
         let node = ListeningNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakePortIo::new(),
             0,
         );
@@ -652,7 +652,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let _ = ListeningNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
             0,
         );
@@ -670,7 +670,7 @@ mod tests {
         let portio = FakePortIo::new();
 
         let _ = PreMasterNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             &portio,
         );
 
@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn pre_master_node_to_master_transition_on_qualification_timeout() {
         let node = PreMasterNode::new(
-            SynchronizedClock::new(FakeClock::new(TimeStamp::new(0, 0))),
+            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
             FakePortIo::new(),
         );
 

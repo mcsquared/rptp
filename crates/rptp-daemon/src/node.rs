@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 
 use rptp::{
-    clock::{Clock, SynchronizableClock, SynchronizedClock},
+    clock::{Clock, SynchronizableClock, LocalClock},
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{InitializingNode, MasterNode, NodeState, SlaveNode},
     port::PortIo,
@@ -72,7 +72,7 @@ impl<P: NetPort> TokioNode<P> {
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
         let node = NodeState::Initializing(InitializingNode::new(
-            SynchronizedClock::new(clock.clone()),
+            LocalClock::new(clock.clone()),
             TokioPortIo::new(event_tx, general_tx, system_tx),
         ));
 
@@ -97,7 +97,7 @@ impl<P: NetPort> TokioNode<P> {
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
         let node = NodeState::Master(MasterNode::new(
-            SynchronizedClock::new(clock.clone()),
+            LocalClock::new(clock.clone()),
             TokioPortIo::new(event_tx, general_tx, system_tx),
         ));
 
@@ -122,7 +122,7 @@ impl<P: NetPort> TokioNode<P> {
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
         let node = NodeState::Slave(SlaveNode::new(
-            SynchronizedClock::new(clock.clone()),
+            LocalClock::new(clock.clone()),
             TokioPortIo::new(event_tx, general_tx, system_tx),
         ));
 
