@@ -1,30 +1,27 @@
 use std::time::Duration;
 
 use crate::bmca::BestForeignClock;
-use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
     SystemMessage,
 };
-use crate::port::PortIo;
+use crate::port::Port;
 use crate::time::TimeStamp;
 
-pub enum NodeState<C, P>
+pub enum NodeState<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    Initializing(InitializingNode<C, P>),
-    Listening(ListeningNode<C, P>),
-    Slave(SlaveNode<C, P>),
-    Master(MasterNode<C, P>),
-    PreMaster(PreMasterNode<C, P>),
+    Initializing(InitializingNode<P>),
+    Listening(ListeningNode<P>),
+    Slave(SlaveNode<P>),
+    Master(MasterNode<P>),
+    PreMaster(PreMasterNode<P>),
 }
 
-impl<C, P> NodeState<C, P>
+impl<P> NodeState<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
     pub fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> Self {
         match self {
@@ -57,73 +54,61 @@ where
     }
 }
 
-pub struct InitializingNode<C, P>
+pub struct InitializingNode<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    clock: LocalClock<C>,
-    portio: P,
+    port: P,
 }
 
-impl<C, P> InitializingNode<C, P>
+impl<P> InitializingNode<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    pub fn new(clock: LocalClock<C>, portio: P) -> Self {
-        Self { clock, portio }
+    pub fn new(port: P) -> Self {
+        Self { port }
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
-            SystemMessage::Initialized => NodeState::Listening(ListeningNode::new(
-                self.clock,
-                self.portio,
-                BestForeignClock::new(),
-            )),
+            SystemMessage::Initialized => {
+                NodeState::Listening(ListeningNode::new(self.port, BestForeignClock::new()))
+            }
             _ => NodeState::Initializing(self),
         }
     }
 }
 
-pub struct ListeningNode<C, P>
+pub struct ListeningNode<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    clock: LocalClock<C>,
-    portio: P,
+    port: P,
     best_foreign: BestForeignClock,
 }
 
-impl<C, P> ListeningNode<C, P>
+impl<P> ListeningNode<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    pub fn new(clock: LocalClock<C>, portio: P, best_foreign: BestForeignClock) -> Self {
-        portio.schedule(
+    pub fn new(port: P, best_foreign: BestForeignClock) -> Self {
+        port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
 
-        Self {
-            clock,
-            portio,
-            best_foreign,
-        }
+        Self { port, best_foreign }
     }
 
-    fn general_message(self, msg: GeneralMessage) -> NodeState<C, P> {
+    fn general_message(self, msg: GeneralMessage) -> NodeState<P> {
         match msg {
             GeneralMessage::Announce(msg) => {
                 self.best_foreign.consider(msg);
                 if let Some(best_foreign) = self.best_foreign.best() {
-                    if best_foreign.outranks_local(&self.clock) {
+                    if best_foreign.outranks_local(&self.port.clock()) {
                         NodeState::Listening(self) // TODO: implement transition to Uncalibrated as pre-stage to Slave
                     } else {
-                        NodeState::PreMaster(PreMasterNode::new(self.clock, self.portio))
+                        NodeState::PreMaster(PreMasterNode::new(self.port))
                     }
                 } else {
                     NodeState::Listening(self)
@@ -133,47 +118,42 @@ where
         }
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
-            SystemMessage::AnnounceReceiptTimeout => {
-                NodeState::Master(MasterNode::new(self.clock, self.portio))
-            }
+            SystemMessage::AnnounceReceiptTimeout => NodeState::Master(MasterNode::new(self.port)),
             _ => NodeState::Listening(self),
         }
     }
 }
 
-pub struct SlaveNode<C, P>
+pub struct SlaveNode<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    clock: LocalClock<C>,
-    portio: P,
+    port: P,
 }
 
-impl<C, P> SlaveNode<C, P>
+impl<P> SlaveNode<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    pub fn new(clock: LocalClock<C>, portio: P) -> Self {
-        portio.schedule(
+    pub fn new(port: P) -> Self {
+        port.schedule(
             SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)),
             Duration::ZERO,
         );
-        portio.schedule(
+        port.schedule(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
             Duration::ZERO,
         );
 
-        Self { clock, portio }
+        Self { port }
     }
 
-    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<C, P> {
+    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<P> {
         match msg {
             EventMessage::TwoStepSync(sync) => {
-                self.clock.ingest_two_step_sync(sync, timestamp);
+                self.port.clock().ingest_two_step_sync(sync, timestamp);
             }
             _ => {}
         }
@@ -181,29 +161,29 @@ where
         NodeState::Slave(self)
     }
 
-    fn general_message(self, msg: GeneralMessage) -> NodeState<C, P> {
+    fn general_message(self, msg: GeneralMessage) -> NodeState<P> {
         match msg {
             GeneralMessage::Announce(_) => {}
             GeneralMessage::FollowUp(follow_up) => {
-                self.clock.ingest_follow_up(follow_up);
+                self.port.clock().ingest_follow_up(follow_up);
             }
             GeneralMessage::DelayResp(resp) => {
-                self.clock.ingest_delay_response(resp);
+                self.port.clock().ingest_delay_response(resp);
             }
         }
 
         NodeState::Slave(self)
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
             SystemMessage::AnnounceCycle(announce_cycle) => {
                 let announce_message = announce_cycle.announce();
                 let next_cycle = announce_cycle.next();
 
-                self.portio
+                self.port
                     .send_general(GeneralMessage::Announce(announce_message));
-                self.portio.schedule(
+                self.port.schedule(
                     SystemMessage::AnnounceCycle(next_cycle),
                     Duration::from_secs(1),
                 );
@@ -212,16 +192,15 @@ where
                 let delay_request = delay_cycle.delay_request();
                 let next_cycle = delay_cycle.next();
 
-                self.portio
-                    .send_event(EventMessage::DelayReq(delay_request));
-                self.portio.schedule(
+                self.port.send_event(EventMessage::DelayReq(delay_request));
+                self.port.schedule(
                     SystemMessage::DelayCycle(next_cycle),
                     Duration::from_secs(1),
                 );
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::DelayReq(req) => {
-                    self.clock.ingest_delay_request(req, timestamp);
+                    self.port.clock().ingest_delay_request(req, timestamp);
                 }
                 _ => {}
             },
@@ -232,33 +211,30 @@ where
     }
 }
 
-pub struct MasterNode<C, P>
+pub struct MasterNode<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    _clock: LocalClock<C>,
-    portio: P,
+    port: P,
 }
 
-impl<C, P> MasterNode<C, P>
+impl<P> MasterNode<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    pub fn new(_clock: LocalClock<C>, portio: P) -> Self {
-        portio.schedule(
+    pub fn new(port: P) -> Self {
+        port.schedule(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
             Duration::ZERO,
         );
 
-        Self { _clock, portio }
+        Self { port }
     }
 
-    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<C, P> {
+    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<P> {
         match msg {
             EventMessage::DelayReq(req) => self
-                .portio
+                .port
                 .send_general(GeneralMessage::DelayResp(req.response(timestamp))),
             _ => {}
         }
@@ -266,7 +242,7 @@ where
         NodeState::Master(self)
     }
 
-    fn general_message(self, _msg: GeneralMessage) -> NodeState<C, P> {
+    fn general_message(self, _msg: GeneralMessage) -> NodeState<P> {
         match _msg {
             _ => {}
         }
@@ -274,20 +250,20 @@ where
         NodeState::Master(self)
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
             SystemMessage::SyncCycle(sync_cycle) => {
                 let sync_message = sync_cycle.two_step_sync();
                 let next_cycle = sync_cycle.next();
 
-                self.portio
+                self.port
                     .send_event(EventMessage::TwoStepSync(sync_message));
-                self.portio
+                self.port
                     .schedule(SystemMessage::SyncCycle(next_cycle), Duration::from_secs(1));
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::TwoStepSync(twostep) => {
-                    self.portio
+                    self.port
                         .send_general(GeneralMessage::FollowUp(twostep.follow_up(timestamp)));
                 }
                 _ => {}
@@ -299,31 +275,26 @@ where
     }
 }
 
-pub struct PreMasterNode<C, P>
+pub struct PreMasterNode<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    clock: LocalClock<C>,
-    portio: P,
+    port: P,
 }
 
-impl<C, P> PreMasterNode<C, P>
+impl<P> PreMasterNode<P>
 where
-    C: SynchronizableClock,
-    P: PortIo,
+    P: Port,
 {
-    pub fn new(clock: LocalClock<C>, portio: P) -> Self {
-        portio.schedule(SystemMessage::QualificationTimeout, Duration::from_secs(2));
+    pub fn new(port: P) -> Self {
+        port.schedule(SystemMessage::QualificationTimeout, Duration::from_secs(2));
 
-        Self { clock, portio }
+        Self { port }
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<C, P> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
-            SystemMessage::QualificationTimeout => {
-                NodeState::Master(MasterNode::new(self.clock, self.portio))
-            }
+            SystemMessage::QualificationTimeout => NodeState::Master(MasterNode::new(self.port)),
             _ => NodeState::PreMaster(self),
         }
     }
@@ -336,7 +307,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::clock::{Clock, FakeClock};
+    use crate::clock::{Clock, FakeClock, LocalClock, SynchronizableClock};
     use crate::message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
         TwoStepSyncMessage,
@@ -347,10 +318,7 @@ mod tests {
     fn slave_node_synchronizes_clock() {
         let local_clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let mut slave = NodeState::Slave(SlaveNode::new(
-            LocalClock::new(local_clock.clone()),
-            FakePortIo::new(),
-        ));
+        let mut slave = NodeState::Slave(SlaveNode::new(FakePortIo::new(local_clock.clone())));
 
         slave = slave.event_message(
             EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
@@ -374,12 +342,9 @@ mod tests {
 
     #[test]
     fn master_node_answers_delay_request_with_delay_response() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let node = MasterNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let node = MasterNode::new(&port);
 
         node.event_message(
             EventMessage::DelayReq(DelayRequestMessage::new(0)),
@@ -387,8 +352,7 @@ mod tests {
         );
 
         assert!(
-            portio
-                .general_messages
+            port.general_messages
                 .borrow()
                 .contains(&GeneralMessage::DelayResp(DelayResponseMessage::new(
                     0,
@@ -399,16 +363,12 @@ mod tests {
 
     #[test]
     fn master_node_schedules_initial_sync() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let _ = MasterNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let _ = MasterNode::new(&port);
 
         assert!(
-            portio
-                .system_messages
+            port.system_messages
                 .borrow()
                 .contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0)))
         );
@@ -416,18 +376,14 @@ mod tests {
 
     #[test]
     fn master_node_answers_sync_cycle_with_sync() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let node = MasterNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let node = MasterNode::new(&port);
 
         node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
         assert!(
-            portio
-                .event_messages
+            port.event_messages
                 .borrow()
                 .contains(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)))
         );
@@ -435,18 +391,14 @@ mod tests {
 
     #[test]
     fn master_node_schedules_next_sync() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let node = MasterNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let node = MasterNode::new(&port);
 
         node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
         assert!(
-            portio
-                .system_messages
+            port.system_messages
                 .borrow()
                 .contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(1)))
         );
@@ -454,12 +406,9 @@ mod tests {
 
     #[test]
     fn master_node_answers_timestamped_sync_with_follow_up() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let node = MasterNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let node = MasterNode::new(&port);
 
         node.system_message(SystemMessage::Timestamp {
             msg: EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
@@ -467,8 +416,7 @@ mod tests {
         });
 
         assert!(
-            portio
-                .general_messages
+            port.general_messages
                 .borrow()
                 .contains(&GeneralMessage::FollowUp(FollowUpMessage::new(
                     0,
@@ -479,16 +427,12 @@ mod tests {
 
     #[test]
     fn slave_node_schedules_initial_announce_cycle() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let _ = SlaveNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let _ = SlaveNode::new(&port);
 
         assert!(
-            portio
-                .system_messages
+            port.system_messages
                 .borrow()
                 .contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)))
         );
@@ -496,18 +440,14 @@ mod tests {
 
     #[test]
     fn slave_node_schedules_next_announce() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let node = SlaveNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let node = SlaveNode::new(&port);
 
         node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
 
         assert!(
-            portio
-                .system_messages
+            port.system_messages
                 .borrow()
                 .contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(1)))
         );
@@ -515,18 +455,14 @@ mod tests {
 
     #[test]
     fn slave_node_answers_announce_cycle_with_announce() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let node = SlaveNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let node = SlaveNode::new(&port);
 
         node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
 
         assert!(
-            portio
-                .general_messages
+            port.general_messages
                 .borrow()
                 .contains(&GeneralMessage::Announce(AnnounceMessage::new(0)))
         );
@@ -534,16 +470,12 @@ mod tests {
 
     #[test]
     fn slave_node_schedules_initial_delay_cycle() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let _ = SlaveNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let _ = SlaveNode::new(&port);
 
         assert!(
-            portio
-                .system_messages
+            port.system_messages
                 .borrow()
                 .contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(0)))
         );
@@ -551,18 +483,14 @@ mod tests {
 
     #[test]
     fn slave_node_schedules_next_delay_request() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let node = SlaveNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let node = SlaveNode::new(&port);
 
         node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
 
         assert!(
-            portio
-                .system_messages
+            port.system_messages
                 .borrow()
                 .contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(1)))
         );
@@ -570,18 +498,14 @@ mod tests {
 
     #[test]
     fn slave_node_answers_delay_request_cycle_with_delay_request() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let node = SlaveNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let node = SlaveNode::new(&port);
 
         node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
 
         assert!(
-            portio
-                .event_messages
+            port.event_messages
                 .borrow()
                 .contains(&EventMessage::DelayReq(DelayRequestMessage::new(0)))
         );
@@ -589,10 +513,7 @@ mod tests {
 
     #[test]
     fn initializing_node_to_listening_transition() {
-        let node = InitializingNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(),
-        );
+        let node = InitializingNode::new(FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))));
 
         let node = node.system_message(SystemMessage::Initialized);
 
@@ -605,8 +526,7 @@ mod tests {
     #[test]
     fn listening_node_to_master_transition_on_announce_receipt_timeout() {
         let node = ListeningNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(),
+            FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
             BestForeignClock::new(),
         );
 
@@ -621,8 +541,7 @@ mod tests {
     #[test]
     fn listening_node_stays_in_listening_on_single_announce() {
         let node = ListeningNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(),
+            FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
             BestForeignClock::new(),
         );
 
@@ -637,8 +556,7 @@ mod tests {
     #[test]
     fn listening_node_to_pre_master_transition_on_two_announces() {
         let node = ListeningNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(),
+            FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
             BestForeignClock::new(),
         );
 
@@ -653,17 +571,12 @@ mod tests {
 
     #[test]
     fn listening_node_schedules_announce_receipt_timeout() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let _ = ListeningNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-            BestForeignClock::new(),
-        );
+        let _ = ListeningNode::new(&port, BestForeignClock::new());
 
         assert!(
-            portio
-                .system_messages
+            port.system_messages
                 .borrow()
                 .contains(&SystemMessage::AnnounceReceiptTimeout)
         );
@@ -671,16 +584,12 @@ mod tests {
 
     #[test]
     fn pre_master_node_schedules_qualification_timeout() {
-        let portio = FakePortIo::new();
+        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let _ = PreMasterNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            &portio,
-        );
+        let _ = PreMasterNode::new(&port);
 
         assert!(
-            portio
-                .system_messages
+            port.system_messages
                 .borrow()
                 .contains(&SystemMessage::QualificationTimeout)
         );
@@ -688,10 +597,7 @@ mod tests {
 
     #[test]
     fn pre_master_node_to_master_transition_on_qualification_timeout() {
-        let node = PreMasterNode::new(
-            LocalClock::new(FakeClock::new(TimeStamp::new(0, 0))),
-            FakePortIo::new(),
-        );
+        let node = PreMasterNode::new(FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))));
 
         let node = node.system_message(SystemMessage::QualificationTimeout);
 
@@ -701,15 +607,17 @@ mod tests {
         }
     }
 
-    struct FakePortIo {
+    struct FakePortIo<C: SynchronizableClock> {
+        clock: LocalClock<C>,
         event_messages: RefCell<Vec<EventMessage>>,
         general_messages: RefCell<Vec<GeneralMessage>>,
         system_messages: RefCell<Vec<SystemMessage>>,
     }
 
-    impl FakePortIo {
-        pub fn new() -> Self {
+    impl<C: SynchronizableClock> FakePortIo<C> {
+        pub fn new(clock: C) -> Self {
             Self {
+                clock: LocalClock::new(clock),
                 event_messages: RefCell::new(Vec::new()),
                 general_messages: RefCell::new(Vec::new()),
                 system_messages: RefCell::new(Vec::new()),
@@ -717,7 +625,13 @@ mod tests {
         }
     }
 
-    impl PortIo for FakePortIo {
+    impl<C: SynchronizableClock> Port for FakePortIo<C> {
+        type Clock = C;
+
+        fn clock(&self) -> &LocalClock<Self::Clock> {
+            &self.clock
+        }
+
         fn send_event(&self, msg: EventMessage) {
             self.event_messages.borrow_mut().push(msg);
         }
@@ -731,7 +645,13 @@ mod tests {
         }
     }
 
-    impl PortIo for &FakePortIo {
+    impl Port for &FakePortIo<FakeClock> {
+        type Clock = FakeClock;
+
+        fn clock(&self) -> &LocalClock<Self::Clock> {
+            &self.clock
+        }
+
         fn send_event(&self, msg: EventMessage) {
             self.event_messages.borrow_mut().push(msg);
         }
