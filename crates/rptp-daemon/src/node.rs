@@ -243,6 +243,13 @@ mod tests {
 
     use crate::net::FakeNetPort;
 
+    #[test]
+    fn tokio_node_state_size() {
+        use std::mem::size_of;
+        let s = size_of::<NodeState<Box<TokioPort>>>();
+        assert!(s <= 32);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn master_node_sends_periodic_sync_follow_up() -> std::io::Result<()> {
         let (event_port, mut event_rx) = FakeNetPort::new();
