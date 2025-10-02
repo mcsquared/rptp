@@ -54,26 +54,45 @@ where
     }
 }
 
+pub struct IntoListeningNode<P: Port> {
+    best_foreign: BestForeignClock<P::ForeignClockStore>,
+}
+
+impl<P: Port> IntoListeningNode<P> {
+    pub fn new(best_foreign: BestForeignClock<P::ForeignClockStore>) -> Self {
+        Self { best_foreign }
+    }
+
+    pub fn into(self, port: P) -> ListeningNode<P>
+    where
+        P: Port,
+    {
+        ListeningNode::new(port, self.best_foreign)
+    }
+}
+
 pub struct InitializingNode<P>
 where
     P: Port,
 {
     port: P,
+    into_listening: IntoListeningNode<P>,
 }
 
 impl<P> InitializingNode<P>
 where
     P: Port,
 {
-    pub fn new(port: P) -> Self {
-        Self { port }
+    pub fn new(port: P, into_listening: IntoListeningNode<P>) -> Self {
+        Self {
+            port,
+            into_listening,
+        }
     }
 
     fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
-            SystemMessage::Initialized => {
-                NodeState::Listening(ListeningNode::new(self.port, BestForeignClock::new()))
-            }
+            SystemMessage::Initialized => NodeState::Listening(self.into_listening.into(self.port)),
             _ => NodeState::Initializing(self),
         }
     }
@@ -84,14 +103,14 @@ where
     P: Port,
 {
     port: P,
-    best_foreign: BestForeignClock,
+    best_foreign: BestForeignClock<P::ForeignClockStore>,
 }
 
 impl<P> ListeningNode<P>
 where
     P: Port,
 {
-    pub fn new(port: P, best_foreign: BestForeignClock) -> Self {
+    pub fn new(port: P, best_foreign: BestForeignClock<P::ForeignClockStore>) -> Self {
         port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -307,6 +326,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    use crate::bmca::ForeignClockStore;
     use crate::clock::{Clock, FakeClock, LocalClock, SynchronizableClock};
     use crate::message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
@@ -513,7 +533,10 @@ mod tests {
 
     #[test]
     fn initializing_node_to_listening_transition() {
-        let node = InitializingNode::new(FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))));
+        let node = InitializingNode::new(
+            FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
+            IntoListeningNode::new(BestForeignClock::new(FakeForeignClockStore::new())),
+        );
 
         let node = node.system_message(SystemMessage::Initialized);
 
@@ -527,7 +550,7 @@ mod tests {
     fn listening_node_to_master_transition_on_announce_receipt_timeout() {
         let node = ListeningNode::new(
             FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
-            BestForeignClock::new(),
+            BestForeignClock::new(FakeForeignClockStore::new()),
         );
 
         let node = node.system_message(SystemMessage::AnnounceReceiptTimeout);
@@ -542,7 +565,7 @@ mod tests {
     fn listening_node_stays_in_listening_on_single_announce() {
         let node = ListeningNode::new(
             FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
-            BestForeignClock::new(),
+            BestForeignClock::new(FakeForeignClockStore::new()),
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
@@ -557,7 +580,7 @@ mod tests {
     fn listening_node_to_pre_master_transition_on_two_announces() {
         let node = ListeningNode::new(
             FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
-            BestForeignClock::new(),
+            BestForeignClock::new(FakeForeignClockStore::new()),
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
@@ -573,7 +596,7 @@ mod tests {
     fn listening_node_schedules_announce_receipt_timeout() {
         let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let _ = ListeningNode::new(&port, BestForeignClock::new());
+        let _ = ListeningNode::new(&port, BestForeignClock::new(FakeForeignClockStore));
 
         assert!(
             port.system_messages
@@ -627,6 +650,7 @@ mod tests {
 
     impl<C: SynchronizableClock> Port for FakePortIo<C> {
         type Clock = C;
+        type ForeignClockStore = FakeForeignClockStore;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
@@ -647,6 +671,7 @@ mod tests {
 
     impl Port for &FakePortIo<FakeClock> {
         type Clock = FakeClock;
+        type ForeignClockStore = FakeForeignClockStore;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
@@ -664,4 +689,14 @@ mod tests {
             self.system_messages.borrow_mut().push(msg);
         }
     }
+
+    struct FakeForeignClockStore;
+
+    impl FakeForeignClockStore {
+        fn new() -> Self {
+            Self {}
+        }
+    }
+
+    impl ForeignClockStore for FakeForeignClockStore {}
 }

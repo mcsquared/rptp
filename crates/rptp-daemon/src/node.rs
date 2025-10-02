@@ -5,13 +5,28 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 
 use rptp::{
+    bmca::{BestForeignClock, ForeignClock, ForeignClockStore},
     clock::{Clock, LocalClock, SynchronizableClock},
     message::{EventMessage, GeneralMessage, SystemMessage},
-    node::{InitializingNode, MasterNode, NodeState, SlaveNode},
+    node::{InitializingNode, IntoListeningNode, MasterNode, NodeState, SlaveNode},
     port::Port,
 };
 
 use crate::net::NetPort;
+
+struct VecForeignClockStore {
+    _clocks: Vec<ForeignClock>,
+}
+
+impl VecForeignClockStore {
+    fn new() -> Self {
+        Self {
+            _clocks: Vec::new(),
+        }
+    }
+}
+
+impl ForeignClockStore for VecForeignClockStore {}
 
 struct TokioPort {
     clock: LocalClock<Rc<dyn SynchronizableClock>>,
@@ -38,6 +53,7 @@ impl TokioPort {
 
 impl Port for TokioPort {
     type Clock = Rc<dyn SynchronizableClock>;
+    type ForeignClockStore = VecForeignClockStore;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         &self.clock
@@ -80,12 +96,15 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let node = NodeState::Initializing(InitializingNode::new(Box::new(TokioPort::new(
-            LocalClock::new(clock.clone()),
-            event_tx,
-            general_tx,
-            system_tx,
-        ))));
+        let node = NodeState::Initializing(InitializingNode::new(
+            Box::new(TokioPort::new(
+                LocalClock::new(clock.clone()),
+                event_tx,
+                general_tx,
+                system_tx,
+            )),
+            IntoListeningNode::new(BestForeignClock::new(VecForeignClockStore::new())),
+        ));
 
         Ok(Self {
             node: node.system_message(SystemMessage::Initialized),
@@ -247,7 +266,8 @@ mod tests {
     fn tokio_node_state_size() {
         use std::mem::size_of;
         let s = size_of::<NodeState<Box<TokioPort>>>();
-        assert!(s <= 32);
+        println!("NodeState<Box<TokioPort>> size: {}", s);
+        assert!(s <= 64);
     }
 
     #[tokio::test(start_paused = true)]

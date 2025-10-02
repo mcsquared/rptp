@@ -1,8 +1,10 @@
+use crate::bmca::ForeignClockStore;
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
 pub trait Port {
     type Clock: SynchronizableClock;
+    type ForeignClockStore: ForeignClockStore;
 
     fn clock(&self) -> &LocalClock<Self::Clock>;
     fn send_event(&self, msg: EventMessage);
@@ -12,6 +14,7 @@ pub trait Port {
 
 impl<P: Port> Port for Box<P> {
     type Clock = P::Clock;
+    type ForeignClockStore = P::ForeignClockStore;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         self.as_ref().clock()

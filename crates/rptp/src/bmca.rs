@@ -3,6 +3,8 @@ use std::cell::RefCell;
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::AnnounceMessage;
 
+pub trait ForeignClockStore {}
+
 pub struct ForeignClock {}
 
 impl ForeignClock {
@@ -19,14 +21,16 @@ impl ForeignClock {
     }
 }
 
-pub struct BestForeignClock {
+pub struct BestForeignClock<S: ForeignClockStore> {
     announce_count: RefCell<u8>,
+    _store: S,
 }
 
-impl BestForeignClock {
-    pub fn new() -> Self {
+impl<S: ForeignClockStore> BestForeignClock<S> {
+    pub fn new(_store: S) -> Self {
         Self {
             announce_count: RefCell::new(0),
+            _store,
         }
     }
 
