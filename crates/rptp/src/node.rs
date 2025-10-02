@@ -158,10 +158,6 @@ where
 {
     pub fn new(port: P) -> Self {
         port.schedule(
-            SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)),
-            Duration::ZERO,
-        );
-        port.schedule(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
             Duration::ZERO,
         );
@@ -196,17 +192,6 @@ where
 
     fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
-            SystemMessage::AnnounceCycle(announce_cycle) => {
-                let announce_message = announce_cycle.announce();
-                let next_cycle = announce_cycle.next();
-
-                self.port
-                    .send_general(GeneralMessage::Announce(announce_message));
-                self.port.schedule(
-                    SystemMessage::AnnounceCycle(next_cycle),
-                    Duration::from_secs(1),
-                );
-            }
             SystemMessage::DelayCycle(delay_cycle) => {
                 let delay_request = delay_cycle.delay_request();
                 let next_cycle = delay_cycle.next();
@@ -243,6 +228,10 @@ where
 {
     pub fn new(port: P) -> Self {
         port.schedule(
+            SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)),
+            Duration::ZERO,
+        );
+        port.schedule(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
             Duration::ZERO,
         );
@@ -271,6 +260,17 @@ where
 
     fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
+            SystemMessage::AnnounceCycle(announce_cycle) => {
+                let announce_message = announce_cycle.announce();
+                let next_cycle = announce_cycle.next();
+
+                self.port
+                    .send_general(GeneralMessage::Announce(announce_message));
+                self.port.schedule(
+                    SystemMessage::AnnounceCycle(next_cycle),
+                    Duration::from_secs(1),
+                );
+            }
             SystemMessage::SyncCycle(sync_cycle) => {
                 let sync_message = sync_cycle.two_step_sync();
                 let next_cycle = sync_cycle.next();
@@ -446,10 +446,10 @@ mod tests {
     }
 
     #[test]
-    fn slave_node_schedules_initial_announce_cycle() {
+    fn master_node_schedules_initial_announce_cycle() {
         let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let _ = SlaveNode::new(&port);
+        let _ = MasterNode::new(&port);
 
         assert!(
             port.system_messages
@@ -459,10 +459,10 @@ mod tests {
     }
 
     #[test]
-    fn slave_node_schedules_next_announce() {
+    fn master_node_schedules_next_announce() {
         let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let node = SlaveNode::new(&port);
+        let node = MasterNode::new(&port);
 
         node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
 
@@ -474,10 +474,10 @@ mod tests {
     }
 
     #[test]
-    fn slave_node_answers_announce_cycle_with_announce() {
+    fn master_node_answers_announce_cycle_with_announce() {
         let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let node = SlaveNode::new(&port);
+        let node = MasterNode::new(&port);
 
         node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
 
