@@ -338,7 +338,7 @@ mod tests {
     fn slave_node_synchronizes_clock() {
         let local_clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let mut slave = NodeState::Slave(SlaveNode::new(FakePortIo::new(local_clock.clone())));
+        let mut slave = NodeState::Slave(SlaveNode::new(FakePort::new(local_clock.clone())));
 
         slave = slave.event_message(
             EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn master_node_answers_delay_request_with_delay_response() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let node = MasterNode::new(&port);
 
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn master_node_schedules_initial_sync() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let _ = MasterNode::new(&port);
 
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn master_node_answers_sync_cycle_with_sync() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let node = MasterNode::new(&port);
 
@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn master_node_schedules_next_sync() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let node = MasterNode::new(&port);
 
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn master_node_answers_timestamped_sync_with_follow_up() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let node = MasterNode::new(&port);
 
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn master_node_schedules_initial_announce_cycle() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let _ = MasterNode::new(&port);
 
@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn master_node_schedules_next_announce() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let node = MasterNode::new(&port);
 
@@ -475,7 +475,7 @@ mod tests {
 
     #[test]
     fn master_node_answers_announce_cycle_with_announce() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let node = MasterNode::new(&port);
 
@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn slave_node_schedules_initial_delay_cycle() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let _ = SlaveNode::new(&port);
 
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn slave_node_schedules_next_delay_request() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let node = SlaveNode::new(&port);
 
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn slave_node_answers_delay_request_cycle_with_delay_request() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let node = SlaveNode::new(&port);
 
@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn initializing_node_to_listening_transition() {
         let node = InitializingNode::new(
-            FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakePort::new(FakeClock::new(TimeStamp::new(0, 0))),
             IntoListeningNode::new(BestForeignClock::new(FakeForeignClockStore::new())),
         );
 
@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn listening_node_to_master_transition_on_announce_receipt_timeout() {
         let node = ListeningNode::new(
-            FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakePort::new(FakeClock::new(TimeStamp::new(0, 0))),
             BestForeignClock::new(FakeForeignClockStore::new()),
         );
 
@@ -564,7 +564,7 @@ mod tests {
     #[test]
     fn listening_node_stays_in_listening_on_single_announce() {
         let node = ListeningNode::new(
-            FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakePort::new(FakeClock::new(TimeStamp::new(0, 0))),
             BestForeignClock::new(FakeForeignClockStore::new()),
         );
 
@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn listening_node_to_pre_master_transition_on_two_announces() {
         let node = ListeningNode::new(
-            FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))),
+            FakePort::new(FakeClock::new(TimeStamp::new(0, 0))),
             BestForeignClock::new(FakeForeignClockStore::new()),
         );
 
@@ -594,7 +594,7 @@ mod tests {
 
     #[test]
     fn listening_node_schedules_announce_receipt_timeout() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let _ = ListeningNode::new(&port, BestForeignClock::new(FakeForeignClockStore));
 
@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn pre_master_node_schedules_qualification_timeout() {
-        let port = FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let _ = PreMasterNode::new(&port);
 
@@ -620,7 +620,7 @@ mod tests {
 
     #[test]
     fn pre_master_node_to_master_transition_on_qualification_timeout() {
-        let node = PreMasterNode::new(FakePortIo::new(FakeClock::new(TimeStamp::new(0, 0))));
+        let node = PreMasterNode::new(FakePort::new(FakeClock::new(TimeStamp::new(0, 0))));
 
         let node = node.system_message(SystemMessage::QualificationTimeout);
 
@@ -630,14 +630,14 @@ mod tests {
         }
     }
 
-    struct FakePortIo<C: SynchronizableClock> {
+    struct FakePort<C: SynchronizableClock> {
         clock: LocalClock<C>,
         event_messages: RefCell<Vec<EventMessage>>,
         general_messages: RefCell<Vec<GeneralMessage>>,
         system_messages: RefCell<Vec<SystemMessage>>,
     }
 
-    impl<C: SynchronizableClock> FakePortIo<C> {
+    impl<C: SynchronizableClock> FakePort<C> {
         pub fn new(clock: C) -> Self {
             Self {
                 clock: LocalClock::new(clock),
@@ -648,7 +648,7 @@ mod tests {
         }
     }
 
-    impl<C: SynchronizableClock> Port for FakePortIo<C> {
+    impl<C: SynchronizableClock> Port for FakePort<C> {
         type Clock = C;
         type ForeignClockStore = FakeForeignClockStore;
 
@@ -669,7 +669,7 @@ mod tests {
         }
     }
 
-    impl Port for &FakePortIo<FakeClock> {
+    impl Port for &FakePort<FakeClock> {
         type Clock = FakeClock;
         type ForeignClockStore = FakeForeignClockStore;
 
