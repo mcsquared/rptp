@@ -1,12 +1,19 @@
-use crate::bmca::ForeignClockStore;
+use crate::bmca::{BestForeignClock, ForeignClockStore};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
-pub trait Port {
-    type Clock: SynchronizableClock;
+pub trait Infrastructure {
     type ForeignClockStore: ForeignClockStore;
 
+    fn best_foreign_clock(&self) -> BestForeignClock<Self::ForeignClockStore>;
+}
+
+pub trait Port {
+    type Clock: SynchronizableClock;
+    type Infrastructure: Infrastructure;
+
     fn clock(&self) -> &LocalClock<Self::Clock>;
+    fn infrastructure(&self) -> &Self::Infrastructure;
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
     fn schedule(&self, msg: SystemMessage, delay: std::time::Duration);
@@ -14,10 +21,14 @@ pub trait Port {
 
 impl<P: Port> Port for Box<P> {
     type Clock = P::Clock;
-    type ForeignClockStore = P::ForeignClockStore;
+    type Infrastructure = P::Infrastructure;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         self.as_ref().clock()
+    }
+
+    fn infrastructure(&self) -> &Self::Infrastructure {
+        self.as_ref().infrastructure()
     }
 
     fn send_event(&self, msg: EventMessage) {

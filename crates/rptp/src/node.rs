@@ -5,7 +5,7 @@ use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
     SystemMessage,
 };
-use crate::port::Port;
+use crate::port::{Infrastructure, Port};
 use crate::time::TimeStamp;
 
 pub enum NodeState<P>
@@ -54,63 +54,48 @@ where
     }
 }
 
-pub struct IntoListeningNode<P: Port> {
-    best_foreign: BestForeignClock<P::ForeignClockStore>,
-}
-
-impl<P: Port> IntoListeningNode<P> {
-    pub fn new(best_foreign: BestForeignClock<P::ForeignClockStore>) -> Self {
-        Self { best_foreign }
-    }
-
-    pub fn into(self, port: P) -> ListeningNode<P>
-    where
-        P: Port,
-    {
-        ListeningNode::new(port, self.best_foreign)
-    }
-}
-
 pub struct InitializingNode<P>
 where
     P: Port,
 {
     port: P,
-    into_listening: IntoListeningNode<P>,
 }
 
 impl<P> InitializingNode<P>
 where
     P: Port,
 {
-    pub fn new(port: P, into_listening: IntoListeningNode<P>) -> Self {
-        Self {
-            port,
-            into_listening,
-        }
+    pub fn new(port: P) -> Self {
+        Self { port }
     }
 
     fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
-            SystemMessage::Initialized => NodeState::Listening(self.into_listening.into(self.port)),
+            SystemMessage::Initialized => {
+                let best_foreign = self.port.infrastructure().best_foreign_clock();
+                NodeState::Listening(ListeningNode::new(self.port, best_foreign))
+            }
             _ => NodeState::Initializing(self),
         }
     }
 }
+
+type BestForeignClockFor<P> =
+    BestForeignClock<<<P as Port>::Infrastructure as Infrastructure>::ForeignClockStore>;
 
 pub struct ListeningNode<P>
 where
     P: Port,
 {
     port: P,
-    best_foreign: BestForeignClock<P::ForeignClockStore>,
+    best_foreign: BestForeignClockFor<P>,
 }
 
 impl<P> ListeningNode<P>
 where
     P: Port,
 {
-    pub fn new(port: P, best_foreign: BestForeignClock<P::ForeignClockStore>) -> Self {
+    pub fn new(port: P, best_foreign: BestForeignClockFor<P>) -> Self {
         port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -533,10 +518,7 @@ mod tests {
 
     #[test]
     fn initializing_node_to_listening_transition() {
-        let node = InitializingNode::new(
-            FakePort::new(FakeClock::new(TimeStamp::new(0, 0))),
-            IntoListeningNode::new(BestForeignClock::new(FakeForeignClockStore::new())),
-        );
+        let node = InitializingNode::new(FakePort::new(FakeClock::new(TimeStamp::new(0, 0))));
 
         let node = node.system_message(SystemMessage::Initialized);
 
@@ -630,6 +612,16 @@ mod tests {
         }
     }
 
+    struct FakeInfrastructure;
+
+    impl Infrastructure for FakeInfrastructure {
+        type ForeignClockStore = FakeForeignClockStore;
+
+        fn best_foreign_clock(&self) -> BestForeignClock<Self::ForeignClockStore> {
+            BestForeignClock::new(FakeForeignClockStore::new())
+        }
+    }
+
     struct FakePort<C: SynchronizableClock> {
         clock: LocalClock<C>,
         event_messages: RefCell<Vec<EventMessage>>,
@@ -650,10 +642,15 @@ mod tests {
 
     impl<C: SynchronizableClock> Port for FakePort<C> {
         type Clock = C;
-        type ForeignClockStore = FakeForeignClockStore;
+        type Infrastructure = FakeInfrastructure;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
+        }
+
+        fn infrastructure(&self) -> &Self::Infrastructure {
+            static INFRASTRUCTURE: FakeInfrastructure = FakeInfrastructure {};
+            &INFRASTRUCTURE
         }
 
         fn send_event(&self, msg: EventMessage) {
@@ -671,10 +668,15 @@ mod tests {
 
     impl Port for &FakePort<FakeClock> {
         type Clock = FakeClock;
-        type ForeignClockStore = FakeForeignClockStore;
+        type Infrastructure = FakeInfrastructure;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
+        }
+
+        fn infrastructure(&self) -> &Self::Infrastructure {
+            static INFRASTRUCTURE: FakeInfrastructure = FakeInfrastructure {};
+            &INFRASTRUCTURE
         }
 
         fn send_event(&self, msg: EventMessage) {

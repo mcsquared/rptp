@@ -8,8 +8,8 @@ use rptp::{
     bmca::{BestForeignClock, ForeignClock, ForeignClockStore},
     clock::{Clock, LocalClock, SynchronizableClock},
     message::{EventMessage, GeneralMessage, SystemMessage},
-    node::{InitializingNode, IntoListeningNode, MasterNode, NodeState, SlaveNode},
-    port::Port,
+    node::{InitializingNode, MasterNode, NodeState, SlaveNode},
+    port::{Infrastructure, Port},
 };
 
 use crate::net::NetPort;
@@ -27,6 +27,16 @@ impl VecForeignClockStore {
 }
 
 impl ForeignClockStore for VecForeignClockStore {}
+
+struct TokioInfrastructure;
+
+impl Infrastructure for TokioInfrastructure {
+    type ForeignClockStore = VecForeignClockStore;
+
+    fn best_foreign_clock(&self) -> BestForeignClock<Self::ForeignClockStore> {
+        BestForeignClock::new(VecForeignClockStore::new())
+    }
+}
 
 struct TokioPort {
     clock: LocalClock<Rc<dyn SynchronizableClock>>,
@@ -53,10 +63,18 @@ impl TokioPort {
 
 impl Port for TokioPort {
     type Clock = Rc<dyn SynchronizableClock>;
-    type ForeignClockStore = VecForeignClockStore;
+    type Infrastructure = TokioInfrastructure;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         &self.clock
+    }
+
+    fn infrastructure(&self) -> &Self::Infrastructure {
+        // This is a bit of a hack; in a real implementation, the infrastructure would be a field.
+        // Here we just create a new one each time, which is not ideal but works for this example.
+        // In practice, you would want to store it in the struct.
+        static INFRASTRUCTURE: TokioInfrastructure = TokioInfrastructure {};
+        &INFRASTRUCTURE
     }
 
     fn send_event(&self, msg: EventMessage) {
@@ -96,15 +114,12 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let node = NodeState::Initializing(InitializingNode::new(
-            Box::new(TokioPort::new(
-                LocalClock::new(clock.clone()),
-                event_tx,
-                general_tx,
-                system_tx,
-            )),
-            IntoListeningNode::new(BestForeignClock::new(VecForeignClockStore::new())),
-        ));
+        let node = NodeState::Initializing(InitializingNode::new(Box::new(TokioPort::new(
+            LocalClock::new(clock.clone()),
+            event_tx,
+            general_tx,
+            system_tx,
+        ))));
 
         Ok(Self {
             node: node.system_message(SystemMessage::Initialized),
