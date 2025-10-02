@@ -1,17 +1,13 @@
 use std::time::Duration;
 
-use crate::bmca::BestForeignClock;
 use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
     SystemMessage,
 };
-use crate::port::{Infrastructure, Port};
+use crate::port::Port;
 use crate::time::TimeStamp;
 
-pub enum NodeState<P>
-where
-    P: Port,
-{
+pub enum NodeState<P: Port> {
     Initializing(InitializingNode<P>),
     Listening(ListeningNode<P>),
     Slave(SlaveNode<P>),
@@ -19,10 +15,7 @@ where
     PreMaster(PreMasterNode<P>),
 }
 
-impl<P> NodeState<P>
-where
-    P: Port,
-{
+impl<P: Port> NodeState<P> {
     pub fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> Self {
         match self {
             NodeState::Initializing(_) => self,
@@ -54,61 +47,42 @@ where
     }
 }
 
-pub struct InitializingNode<P>
-where
-    P: Port,
-{
+pub struct InitializingNode<P: Port> {
     port: P,
 }
 
-impl<P> InitializingNode<P>
-where
-    P: Port,
-{
+impl<P: Port> InitializingNode<P> {
     pub fn new(port: P) -> Self {
         Self { port }
     }
 
     fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
-            SystemMessage::Initialized => {
-                let best_foreign = self.port.infrastructure().best_foreign_clock();
-                NodeState::Listening(ListeningNode::new(self.port, best_foreign))
-            }
+            SystemMessage::Initialized => NodeState::Listening(ListeningNode::new(self.port)),
             _ => NodeState::Initializing(self),
         }
     }
 }
 
-type BestForeignClockFor<P> =
-    BestForeignClock<<<P as Port>::Infrastructure as Infrastructure>::ForeignClockStore>;
-
-pub struct ListeningNode<P>
-where
-    P: Port,
-{
+pub struct ListeningNode<P: Port> {
     port: P,
-    best_foreign: BestForeignClockFor<P>,
 }
 
-impl<P> ListeningNode<P>
-where
-    P: Port,
-{
-    pub fn new(port: P, best_foreign: BestForeignClockFor<P>) -> Self {
+impl<P: Port> ListeningNode<P> {
+    pub fn new(port: P) -> Self {
         port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
 
-        Self { port, best_foreign }
+        Self { port }
     }
 
     fn general_message(self, msg: GeneralMessage) -> NodeState<P> {
         match msg {
             GeneralMessage::Announce(msg) => {
-                self.best_foreign.consider(msg);
-                if let Some(best_foreign) = self.best_foreign.best() {
+                self.port.consider_announce(msg);
+                if let Some(best_foreign) = self.port.best_foreign_clock() {
                     if best_foreign.outranks_local(&self.port.clock()) {
                         NodeState::Listening(self) // TODO: implement transition to Uncalibrated as pre-stage to Slave
                     } else {
@@ -130,17 +104,11 @@ where
     }
 }
 
-pub struct SlaveNode<P>
-where
-    P: Port,
-{
+pub struct SlaveNode<P: Port> {
     port: P,
 }
 
-impl<P> SlaveNode<P>
-where
-    P: Port,
-{
+impl<P: Port> SlaveNode<P> {
     pub fn new(port: P) -> Self {
         port.schedule(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
@@ -200,17 +168,11 @@ where
     }
 }
 
-pub struct MasterNode<P>
-where
-    P: Port,
-{
+pub struct MasterNode<P: Port> {
     port: P,
 }
 
-impl<P> MasterNode<P>
-where
-    P: Port,
-{
+impl<P: Port> MasterNode<P> {
     pub fn new(port: P) -> Self {
         port.schedule(
             SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)),
@@ -279,17 +241,11 @@ where
     }
 }
 
-pub struct PreMasterNode<P>
-where
-    P: Port,
-{
+pub struct PreMasterNode<P: Port> {
     port: P,
 }
 
-impl<P> PreMasterNode<P>
-where
-    P: Port,
-{
+impl<P: Port> PreMasterNode<P> {
     pub fn new(port: P) -> Self {
         port.schedule(SystemMessage::QualificationTimeout, Duration::from_secs(2));
 
@@ -311,7 +267,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::bmca::ForeignClockStore;
+    use crate::bmca::{BestForeignClock, ForeignClock, ForeignClockStore};
     use crate::clock::{Clock, FakeClock, LocalClock, SynchronizableClock};
     use crate::message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
@@ -530,10 +486,7 @@ mod tests {
 
     #[test]
     fn listening_node_to_master_transition_on_announce_receipt_timeout() {
-        let node = ListeningNode::new(
-            FakePort::new(FakeClock::new(TimeStamp::new(0, 0))),
-            BestForeignClock::new(FakeForeignClockStore::new()),
-        );
+        let node = ListeningNode::new(FakePort::new(FakeClock::new(TimeStamp::new(0, 0))));
 
         let node = node.system_message(SystemMessage::AnnounceReceiptTimeout);
 
@@ -545,10 +498,7 @@ mod tests {
 
     #[test]
     fn listening_node_stays_in_listening_on_single_announce() {
-        let node = ListeningNode::new(
-            FakePort::new(FakeClock::new(TimeStamp::new(0, 0))),
-            BestForeignClock::new(FakeForeignClockStore::new()),
-        );
+        let node = ListeningNode::new(FakePort::new(FakeClock::new(TimeStamp::new(0, 0))));
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
 
@@ -560,10 +510,7 @@ mod tests {
 
     #[test]
     fn listening_node_to_pre_master_transition_on_two_announces() {
-        let node = ListeningNode::new(
-            FakePort::new(FakeClock::new(TimeStamp::new(0, 0))),
-            BestForeignClock::new(FakeForeignClockStore::new()),
-        );
+        let node = ListeningNode::new(FakePort::new(FakeClock::new(TimeStamp::new(0, 0))));
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(1)));
@@ -578,7 +525,7 @@ mod tests {
     fn listening_node_schedules_announce_receipt_timeout() {
         let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
-        let _ = ListeningNode::new(&port, BestForeignClock::new(FakeForeignClockStore));
+        let _ = ListeningNode::new(&port);
 
         assert!(
             port.system_messages
@@ -612,18 +559,9 @@ mod tests {
         }
     }
 
-    struct FakeInfrastructure;
-
-    impl Infrastructure for FakeInfrastructure {
-        type ForeignClockStore = FakeForeignClockStore;
-
-        fn best_foreign_clock(&self) -> BestForeignClock<Self::ForeignClockStore> {
-            BestForeignClock::new(FakeForeignClockStore::new())
-        }
-    }
-
     struct FakePort<C: SynchronizableClock> {
         clock: LocalClock<C>,
+        best_foreign: BestForeignClock<FakeForeignClockStore>,
         event_messages: RefCell<Vec<EventMessage>>,
         general_messages: RefCell<Vec<GeneralMessage>>,
         system_messages: RefCell<Vec<SystemMessage>>,
@@ -633,6 +571,7 @@ mod tests {
         pub fn new(clock: C) -> Self {
             Self {
                 clock: LocalClock::new(clock),
+                best_foreign: BestForeignClock::new(FakeForeignClockStore::new()),
                 event_messages: RefCell::new(Vec::new()),
                 general_messages: RefCell::new(Vec::new()),
                 system_messages: RefCell::new(Vec::new()),
@@ -642,15 +581,17 @@ mod tests {
 
     impl<C: SynchronizableClock> Port for FakePort<C> {
         type Clock = C;
-        type Infrastructure = FakeInfrastructure;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
         }
 
-        fn infrastructure(&self) -> &Self::Infrastructure {
-            static INFRASTRUCTURE: FakeInfrastructure = FakeInfrastructure {};
-            &INFRASTRUCTURE
+        fn consider_announce(&self, msg: AnnounceMessage) {
+            self.best_foreign.consider(msg);
+        }
+
+        fn best_foreign_clock(&self) -> Option<ForeignClock> {
+            self.best_foreign.best()
         }
 
         fn send_event(&self, msg: EventMessage) {
@@ -668,15 +609,17 @@ mod tests {
 
     impl Port for &FakePort<FakeClock> {
         type Clock = FakeClock;
-        type Infrastructure = FakeInfrastructure;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
         }
 
-        fn infrastructure(&self) -> &Self::Infrastructure {
-            static INFRASTRUCTURE: FakeInfrastructure = FakeInfrastructure {};
-            &INFRASTRUCTURE
+        fn consider_announce(&self, msg: AnnounceMessage) {
+            self.best_foreign.consider(msg);
+        }
+
+        fn best_foreign_clock(&self) -> Option<ForeignClock> {
+            self.best_foreign.best()
         }
 
         fn send_event(&self, msg: EventMessage) {

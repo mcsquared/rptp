@@ -9,7 +9,7 @@ use rptp::{
     clock::{Clock, LocalClock, SynchronizableClock},
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{InitializingNode, MasterNode, NodeState, SlaveNode},
-    port::{Infrastructure, Port},
+    port::Port,
 };
 
 use crate::net::NetPort;
@@ -28,18 +28,9 @@ impl VecForeignClockStore {
 
 impl ForeignClockStore for VecForeignClockStore {}
 
-struct TokioInfrastructure;
-
-impl Infrastructure for TokioInfrastructure {
-    type ForeignClockStore = VecForeignClockStore;
-
-    fn best_foreign_clock(&self) -> BestForeignClock<Self::ForeignClockStore> {
-        BestForeignClock::new(VecForeignClockStore::new())
-    }
-}
-
 struct TokioPort {
     clock: LocalClock<Rc<dyn SynchronizableClock>>,
+    best_foreign: BestForeignClock<VecForeignClockStore>,
     event_tx: mpsc::UnboundedSender<EventMessage>,
     general_tx: mpsc::UnboundedSender<GeneralMessage>,
     system_tx: mpsc::UnboundedSender<SystemMessage>,
@@ -54,6 +45,7 @@ impl TokioPort {
     ) -> Self {
         Self {
             clock,
+            best_foreign: BestForeignClock::new(VecForeignClockStore::new()),
             event_tx,
             general_tx,
             system_tx,
@@ -63,18 +55,17 @@ impl TokioPort {
 
 impl Port for TokioPort {
     type Clock = Rc<dyn SynchronizableClock>;
-    type Infrastructure = TokioInfrastructure;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         &self.clock
     }
 
-    fn infrastructure(&self) -> &Self::Infrastructure {
-        // This is a bit of a hack; in a real implementation, the infrastructure would be a field.
-        // Here we just create a new one each time, which is not ideal but works for this example.
-        // In practice, you would want to store it in the struct.
-        static INFRASTRUCTURE: TokioInfrastructure = TokioInfrastructure {};
-        &INFRASTRUCTURE
+    fn consider_announce(&self, msg: rptp::message::AnnounceMessage) {
+        self.best_foreign.consider(msg);
+    }
+
+    fn best_foreign_clock(&self) -> Option<ForeignClock> {
+        self.best_foreign.best()
     }
 
     fn send_event(&self, msg: EventMessage) {
