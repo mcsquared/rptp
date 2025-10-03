@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::bmca::BestForeignClock;
 use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
     SystemMessage,
@@ -66,6 +67,7 @@ impl<P: Port> InitializingNode<P> {
 
 pub struct ListeningNode<P: Port> {
     port: P,
+    best_foreign: BestForeignClock<P::ClockStore>,
 }
 
 impl<P: Port> ListeningNode<P> {
@@ -75,14 +77,16 @@ impl<P: Port> ListeningNode<P> {
             Duration::from_secs(5),
         );
 
-        Self { port }
+        let best_foreign = BestForeignClock::new(port.foreign_clock_store());
+
+        Self { port, best_foreign }
     }
 
     fn general_message(self, msg: GeneralMessage) -> NodeState<P> {
         match msg {
             GeneralMessage::Announce(msg) => {
-                self.port.consider_announce(msg);
-                if let Some(best_foreign) = self.port.best_foreign_clock() {
+                self.best_foreign.consider(msg);
+                if let Some(best_foreign) = self.best_foreign.best() {
                     if best_foreign.outranks_local(&self.port.clock()) {
                         NodeState::Listening(self) // TODO: implement transition to Uncalibrated as pre-stage to Slave
                     } else {
@@ -267,7 +271,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::bmca::{BestForeignClock, ForeignClock, ForeignClockStore};
+    use crate::bmca::{ForeignClock, ForeignClockStore};
     use crate::clock::{Clock, FakeClock, LocalClock, SynchronizableClock};
     use crate::message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
@@ -561,7 +565,6 @@ mod tests {
 
     struct FakePort<C: SynchronizableClock> {
         clock: LocalClock<C>,
-        best_foreign: BestForeignClock<FakeForeignClockStore>,
         event_messages: RefCell<Vec<EventMessage>>,
         general_messages: RefCell<Vec<GeneralMessage>>,
         system_messages: RefCell<Vec<SystemMessage>>,
@@ -571,7 +574,6 @@ mod tests {
         pub fn new(clock: C) -> Self {
             Self {
                 clock: LocalClock::new(clock),
-                best_foreign: BestForeignClock::new(FakeForeignClockStore::new()),
                 event_messages: RefCell::new(Vec::new()),
                 general_messages: RefCell::new(Vec::new()),
                 system_messages: RefCell::new(Vec::new()),
@@ -581,17 +583,14 @@ mod tests {
 
     impl<C: SynchronizableClock> Port for FakePort<C> {
         type Clock = C;
+        type ClockStore = FakeForeignClockStore;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
         }
 
-        fn consider_announce(&self, msg: AnnounceMessage) {
-            self.best_foreign.consider(msg);
-        }
-
-        fn best_foreign_clock(&self) -> Option<ForeignClock> {
-            self.best_foreign.best()
+        fn foreign_clock_store(&self) -> Self::ClockStore {
+            FakeForeignClockStore::new()
         }
 
         fn send_event(&self, msg: EventMessage) {
@@ -609,17 +608,14 @@ mod tests {
 
     impl Port for &FakePort<FakeClock> {
         type Clock = FakeClock;
+        type ClockStore = FakeForeignClockStore;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
         }
 
-        fn consider_announce(&self, msg: AnnounceMessage) {
-            self.best_foreign.consider(msg);
-        }
-
-        fn best_foreign_clock(&self) -> Option<ForeignClock> {
-            self.best_foreign.best()
+        fn foreign_clock_store(&self) -> Self::ClockStore {
+            FakeForeignClockStore::new()
         }
 
         fn send_event(&self, msg: EventMessage) {
@@ -635,13 +631,25 @@ mod tests {
         }
     }
 
-    struct FakeForeignClockStore;
+    struct FakeForeignClockStore {
+        clocks: RefCell<Vec<ForeignClock>>,
+    }
 
     impl FakeForeignClockStore {
         fn new() -> Self {
-            Self {}
+            Self {
+                clocks: RefCell::new(Vec::new()),
+            }
         }
     }
 
-    impl ForeignClockStore for FakeForeignClockStore {}
+    impl ForeignClockStore for FakeForeignClockStore {
+        fn insert(&self, clock: ForeignClock) {
+            self.clocks.borrow_mut().push(clock);
+        }
+
+        fn count(&self) -> usize {
+            self.clocks.borrow().len()
+        }
+    }
 }

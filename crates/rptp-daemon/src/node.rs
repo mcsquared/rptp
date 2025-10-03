@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -5,7 +6,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 
 use rptp::{
-    bmca::{BestForeignClock, ForeignClock, ForeignClockStore},
+    bmca::{ForeignClock, ForeignClockStore},
     clock::{Clock, LocalClock, SynchronizableClock},
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{InitializingNode, MasterNode, NodeState, SlaveNode},
@@ -15,22 +16,38 @@ use rptp::{
 use crate::net::NetPort;
 
 struct VecForeignClockStore {
-    _clocks: Vec<ForeignClock>,
+    clocks: RefCell<Vec<ForeignClock>>,
 }
 
 impl VecForeignClockStore {
     fn new() -> Self {
         Self {
-            _clocks: Vec::new(),
+            clocks: RefCell::new(Vec::new()),
         }
     }
 }
 
-impl ForeignClockStore for VecForeignClockStore {}
+impl ForeignClockStore for VecForeignClockStore {
+    fn insert(&self, clock: ForeignClock) {
+        self.clocks.borrow_mut().push(clock);
+    }
+
+    fn count(&self) -> usize {
+        self.clocks.borrow().len()
+    }
+}
+
+impl ForeignClockStore for Box<VecForeignClockStore> {
+    fn insert(&self, clock: ForeignClock) {
+        self.as_ref().insert(clock);
+    }
+    fn count(&self) -> usize {
+        self.as_ref().count()
+    }
+}
 
 struct TokioPort {
     clock: LocalClock<Rc<dyn SynchronizableClock>>,
-    best_foreign: BestForeignClock<VecForeignClockStore>,
     event_tx: mpsc::UnboundedSender<EventMessage>,
     general_tx: mpsc::UnboundedSender<GeneralMessage>,
     system_tx: mpsc::UnboundedSender<SystemMessage>,
@@ -45,7 +62,6 @@ impl TokioPort {
     ) -> Self {
         Self {
             clock,
-            best_foreign: BestForeignClock::new(VecForeignClockStore::new()),
             event_tx,
             general_tx,
             system_tx,
@@ -55,17 +71,14 @@ impl TokioPort {
 
 impl Port for TokioPort {
     type Clock = Rc<dyn SynchronizableClock>;
+    type ClockStore = Box<VecForeignClockStore>;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         &self.clock
     }
 
-    fn consider_announce(&self, msg: rptp::message::AnnounceMessage) {
-        self.best_foreign.consider(msg);
-    }
-
-    fn best_foreign_clock(&self) -> Option<ForeignClock> {
-        self.best_foreign.best()
+    fn foreign_clock_store(&self) -> Self::ClockStore {
+        Box::new(VecForeignClockStore::new())
     }
 
     fn send_event(&self, msg: EventMessage) {
@@ -273,7 +286,7 @@ mod tests {
         use std::mem::size_of;
         let s = size_of::<NodeState<Box<TokioPort>>>();
         println!("NodeState<Box<TokioPort>> size: {}", s);
-        assert!(s <= 64);
+        assert!(s <= 32);
     }
 
     #[tokio::test(start_paused = true)]

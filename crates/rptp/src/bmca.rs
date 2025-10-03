@@ -1,9 +1,10 @@
-use std::cell::RefCell;
-
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::AnnounceMessage;
 
-pub trait ForeignClockStore {}
+pub trait ForeignClockStore {
+    fn insert(&self, clock: ForeignClock);
+    fn count(&self) -> usize;
+}
 
 pub struct ForeignClock {}
 
@@ -22,24 +23,23 @@ impl ForeignClock {
 }
 
 pub struct BestForeignClock<S: ForeignClockStore> {
-    announce_count: RefCell<u8>,
-    _store: S,
+    store: S,
 }
 
 impl<S: ForeignClockStore> BestForeignClock<S> {
-    pub fn new(_store: S) -> Self {
-        Self {
-            announce_count: RefCell::new(0),
-            _store,
-        }
+    pub fn new(store: S) -> Self {
+        Self { store }
     }
 
     pub fn consider(&self, _announce: AnnounceMessage) {
-        *self.announce_count.borrow_mut() += 1;
+        // In a real implementation, you would create a ForeignClock from the announce
+        // and insert it into the store.
+        let clock = ForeignClock::new();
+        self.store.insert(clock);
     }
 
     pub fn best(&self) -> Option<ForeignClock> {
-        if self.announce_count.borrow().clone() >= 2 {
+        if self.store.count() >= 2 {
             Some(ForeignClock::new())
         } else {
             None
