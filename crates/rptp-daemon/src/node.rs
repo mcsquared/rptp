@@ -1,16 +1,16 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::mpsc;
-use tokio::time::sleep;
 
 use rptp::{
     bmca::{ForeignClock, ForeignClockStore},
     clock::{Clock, LocalClock, SynchronizableClock},
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{InitializingNode, MasterNode, NodeState, SlaveNode},
-    port::Port,
+    port::{Port, Timeout},
 };
 
 use crate::net::NetPort;
@@ -46,6 +46,74 @@ impl ForeignClockStore for Box<VecForeignClockStore> {
     }
 }
 
+struct TokioTimeout {
+    inner: Arc<TokioTimeoutInner>,
+}
+
+struct TokioTimeoutInner {
+    tx: mpsc::UnboundedSender<SystemMessage>,
+    msg: Mutex<SystemMessage>,
+    handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+impl TokioTimeout {
+    fn new(tx: mpsc::UnboundedSender<SystemMessage>, msg: SystemMessage, delay: Duration) -> Self {
+        let inner = Arc::new(TokioTimeoutInner {
+            tx,
+            msg: Mutex::new(msg),
+            handle: Mutex::new(None),
+        });
+
+        let timeout = Self { inner };
+        timeout.reset(delay);
+        timeout
+    }
+
+    fn reset(&self, delay: Duration) {
+        let msg = *self.inner.msg.lock().unwrap();
+        let mut guard = self.inner.handle.lock().unwrap();
+
+        if let Some(handle) = guard.take() {
+            handle.abort();
+        }
+        *guard = Some(Self::spawn(Arc::clone(&self.inner), msg, delay));
+    }
+
+    fn spawn(
+        inner: Arc<TokioTimeoutInner>,
+        msg: SystemMessage,
+        delay: Duration,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            let _ = inner.tx.send(msg);
+        })
+    }
+}
+
+impl Timeout for TokioTimeout {
+    fn restart(&self, delay: Duration) {
+        self.reset(delay);
+    }
+
+    fn restart_with(&self, msg: SystemMessage, delay: Duration) {
+        *self.inner.msg.lock().unwrap() = msg;
+        self.reset(delay);
+    }
+
+    fn cancel(&self) {
+        if let Some(handle) = self.inner.handle.lock().unwrap().take() {
+            handle.abort();
+        }
+    }
+}
+
+impl Drop for TokioTimeout {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
 struct TokioPort {
     clock: LocalClock<Rc<dyn SynchronizableClock>>,
     event_tx: mpsc::UnboundedSender<EventMessage>,
@@ -72,6 +140,7 @@ impl TokioPort {
 impl Port for TokioPort {
     type Clock = Rc<dyn SynchronizableClock>;
     type ClockStore = Box<VecForeignClockStore>;
+    type Timeout = TokioTimeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         &self.clock
@@ -89,12 +158,9 @@ impl Port for TokioPort {
         let _ = self.general_tx.send(msg);
     }
 
-    fn schedule(&self, msg: SystemMessage, delay: Duration) {
+    fn schedule(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
         let tx = self.system_tx.clone();
-        tokio::spawn(async move {
-            sleep(delay).await;
-            let _ = tx.send(msg);
-        });
+        TokioTimeout::new(tx, msg, delay)
     }
 }
 

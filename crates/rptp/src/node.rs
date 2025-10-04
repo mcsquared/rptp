@@ -5,7 +5,7 @@ use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
     SystemMessage,
 };
-use crate::port::Port;
+use crate::port::{Port, Timeout};
 use crate::time::TimeStamp;
 
 pub enum NodeState<P: Port> {
@@ -68,23 +68,30 @@ impl<P: Port> InitializingNode<P> {
 pub struct ListeningNode<P: Port> {
     port: P,
     best_foreign: BestForeignClock<P::ClockStore>,
+    announce_receipt_timeout: P::Timeout,
 }
 
 impl<P: Port> ListeningNode<P> {
     pub fn new(port: P) -> Self {
-        port.schedule(
+        let announce_receipt_timeout = port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
 
         let best_foreign = BestForeignClock::new(port.foreign_clock_store());
 
-        Self { port, best_foreign }
+        Self {
+            port,
+            best_foreign,
+            announce_receipt_timeout,
+        }
     }
 
     fn general_message(self, msg: GeneralMessage) -> NodeState<P> {
         match msg {
             GeneralMessage::Announce(msg) => {
+                self.announce_receipt_timeout
+                    .restart(Duration::from_secs(5));
                 self.best_foreign.consider(msg);
                 if let Some(best_foreign) = self.best_foreign.best() {
                     if best_foreign.outranks_local(&self.port.clock()) {
@@ -110,16 +117,20 @@ impl<P: Port> ListeningNode<P> {
 
 pub struct SlaveNode<P: Port> {
     port: P,
+    delay_cycle_timeout: P::Timeout,
 }
 
 impl<P: Port> SlaveNode<P> {
     pub fn new(port: P) -> Self {
-        port.schedule(
+        let delay_cycle_timeout = port.schedule(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
             Duration::ZERO,
         );
 
-        Self { port }
+        Self {
+            port,
+            delay_cycle_timeout,
+        }
     }
 
     fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<P> {
@@ -154,7 +165,7 @@ impl<P: Port> SlaveNode<P> {
                 let next_cycle = delay_cycle.next();
 
                 self.port.send_event(EventMessage::DelayReq(delay_request));
-                self.port.schedule(
+                self.delay_cycle_timeout.restart_with(
                     SystemMessage::DelayCycle(next_cycle),
                     Duration::from_secs(1),
                 );
@@ -174,20 +185,26 @@ impl<P: Port> SlaveNode<P> {
 
 pub struct MasterNode<P: Port> {
     port: P,
+    announce_cycle_timeout: P::Timeout,
+    sync_cycle_timeout: P::Timeout,
 }
 
 impl<P: Port> MasterNode<P> {
     pub fn new(port: P) -> Self {
-        port.schedule(
+        let announce_cycle_timeout = port.schedule(
             SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)),
             Duration::ZERO,
         );
-        port.schedule(
+        let sync_cycle_timeout = port.schedule(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
             Duration::ZERO,
         );
 
-        Self { port }
+        Self {
+            port,
+            announce_cycle_timeout,
+            sync_cycle_timeout,
+        }
     }
 
     fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<P> {
@@ -217,7 +234,7 @@ impl<P: Port> MasterNode<P> {
 
                 self.port
                     .send_general(GeneralMessage::Announce(announce_message));
-                self.port.schedule(
+                self.announce_cycle_timeout.restart_with(
                     SystemMessage::AnnounceCycle(next_cycle),
                     Duration::from_secs(1),
                 );
@@ -228,8 +245,8 @@ impl<P: Port> MasterNode<P> {
 
                 self.port
                     .send_event(EventMessage::TwoStepSync(sync_message));
-                self.port
-                    .schedule(SystemMessage::SyncCycle(next_cycle), Duration::from_secs(1));
+                self.sync_cycle_timeout
+                    .restart_with(SystemMessage::SyncCycle(next_cycle), Duration::from_secs(1));
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::TwoStepSync(twostep) => {
@@ -247,13 +264,17 @@ impl<P: Port> MasterNode<P> {
 
 pub struct PreMasterNode<P: Port> {
     port: P,
+    _qualification_timeout: P::Timeout,
 }
 
 impl<P: Port> PreMasterNode<P> {
     pub fn new(port: P) -> Self {
-        port.schedule(SystemMessage::QualificationTimeout, Duration::from_secs(2));
-
-        Self { port }
+        let _qualification_timeout =
+            port.schedule(SystemMessage::QualificationTimeout, Duration::from_secs(2));
+        Self {
+            port,
+            _qualification_timeout,
+        }
     }
 
     fn system_message(self, msg: SystemMessage) -> NodeState<P> {
@@ -563,20 +584,48 @@ mod tests {
         }
     }
 
+    struct FakeTimeout {
+        msg: RefCell<SystemMessage>,
+        system_messages: Rc<RefCell<Vec<SystemMessage>>>,
+    }
+
+    impl FakeTimeout {
+        pub fn new(msg: SystemMessage, system_messages: Rc<RefCell<Vec<SystemMessage>>>) -> Self {
+            Self {
+                msg: RefCell::new(msg),
+                system_messages,
+            }
+        }
+    }
+
+    impl Timeout for FakeTimeout {
+        fn restart(&self, _timeout: Duration) {
+            let msg = *self.msg.borrow();
+            self.system_messages.borrow_mut().push(msg);
+        }
+
+        fn restart_with(&self, msg: SystemMessage, _timeout: Duration) {
+            self.system_messages.borrow_mut().push(msg);
+            self.msg.replace(msg);
+        }
+
+        fn cancel(&self) {}
+    }
+
     struct FakePort<C: SynchronizableClock> {
         clock: LocalClock<C>,
-        event_messages: RefCell<Vec<EventMessage>>,
-        general_messages: RefCell<Vec<GeneralMessage>>,
-        system_messages: RefCell<Vec<SystemMessage>>,
+        event_messages: Rc<RefCell<Vec<EventMessage>>>,
+        general_messages: Rc<RefCell<Vec<GeneralMessage>>>,
+        system_messages: Rc<RefCell<Vec<SystemMessage>>>,
     }
 
     impl<C: SynchronizableClock> FakePort<C> {
         pub fn new(clock: C) -> Self {
             Self {
                 clock: LocalClock::new(clock),
-                event_messages: RefCell::new(Vec::new()),
-                general_messages: RefCell::new(Vec::new()),
-                system_messages: RefCell::new(Vec::new()),
+                event_messages: Rc::new(RefCell::new(Vec::new())),
+                general_messages: Rc::new(RefCell::new(Vec::new())),
+                system_messages: Rc::new(RefCell::new(Vec::new())),
             }
         }
     }
@@ -584,6 +633,7 @@ mod tests {
     impl<C: SynchronizableClock> Port for FakePort<C> {
         type Clock = C;
         type ClockStore = FakeForeignClockStore;
+        type Timeout = FakeTimeout;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
@@ -601,14 +651,16 @@ mod tests {
             self.general_messages.borrow_mut().push(msg);
         }
 
-        fn schedule(&self, msg: SystemMessage, _delay: Duration) {
+        fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
             self.system_messages.borrow_mut().push(msg);
+            FakeTimeout::new(msg, Rc::clone(&self.system_messages))
         }
     }
 
     impl Port for &FakePort<FakeClock> {
         type Clock = FakeClock;
         type ClockStore = FakeForeignClockStore;
+        type Timeout = FakeTimeout;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
@@ -626,8 +678,9 @@ mod tests {
             self.general_messages.borrow_mut().push(msg);
         }
 
-        fn schedule(&self, msg: SystemMessage, _delay: Duration) {
+        fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
             self.system_messages.borrow_mut().push(msg);
+            FakeTimeout::new(msg, Rc::clone(&self.system_messages))
         }
     }
 
