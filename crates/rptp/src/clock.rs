@@ -121,7 +121,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn synchronized_clock_adjusts_wrapped_clock() {
+    fn local_clock_adjusts_wrapped_clock() {
         let clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
         let sync_clock = LocalClock::new(clock.clone());
 
