@@ -289,15 +289,14 @@ impl<P: Port> PreMasterNode<P> {
 mod tests {
     use super::*;
 
-    use std::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::bmca::{ForeignClock, ForeignClockStore};
-    use crate::clock::{Clock, FakeClock, LocalClock, SynchronizableClock};
+    use crate::clock::{Clock, FakeClock};
     use crate::message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
         TwoStepSyncMessage,
     };
+    use crate::port::test_support::FakePort;
     use crate::time::TimeStamp;
 
     #[test]
@@ -337,13 +336,12 @@ mod tests {
             TimeStamp::new(0, 0),
         );
 
+        let messages = port.take_general_messages();
         assert!(
-            port.general_messages
-                .borrow()
-                .contains(&GeneralMessage::DelayResp(DelayResponseMessage::new(
-                    0,
-                    TimeStamp::new(0, 0)
-                )))
+            messages.contains(&GeneralMessage::DelayResp(DelayResponseMessage::new(
+                0,
+                TimeStamp::new(0, 0)
+            )))
         );
     }
 
@@ -353,11 +351,8 @@ mod tests {
 
         let _ = MasterNode::new(&port);
 
-        assert!(
-            port.system_messages
-                .borrow()
-                .contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0)))
-        );
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0))));
     }
 
     #[test]
@@ -368,11 +363,8 @@ mod tests {
 
         node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
-        assert!(
-            port.event_messages
-                .borrow()
-                .contains(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)))
-        );
+        let messages = port.take_event_messages();
+        assert!(messages.contains(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(0))));
     }
 
     #[test]
@@ -381,13 +373,13 @@ mod tests {
 
         let node = MasterNode::new(&port);
 
+        // Drain messages that could have been sent during initialization.
+        port.take_system_messages();
+
         node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
-        assert!(
-            port.system_messages
-                .borrow()
-                .contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(1)))
-        );
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(1))));
     }
 
     #[test]
@@ -401,13 +393,12 @@ mod tests {
             timestamp: TimeStamp::new(0, 0),
         });
 
+        let messages = port.take_general_messages();
         assert!(
-            port.general_messages
-                .borrow()
-                .contains(&GeneralMessage::FollowUp(FollowUpMessage::new(
-                    0,
-                    TimeStamp::new(0, 0)
-                )))
+            messages.contains(&GeneralMessage::FollowUp(FollowUpMessage::new(
+                0,
+                TimeStamp::new(0, 0)
+            )))
         );
     }
 
@@ -417,11 +408,8 @@ mod tests {
 
         let _ = MasterNode::new(&port);
 
-        assert!(
-            port.system_messages
-                .borrow()
-                .contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)))
-        );
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0))));
     }
 
     #[test]
@@ -430,13 +418,12 @@ mod tests {
 
         let node = MasterNode::new(&port);
 
+        port.take_system_messages();
+
         node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
 
-        assert!(
-            port.system_messages
-                .borrow()
-                .contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(1)))
-        );
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(1))));
     }
 
     #[test]
@@ -445,13 +432,12 @@ mod tests {
 
         let node = MasterNode::new(&port);
 
+        port.take_system_messages();
+
         node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
 
-        assert!(
-            port.general_messages
-                .borrow()
-                .contains(&GeneralMessage::Announce(AnnounceMessage::new(0)))
-        );
+        let messages = port.take_general_messages();
+        assert!(messages.contains(&GeneralMessage::Announce(AnnounceMessage::new(0))));
     }
 
     #[test]
@@ -460,11 +446,8 @@ mod tests {
 
         let _ = SlaveNode::new(&port);
 
-        assert!(
-            port.system_messages
-                .borrow()
-                .contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(0)))
-        );
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(0))));
     }
 
     #[test]
@@ -473,77 +456,81 @@ mod tests {
 
         let node = SlaveNode::new(&port);
 
+        port.take_system_messages();
+
         node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
 
-        assert!(
-            port.system_messages
-                .borrow()
-                .contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(1)))
-        );
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(1))));
     }
 
     #[test]
-    fn slave_node_answers_delay_request_cycle_with_delay_request() {
+    fn slave_node_answers_delay_cycle_with_delay_request() {
         let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
 
         let node = SlaveNode::new(&port);
 
+        port.take_system_messages();
+
         node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
 
-        assert!(
-            port.event_messages
-                .borrow()
-                .contains(&EventMessage::DelayReq(DelayRequestMessage::new(0)))
-        );
+        let events = port.take_event_messages();
+        assert!(events.contains(&EventMessage::DelayReq(DelayRequestMessage::new(0))));
     }
 
     #[test]
     fn initializing_node_to_listening_transition() {
-        let node = InitializingNode::new(FakePort::new(FakeClock::new(TimeStamp::new(0, 0))));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let node = InitializingNode::new(&port);
 
-        let node = node.system_message(SystemMessage::Initialized);
+        let _ = node.system_message(SystemMessage::Initialized);
 
-        match node {
-            NodeState::Listening(_) => {}
-            _ => panic!("Expected Listening state"),
-        }
+        // Listening node is expected to schedule an announce receipt timeout
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
     fn listening_node_to_master_transition_on_announce_receipt_timeout() {
-        let node = ListeningNode::new(FakePort::new(FakeClock::new(TimeStamp::new(0, 0))));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let node = ListeningNode::new(&port);
 
-        let node = node.system_message(SystemMessage::AnnounceReceiptTimeout);
+        let _ = node.system_message(SystemMessage::AnnounceReceiptTimeout);
 
-        match node {
-            NodeState::Master(_) => {}
-            _ => panic!("Expected Master state"),
-        }
+        // Master node is expected to schedule a sync cycle and announce cycle
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0))));
+        assert!(messages.contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0))));
     }
 
     #[test]
     fn listening_node_stays_in_listening_on_single_announce() {
-        let node = ListeningNode::new(FakePort::new(FakeClock::new(TimeStamp::new(0, 0))));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let node = ListeningNode::new(&port);
 
-        let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
+        port.take_system_messages(); // Ignore the initial announce receipt timeout.
 
-        match node {
-            NodeState::Listening(_) => {}
-            _ => panic!("Expected Listening state"),
-        }
+        let _ = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
+
+        // Listening node is expected to refresh the announce receipt timeout
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
     fn listening_node_to_pre_master_transition_on_two_announces() {
-        let node = ListeningNode::new(FakePort::new(FakeClock::new(TimeStamp::new(0, 0))));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let node = ListeningNode::new(&port);
+
+        // Ignore the initial announce receipt timeout.
+        port.take_system_messages();
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
-        let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(1)));
+        let _ = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(1)));
 
-        match node {
-            NodeState::PreMaster(_) => {}
-            _ => panic!("Expected PreMaster state"),
-        }
+        // PreMaster node is expected to schedule a qualification timeout
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::QualificationTimeout));
     }
 
     #[test]
@@ -552,11 +539,8 @@ mod tests {
 
         let _ = ListeningNode::new(&port);
 
-        assert!(
-            port.system_messages
-                .borrow()
-                .contains(&SystemMessage::AnnounceReceiptTimeout)
-        );
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
@@ -565,144 +549,19 @@ mod tests {
 
         let _ = PreMasterNode::new(&port);
 
-        assert!(
-            port.system_messages
-                .borrow()
-                .contains(&SystemMessage::QualificationTimeout)
-        );
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::QualificationTimeout));
     }
 
     #[test]
     fn pre_master_node_to_master_transition_on_qualification_timeout() {
-        let node = PreMasterNode::new(FakePort::new(FakeClock::new(TimeStamp::new(0, 0))));
+        let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let node = PreMasterNode::new(&port);
 
-        let node = node.system_message(SystemMessage::QualificationTimeout);
+        let _ = node.system_message(SystemMessage::QualificationTimeout);
 
-        match node {
-            NodeState::Master(_) => {}
-            _ => panic!("Expected Master state"),
-        }
-    }
-
-    struct FakeTimeout {
-        msg: RefCell<SystemMessage>,
-        system_messages: Rc<RefCell<Vec<SystemMessage>>>,
-    }
-
-    impl FakeTimeout {
-        pub fn new(msg: SystemMessage, system_messages: Rc<RefCell<Vec<SystemMessage>>>) -> Self {
-            Self {
-                msg: RefCell::new(msg),
-                system_messages,
-            }
-        }
-    }
-
-    impl Timeout for FakeTimeout {
-        fn restart(&self, _timeout: Duration) {
-            let msg = *self.msg.borrow();
-            self.system_messages.borrow_mut().push(msg);
-        }
-
-        fn restart_with(&self, msg: SystemMessage, _timeout: Duration) {
-            self.system_messages.borrow_mut().push(msg);
-            self.msg.replace(msg);
-        }
-
-        fn cancel(&self) {}
-    }
-
-    struct FakePort<C: SynchronizableClock> {
-        clock: LocalClock<C>,
-        event_messages: Rc<RefCell<Vec<EventMessage>>>,
-        general_messages: Rc<RefCell<Vec<GeneralMessage>>>,
-        system_messages: Rc<RefCell<Vec<SystemMessage>>>,
-    }
-
-    impl<C: SynchronizableClock> FakePort<C> {
-        pub fn new(clock: C) -> Self {
-            Self {
-                clock: LocalClock::new(clock),
-                event_messages: Rc::new(RefCell::new(Vec::new())),
-                general_messages: Rc::new(RefCell::new(Vec::new())),
-                system_messages: Rc::new(RefCell::new(Vec::new())),
-            }
-        }
-    }
-
-    impl<C: SynchronizableClock> Port for FakePort<C> {
-        type Clock = C;
-        type ClockStore = FakeForeignClockStore;
-        type Timeout = FakeTimeout;
-
-        fn clock(&self) -> &LocalClock<Self::Clock> {
-            &self.clock
-        }
-
-        fn foreign_clock_store(&self) -> Self::ClockStore {
-            FakeForeignClockStore::new()
-        }
-
-        fn send_event(&self, msg: EventMessage) {
-            self.event_messages.borrow_mut().push(msg);
-        }
-
-        fn send_general(&self, msg: GeneralMessage) {
-            self.general_messages.borrow_mut().push(msg);
-        }
-
-        fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
-            self.system_messages.borrow_mut().push(msg);
-            FakeTimeout::new(msg, Rc::clone(&self.system_messages))
-        }
-    }
-
-    impl Port for &FakePort<FakeClock> {
-        type Clock = FakeClock;
-        type ClockStore = FakeForeignClockStore;
-        type Timeout = FakeTimeout;
-
-        fn clock(&self) -> &LocalClock<Self::Clock> {
-            &self.clock
-        }
-
-        fn foreign_clock_store(&self) -> Self::ClockStore {
-            FakeForeignClockStore::new()
-        }
-
-        fn send_event(&self, msg: EventMessage) {
-            self.event_messages.borrow_mut().push(msg);
-        }
-
-        fn send_general(&self, msg: GeneralMessage) {
-            self.general_messages.borrow_mut().push(msg);
-        }
-
-        fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
-            self.system_messages.borrow_mut().push(msg);
-            FakeTimeout::new(msg, Rc::clone(&self.system_messages))
-        }
-    }
-
-    struct FakeForeignClockStore {
-        clocks: RefCell<Vec<ForeignClock>>,
-    }
-
-    impl FakeForeignClockStore {
-        fn new() -> Self {
-            Self {
-                clocks: RefCell::new(Vec::new()),
-            }
-        }
-    }
-
-    impl ForeignClockStore for FakeForeignClockStore {
-        fn insert(&self, clock: ForeignClock) {
-            self.clocks.borrow_mut().push(clock);
-        }
-
-        fn count(&self) -> usize {
-            self.clocks.borrow().len()
-        }
+        let messages = port.take_system_messages();
+        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0))));
+        assert!(messages.contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0))));
     }
 }

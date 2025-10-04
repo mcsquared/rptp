@@ -45,3 +45,155 @@ impl<P: Port> Port for Box<P> {
         self.as_ref().schedule(msg, delay)
     }
 }
+
+#[cfg(test)]
+pub mod test_support {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::time::Duration;
+
+    use crate::bmca::{ForeignClock, ForeignClockStore};
+    use crate::clock::{LocalClock, SynchronizableClock};
+    use crate::message::{EventMessage, GeneralMessage, SystemMessage};
+
+    use super::{Port, Timeout};
+
+    pub struct FakeTimeout {
+        msg: RefCell<SystemMessage>,
+        system_messages: Rc<RefCell<Vec<SystemMessage>>>,
+    }
+
+    impl FakeTimeout {
+        pub fn new(msg: SystemMessage, system_messages: Rc<RefCell<Vec<SystemMessage>>>) -> Self {
+            Self {
+                msg: RefCell::new(msg),
+                system_messages,
+            }
+        }
+
+        /// Return the currently scheduled system message so tests can simulate firing the timeout.
+        pub fn fire(&self) -> SystemMessage {
+            *self.msg.borrow()
+        }
+    }
+
+    impl Timeout for FakeTimeout {
+        fn restart(&self, _timeout: Duration) {
+            let msg = *self.msg.borrow();
+            self.system_messages.borrow_mut().push(msg);
+        }
+
+        fn restart_with(&self, msg: SystemMessage, _timeout: Duration) {
+            self.system_messages.borrow_mut().push(msg);
+            self.msg.replace(msg);
+        }
+
+        fn cancel(&self) {}
+    }
+
+    pub struct FakePort<C: SynchronizableClock> {
+        clock: LocalClock<C>,
+        event_messages: Rc<RefCell<Vec<EventMessage>>>,
+        general_messages: Rc<RefCell<Vec<GeneralMessage>>>,
+        system_messages: Rc<RefCell<Vec<SystemMessage>>>,
+    }
+
+    impl<C: SynchronizableClock> FakePort<C> {
+        pub fn new(clock: C) -> Self {
+            Self {
+                clock: LocalClock::new(clock),
+                event_messages: Rc::new(RefCell::new(Vec::new())),
+                general_messages: Rc::new(RefCell::new(Vec::new())),
+                system_messages: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+
+        pub fn take_event_messages(&self) -> Vec<EventMessage> {
+            self.event_messages.borrow_mut().drain(..).collect()
+        }
+
+        pub fn take_general_messages(&self) -> Vec<GeneralMessage> {
+            self.general_messages.borrow_mut().drain(..).collect()
+        }
+
+        pub fn take_system_messages(&self) -> Vec<SystemMessage> {
+            self.system_messages.borrow_mut().drain(..).collect()
+        }
+    }
+
+    impl<C: SynchronizableClock> Port for FakePort<C> {
+        type Clock = C;
+        type ClockStore = FakeForeignClockStore;
+        type Timeout = FakeTimeout;
+
+        fn clock(&self) -> &LocalClock<Self::Clock> {
+            &self.clock
+        }
+
+        fn foreign_clock_store(&self) -> Self::ClockStore {
+            FakeForeignClockStore::new()
+        }
+
+        fn send_event(&self, msg: EventMessage) {
+            self.event_messages.borrow_mut().push(msg);
+        }
+
+        fn send_general(&self, msg: GeneralMessage) {
+            self.general_messages.borrow_mut().push(msg);
+        }
+
+        fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
+            self.system_messages.borrow_mut().push(msg);
+            FakeTimeout::new(msg, Rc::clone(&self.system_messages))
+        }
+    }
+
+    impl<C: SynchronizableClock> Port for &FakePort<C> {
+        type Clock = C;
+        type ClockStore = FakeForeignClockStore;
+        type Timeout = FakeTimeout;
+
+        fn clock(&self) -> &LocalClock<Self::Clock> {
+            &self.clock
+        }
+
+        fn foreign_clock_store(&self) -> Self::ClockStore {
+            FakeForeignClockStore::new()
+        }
+
+        fn send_event(&self, msg: EventMessage) {
+            self.event_messages.borrow_mut().push(msg);
+        }
+
+        fn send_general(&self, msg: GeneralMessage) {
+            self.general_messages.borrow_mut().push(msg);
+        }
+
+        fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
+            self.system_messages.borrow_mut().push(msg);
+            FakeTimeout::new(msg, Rc::clone(&self.system_messages))
+        }
+    }
+
+    pub struct FakeForeignClockStore {
+        clocks: RefCell<Vec<ForeignClock>>,
+    }
+
+    impl FakeForeignClockStore {
+        pub fn new() -> Self {
+            Self {
+                clocks: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl ForeignClockStore for FakeForeignClockStore {
+        fn insert(&self, clock: ForeignClock) {
+            self.clocks.borrow_mut().push(clock);
+        }
+
+        fn count(&self) -> usize {
+            self.clocks.borrow().len()
+        }
+    }
+}
