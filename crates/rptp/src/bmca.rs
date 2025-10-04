@@ -38,7 +38,7 @@ impl<S: ForeignClockStore> BestForeignClock<S> {
         self.store.insert(clock);
     }
 
-    pub fn best(&self) -> Option<ForeignClock> {
+    pub fn clock(&self) -> Option<ForeignClock> {
         if self.store.count() >= 2 {
             Some(ForeignClock::new())
         } else {

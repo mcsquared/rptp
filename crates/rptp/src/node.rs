@@ -93,12 +93,14 @@ impl<P: Port> ListeningNode<P> {
                 self.announce_receipt_timeout
                     .restart(Duration::from_secs(5));
                 self.best_foreign.consider(msg);
-                if let Some(best_foreign) = self.best_foreign.best() {
-                    if best_foreign.outranks_local(&self.port.clock()) {
-                        NodeState::Listening(self) // TODO: implement transition to Uncalibrated as pre-stage to Slave
-                    } else {
-                        NodeState::PreMaster(PreMasterNode::new(self.port))
-                    }
+
+                let should_promote = match self.best_foreign.clock() {
+                    Some(best_foreign) => !best_foreign.outranks_local(&self.port.clock()),
+                    None => false,
+                };
+
+                if should_promote {
+                    NodeState::PreMaster(PreMasterNode::new(self.port))
                 } else {
                     NodeState::Listening(self)
                 }
