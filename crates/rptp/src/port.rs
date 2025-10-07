@@ -1,4 +1,6 @@
-use crate::bmca::ForeignClockStore;
+use std::cmp;
+
+use crate::bmca::{ForeignClock, SortedForeignClocks};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
@@ -10,11 +12,14 @@ pub trait Timeout {
 
 pub trait Port {
     type Clock: SynchronizableClock;
-    type ClockStore: ForeignClockStore;
+    type SortedClocks: SortedForeignClocks;
     type Timeout: Timeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock>;
-    fn foreign_clock_store(&self) -> Self::ClockStore;
+    fn sorted_foreign_clocks(
+        &self,
+        cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
+    ) -> Self::SortedClocks;
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
     fn schedule(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
@@ -22,15 +27,18 @@ pub trait Port {
 
 impl<P: Port> Port for Box<P> {
     type Clock = P::Clock;
-    type ClockStore = P::ClockStore;
+    type SortedClocks = P::SortedClocks;
     type Timeout = P::Timeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         self.as_ref().clock()
     }
 
-    fn foreign_clock_store(&self) -> Self::ClockStore {
-        self.as_ref().foreign_clock_store()
+    fn sorted_foreign_clocks(
+        &self,
+        cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
+    ) -> Self::SortedClocks {
+        self.as_ref().sorted_foreign_clocks(cmp)
     }
 
     fn send_event(&self, msg: EventMessage) {
@@ -49,11 +57,13 @@ impl<P: Port> Port for Box<P> {
 #[cfg(test)]
 pub mod test_support {
     use std::cell::RefCell;
+    use std::cmp;
     use std::rc::Rc;
     use std::time::Duration;
 
-    use crate::bmca::{ForeignClock, ForeignClockStore};
+    use crate::bmca::ForeignClock;
     use crate::clock::{LocalClock, SynchronizableClock};
+    use crate::infra::infra_support::SortedForeignClocksVec;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
     use super::{Port, Timeout};
@@ -123,15 +133,18 @@ pub mod test_support {
 
     impl<C: SynchronizableClock> Port for FakePort<C> {
         type Clock = C;
-        type ClockStore = FakeForeignClockStore;
+        type SortedClocks = SortedForeignClocksVec;
         type Timeout = FakeTimeout;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
         }
 
-        fn foreign_clock_store(&self) -> Self::ClockStore {
-            FakeForeignClockStore::new()
+        fn sorted_foreign_clocks(
+            &self,
+            cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
+        ) -> Self::SortedClocks {
+            SortedForeignClocksVec::new(cmp)
         }
 
         fn send_event(&self, msg: EventMessage) {
@@ -150,15 +163,18 @@ pub mod test_support {
 
     impl<C: SynchronizableClock> Port for &FakePort<C> {
         type Clock = C;
-        type ClockStore = FakeForeignClockStore;
+        type SortedClocks = SortedForeignClocksVec;
         type Timeout = FakeTimeout;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
         }
 
-        fn foreign_clock_store(&self) -> Self::ClockStore {
-            FakeForeignClockStore::new()
+        fn sorted_foreign_clocks(
+            &self,
+            cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
+        ) -> Self::SortedClocks {
+            SortedForeignClocksVec::new(cmp)
         }
 
         fn send_event(&self, msg: EventMessage) {
@@ -172,28 +188,6 @@ pub mod test_support {
         fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
             self.system_messages.borrow_mut().push(msg);
             FakeTimeout::new(msg, Rc::clone(&self.system_messages))
-        }
-    }
-
-    pub struct FakeForeignClockStore {
-        clocks: RefCell<Vec<ForeignClock>>,
-    }
-
-    impl FakeForeignClockStore {
-        pub fn new() -> Self {
-            Self {
-                clocks: RefCell::new(Vec::new()),
-            }
-        }
-    }
-
-    impl ForeignClockStore for FakeForeignClockStore {
-        fn insert(&self, clock: ForeignClock) {
-            self.clocks.borrow_mut().push(clock);
-        }
-
-        fn count(&self) -> usize {
-            self.clocks.borrow().len()
         }
     }
 }

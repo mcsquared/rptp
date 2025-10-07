@@ -1,11 +1,12 @@
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::AnnounceMessage;
 
-pub trait ForeignClockStore {
+pub trait SortedForeignClocks {
     fn insert(&self, clock: ForeignClock);
-    fn count(&self) -> usize;
+    fn first(&self) -> Option<ForeignClock>;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ForeignClock {}
 
 impl ForeignClock {
@@ -22,27 +23,23 @@ impl ForeignClock {
     }
 }
 
-pub struct BestForeignClock<S: ForeignClockStore> {
-    store: S,
+pub struct BestForeignClock<S: SortedForeignClocks> {
+    sorted_clocks: S,
 }
 
-impl<S: ForeignClockStore> BestForeignClock<S> {
-    pub fn new(store: S) -> Self {
-        Self { store }
+impl<S: SortedForeignClocks> BestForeignClock<S> {
+    pub fn new(sorted_clocks: S) -> Self {
+        Self { sorted_clocks }
     }
 
     pub fn consider(&self, _announce: AnnounceMessage) {
         // In a real implementation, you would create a ForeignClock from the announce
-        // and insert it into the store.
+        // and insert it into the sorted_clocks.
         let clock = ForeignClock::new();
-        self.store.insert(clock);
+        self.sorted_clocks.insert(clock);
     }
 
     pub fn clock(&self) -> Option<ForeignClock> {
-        if self.store.count() >= 2 {
-            Some(ForeignClock::new())
-        } else {
-            None
-        }
+        self.sorted_clocks.first()
     }
 }

@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cmp;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -6,45 +6,15 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use rptp::{
-    bmca::{ForeignClock, ForeignClockStore},
+    bmca::ForeignClock,
     clock::{Clock, LocalClock, SynchronizableClock},
+    infra::infra_support::SortedForeignClocksVec,
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{InitializingNode, MasterNode, NodeState, SlaveNode},
     port::{Port, Timeout},
 };
 
 use crate::net::NetPort;
-
-struct VecForeignClockStore {
-    clocks: RefCell<Vec<ForeignClock>>,
-}
-
-impl VecForeignClockStore {
-    fn new() -> Self {
-        Self {
-            clocks: RefCell::new(Vec::new()),
-        }
-    }
-}
-
-impl ForeignClockStore for VecForeignClockStore {
-    fn insert(&self, clock: ForeignClock) {
-        self.clocks.borrow_mut().push(clock);
-    }
-
-    fn count(&self) -> usize {
-        self.clocks.borrow().len()
-    }
-}
-
-impl ForeignClockStore for Box<VecForeignClockStore> {
-    fn insert(&self, clock: ForeignClock) {
-        self.as_ref().insert(clock);
-    }
-    fn count(&self) -> usize {
-        self.as_ref().count()
-    }
-}
 
 struct TokioTimeout {
     inner: Arc<TokioTimeoutInner>,
@@ -139,15 +109,18 @@ impl TokioPort {
 
 impl Port for TokioPort {
     type Clock = Rc<dyn SynchronizableClock>;
-    type ClockStore = Box<VecForeignClockStore>;
+    type SortedClocks = Box<SortedForeignClocksVec>;
     type Timeout = TokioTimeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         &self.clock
     }
 
-    fn foreign_clock_store(&self) -> Self::ClockStore {
-        Box::new(VecForeignClockStore::new())
+    fn sorted_foreign_clocks(
+        &self,
+        cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
+    ) -> Self::SortedClocks {
+        Box::new(SortedForeignClocksVec::new(cmp))
     }
 
     fn send_event(&self, msg: EventMessage) {

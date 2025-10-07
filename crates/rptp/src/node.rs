@@ -1,6 +1,7 @@
+use std::cmp;
 use std::time::Duration;
 
-use crate::bmca::BestForeignClock;
+use crate::bmca::{BestForeignClock, ForeignClock};
 use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
     SystemMessage,
@@ -67,7 +68,7 @@ impl<P: Port> InitializingNode<P> {
 
 pub struct ListeningNode<P: Port> {
     port: P,
-    best_foreign: BestForeignClock<P::ClockStore>,
+    best_foreign: BestForeignClock<P::SortedClocks>,
     announce_receipt_timeout: P::Timeout,
 }
 
@@ -78,7 +79,17 @@ impl<P: Port> ListeningNode<P> {
             Duration::from_secs(5),
         );
 
-        let best_foreign = BestForeignClock::new(port.foreign_clock_store());
+        let best_foreign = BestForeignClock::new(port.sorted_foreign_clocks(
+            |a: &ForeignClock, b: &ForeignClock| {
+                if a.outranks_other(b) {
+                    cmp::Ordering::Less
+                } else if b.outranks_other(a) {
+                    cmp::Ordering::Greater
+                } else {
+                    cmp::Ordering::Equal
+                }
+            },
+        ));
 
         Self {
             port,
