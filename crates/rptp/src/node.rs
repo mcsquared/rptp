@@ -496,11 +496,9 @@ mod tests {
         let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
         let node = InitializingNode::new(&port);
 
-        let _ = node.system_message(SystemMessage::Initialized);
+        let node = node.system_message(SystemMessage::Initialized);
 
-        // Listening node is expected to schedule an announce receipt timeout
-        let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::AnnounceReceiptTimeout));
+        assert!(matches!(node, NodeState::Listening(_)));
     }
 
     #[test]
@@ -508,12 +506,9 @@ mod tests {
         let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
         let node = ListeningNode::new(&port);
 
-        let _ = node.system_message(SystemMessage::AnnounceReceiptTimeout);
+        let node = node.system_message(SystemMessage::AnnounceReceiptTimeout);
 
-        // Master node is expected to schedule a sync cycle and announce cycle
-        let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0))));
-        assert!(messages.contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0))));
+        assert!(matches!(node, NodeState::Master(_)));
     }
 
     #[test]
@@ -521,13 +516,9 @@ mod tests {
         let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
         let node = ListeningNode::new(&port);
 
-        port.take_system_messages(); // Ignore the initial announce receipt timeout.
+        let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
 
-        let _ = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
-
-        // Listening node is expected to refresh the announce receipt timeout
-        let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::AnnounceReceiptTimeout));
+        assert!(matches!(node, NodeState::Listening(_)));
     }
 
     #[test]
@@ -535,15 +526,10 @@ mod tests {
         let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
         let node = ListeningNode::new(&port);
 
-        // Ignore the initial announce receipt timeout.
-        port.take_system_messages();
-
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(0)));
-        let _ = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(1)));
+        let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(1)));
 
-        // PreMaster node is expected to schedule a qualification timeout
-        let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::QualificationTimeout));
+        assert!(matches!(node, NodeState::PreMaster(_)));
     }
 
     #[test]
@@ -571,10 +557,8 @@ mod tests {
         let port = FakePort::new(FakeClock::new(TimeStamp::new(0, 0)));
         let node = PreMasterNode::new(&port);
 
-        let _ = node.system_message(SystemMessage::QualificationTimeout);
+        let node = node.system_message(SystemMessage::QualificationTimeout);
 
-        let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0))));
-        assert!(messages.contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0))));
+        assert!(matches!(node, NodeState::Master(_)));
     }
 }

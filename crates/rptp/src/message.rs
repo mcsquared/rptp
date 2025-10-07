@@ -1,4 +1,7 @@
-use crate::time::{Duration, TimeStamp};
+use crate::{
+    bmca::ForeignClock,
+    time::{Duration, TimeStamp},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventMessage {
@@ -95,6 +98,14 @@ pub struct AnnounceMessage {
 impl AnnounceMessage {
     pub fn new(sequence_id: u16) -> Self {
         Self { sequence_id }
+    }
+
+    pub fn follows(&self, previous: AnnounceMessage) -> Option<ForeignClock> {
+        if self.sequence_id.wrapping_sub(previous.sequence_id) == 1 {
+            Some(ForeignClock::new())
+        } else {
+            None
+        }
     }
 
     pub fn to_wire(&self) -> [u8; 64] {

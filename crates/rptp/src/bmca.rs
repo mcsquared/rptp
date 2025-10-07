@@ -1,5 +1,6 @@
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::AnnounceMessage;
+use std::cell::Cell;
 
 pub trait SortedForeignClocks {
     fn insert(&self, clock: ForeignClock);
@@ -25,18 +26,23 @@ impl ForeignClock {
 
 pub struct BestForeignClock<S: SortedForeignClocks> {
     sorted_clocks: S,
+    last_announce: Cell<Option<AnnounceMessage>>,
 }
 
 impl<S: SortedForeignClocks> BestForeignClock<S> {
     pub fn new(sorted_clocks: S) -> Self {
-        Self { sorted_clocks }
+        Self {
+            sorted_clocks,
+            last_announce: Cell::new(None),
+        }
     }
 
-    pub fn consider(&self, _announce: AnnounceMessage) {
-        // In a real implementation, you would create a ForeignClock from the announce
-        // and insert it into the sorted_clocks.
-        let clock = ForeignClock::new();
-        self.sorted_clocks.insert(clock);
+    pub fn consider(&self, announce: AnnounceMessage) {
+        if let Some(previous) = self.last_announce.replace(Some(announce)) {
+            if let Some(clock) = announce.follows(previous) {
+                self.sorted_clocks.insert(clock);
+            }
+        }
     }
 
     pub fn clock(&self) -> Option<ForeignClock> {
