@@ -3,7 +3,10 @@ use std::rc::Rc;
 
 use crate::{
     bmca::ForeignClock,
-    message::{DelayRequestMessage, DelayResponseMessage, FollowUpMessage, TwoStepSyncMessage},
+    message::{
+        AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
+        TwoStepSyncMessage,
+    },
     offsets::{MasterSlaveOffset, SlaveMasterOffset},
     time::TimeStamp,
 };
@@ -67,6 +70,10 @@ impl<C: SynchronizableClock> LocalClock<C> {
             slave_master_offset: SlaveMasterOffset::new(),
             self_bmca_view,
         }
+    }
+
+    pub fn announce(&self, sequence_id: u16) -> AnnounceMessage {
+        AnnounceMessage::new(sequence_id, self.self_bmca_view)
     }
 
     pub fn outranks_foreign(&self, other: &ForeignClock) -> bool {

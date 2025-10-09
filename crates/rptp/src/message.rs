@@ -261,14 +261,14 @@ impl AnnounceCycleMessage {
         Self { sequence_id: start }
     }
 
+    pub fn sequence_id(&self) -> u16 {
+        self.sequence_id
+    }
+
     pub fn next(self) -> Self {
         Self {
             sequence_id: self.sequence_id.wrapping_add(1),
         }
-    }
-
-    pub fn announce(&self, foreign_clock: ForeignClock) -> AnnounceMessage {
-        AnnounceMessage::new(self.sequence_id, foreign_clock)
     }
 }
 

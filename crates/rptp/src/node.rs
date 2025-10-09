@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use crate::bmca::{BestForeignClock, ForeignClock};
-use crate::clock::{ClockIdentity, ClockQuality};
 use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
     SystemMessage,
@@ -238,16 +237,12 @@ impl<P: Port> MasterNode<P> {
     fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
             SystemMessage::AnnounceCycle(announce_cycle) => {
-                let announce_message = announce_cycle.announce(ForeignClock::new(
-                    ClockIdentity::new([0; 8]),
-                    ClockQuality::new(248, 0xFE, 0xFFFF),
-                ));
-                let next_cycle = announce_cycle.next();
+                let announce_message = self.port.clock().announce(announce_cycle.sequence_id());
 
                 self.port
                     .send_general(GeneralMessage::Announce(announce_message));
                 self.announce_cycle_timeout.restart_with(
-                    SystemMessage::AnnounceCycle(next_cycle),
+                    SystemMessage::AnnounceCycle(announce_cycle.next()),
                     Duration::from_secs(1),
                 );
             }
@@ -468,10 +463,7 @@ mod tests {
         assert!(
             messages.contains(&GeneralMessage::Announce(AnnounceMessage::new(
                 0,
-                ForeignClock::new(
-                    ClockIdentity::new([0; 8]),
-                    ClockQuality::new(248, 0xFE, 0xFFFF),
-                )
+                ForeignClock::high_grade_test_clock()
             )))
         );
     }
