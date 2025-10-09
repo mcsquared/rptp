@@ -1,5 +1,4 @@
 use std::cell::Cell;
-use std::rc::Rc;
 
 use crate::{
     bmca::ForeignClock,
@@ -118,18 +117,6 @@ impl<C: SynchronizableClock> Clock for LocalClock<C> {
     }
 }
 
-impl Clock for Rc<dyn SynchronizableClock> {
-    fn now(&self) -> TimeStamp {
-        self.as_ref().now()
-    }
-}
-
-impl SynchronizableClock for Rc<dyn SynchronizableClock> {
-    fn synchronize(&self, to: TimeStamp) {
-        self.as_ref().synchronize(to);
-    }
-}
-
 pub struct FakeClock {
     now: Cell<TimeStamp>,
 }
@@ -160,21 +147,11 @@ impl SynchronizableClock for FakeClock {
     }
 }
 
-impl Clock for Rc<FakeClock> {
-    fn now(&self) -> TimeStamp {
-        self.as_ref().now()
-    }
-}
-
-impl SynchronizableClock for Rc<FakeClock> {
-    fn synchronize(&self, to: TimeStamp) {
-        self.as_ref().synchronize(to);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::rc::Rc;
 
     #[test]
     fn local_clock_adjusts_wrapped_clock() {

@@ -1,5 +1,33 @@
 pub mod infra_support {
+    use std::rc::Rc;
+
     use crate::bmca::{ForeignClock, ForeignClockRecord, SortedForeignClockRecords};
+    use crate::clock::{Clock, FakeClock, SynchronizableClock};
+    use crate::time::TimeStamp;
+
+    impl Clock for Rc<dyn SynchronizableClock> {
+        fn now(&self) -> TimeStamp {
+            self.as_ref().now()
+        }
+    }
+
+    impl SynchronizableClock for Rc<dyn SynchronizableClock> {
+        fn synchronize(&self, to: TimeStamp) {
+            self.as_ref().synchronize(to);
+        }
+    }
+
+    impl Clock for Rc<FakeClock> {
+        fn now(&self) -> TimeStamp {
+            self.as_ref().now()
+        }
+    }
+
+    impl SynchronizableClock for Rc<FakeClock> {
+        fn synchronize(&self, to: TimeStamp) {
+            self.as_ref().synchronize(to);
+        }
+    }
 
     pub struct SortedForeignClockRecordsVec {
         records: Vec<ForeignClockRecord>,
