@@ -1,44 +1,59 @@
 pub mod infra_support {
-    use std::cell::RefCell;
-    use std::cmp;
+    use crate::bmca::{ForeignClock, ForeignClockRecord, SortedForeignClockRecords};
 
-    use crate::bmca::{ForeignClock, SortedForeignClocks};
-
-    pub struct SortedForeignClocksVec {
-        clocks: RefCell<Vec<ForeignClock>>,
-        cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
+    pub struct SortedForeignClockRecordsVec {
+        records: Vec<ForeignClockRecord>,
     }
 
-    impl SortedForeignClocksVec {
-        pub fn new(cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering) -> Self {
+    impl SortedForeignClockRecordsVec {
+        pub fn new() -> Self {
             Self {
-                clocks: RefCell::new(Vec::new()),
-                cmp,
-            }
-        }
-    }
-
-    impl SortedForeignClocks for SortedForeignClocksVec {
-        fn insert(&self, clock: ForeignClock) {
-            let mut clocks = self.clocks.borrow_mut();
-
-            match clocks.binary_search_by(|probe| (self.cmp)(probe, &clock)) {
-                Ok(idx) => clocks[idx] = clock,
-                Err(idx) => clocks.insert(idx, clock),
+                records: Vec::new(),
             }
         }
 
-        fn first(&self) -> Option<ForeignClock> {
-            self.clocks.borrow().first().cloned()
+        fn sort_records(&mut self) {
+            self.records.sort();
         }
     }
 
-    impl SortedForeignClocks for Box<SortedForeignClocksVec> {
-        fn insert(&self, clock: ForeignClock) {
-            self.as_ref().insert(clock);
+    impl SortedForeignClockRecords for SortedForeignClockRecordsVec {
+        fn insert(&mut self, record: ForeignClockRecord) {
+            self.records.push(record);
+            self.sort_records();
         }
 
-        fn first(&self) -> Option<ForeignClock> {
+        fn update_record<F>(&mut self, foreign: &ForeignClock, update: F) -> bool
+        where
+            F: FnOnce(&mut ForeignClockRecord),
+        {
+            if let Some(record) = self.records.iter_mut().find(|r| r.same_source_as(&foreign)) {
+                update(record);
+                self.sort_records();
+                true
+            } else {
+                false
+            }
+        }
+
+        fn first(&self) -> Option<&ForeignClockRecord> {
+            self.records.first()
+        }
+    }
+
+    impl SortedForeignClockRecords for Box<SortedForeignClockRecordsVec> {
+        fn insert(&mut self, record: ForeignClockRecord) {
+            self.as_mut().insert(record);
+        }
+
+        fn update_record<F>(&mut self, foreign: &ForeignClock, update: F) -> bool
+        where
+            F: FnOnce(&mut ForeignClockRecord),
+        {
+            self.as_mut().update_record(foreign, update)
+        }
+
+        fn first(&self) -> Option<&ForeignClockRecord> {
             self.as_ref().first()
         }
     }
@@ -46,43 +61,33 @@ pub mod infra_support {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::bmca::ForeignClock;
+        use crate::message::AnnounceMessage;
 
         #[test]
-        fn test_sorted_vec_foreign_clock_insert_single_item() {
-            let sorted_clocks = SortedForeignClocksVec::new(|_a, _b| cmp::Ordering::Equal);
-            let clock = ForeignClock::new();
-            sorted_clocks.insert(clock);
-            assert_eq!(sorted_clocks.first(), Some(clock));
-        }
+        fn sorted_foreign_vec_maintains_best_record_first() {
+            let mut records = SortedForeignClockRecordsVec::new();
 
-        #[test]
-        fn test_sorted_vec_foreign_clock_insert_items_equal() {
-            let sorted_clocks = SortedForeignClocksVec::new(|_a, _b| cmp::Ordering::Equal);
-            let clock1 = ForeignClock::new();
-            let clock2 = ForeignClock::new();
-            sorted_clocks.insert(clock1);
-            sorted_clocks.insert(clock2);
-            assert_eq!(sorted_clocks.first(), Some(clock1));
-        }
+            let high_clock = ForeignClock::high_grade_test_clock();
+            let mid_clock = ForeignClock::mid_grade_test_clock();
+            let low_clock = ForeignClock::low_grade_test_clock();
 
-        #[test]
-        fn test_sorted_vec_foreign_clock_insert_items_less() {
-            let sorted_clocks = SortedForeignClocksVec::new(|_a, _b| cmp::Ordering::Less);
-            let clock1 = ForeignClock::new();
-            let clock2 = ForeignClock::new();
-            sorted_clocks.insert(clock1);
-            sorted_clocks.insert(clock2);
-            assert_eq!(sorted_clocks.first(), Some(clock1));
-        }
+            records.insert(ForeignClockRecord::new(AnnounceMessage::new(0, high_clock)));
+            records.insert(ForeignClockRecord::new(AnnounceMessage::new(0, low_clock)));
+            records.insert(ForeignClockRecord::new(AnnounceMessage::new(0, mid_clock)));
 
-        #[test]
-        fn test_sorted_vec_foreign_clock_insert_items_greater() {
-            let sorted_clocks = SortedForeignClocksVec::new(|_a, _b| cmp::Ordering::Greater);
-            let clock1 = ForeignClock::new();
-            let clock2 = ForeignClock::new();
-            sorted_clocks.insert(clock1);
-            sorted_clocks.insert(clock2);
-            assert_eq!(sorted_clocks.first(), Some(clock2));
+            records.update_record(&high_clock, |record| {
+                record.consider(AnnounceMessage::new(1, high_clock));
+            });
+            records.update_record(&low_clock, |record| {
+                record.consider(AnnounceMessage::new(1, low_clock));
+            });
+            records.update_record(&mid_clock, |record| {
+                record.consider(AnnounceMessage::new(1, mid_clock));
+            });
+
+            let best_clock = records.first().and_then(|record| record.clock());
+            assert_eq!(best_clock, Some(&high_clock));
         }
     }
 }

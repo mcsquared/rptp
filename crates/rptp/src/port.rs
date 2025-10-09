@@ -1,6 +1,4 @@
-use std::cmp;
-
-use crate::bmca::{ForeignClock, SortedForeignClocks};
+use crate::bmca::SortedForeignClockRecords;
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
@@ -12,14 +10,11 @@ pub trait Timeout {
 
 pub trait Port {
     type Clock: SynchronizableClock;
-    type SortedClocks: SortedForeignClocks;
+    type ClockRecords: SortedForeignClockRecords;
     type Timeout: Timeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock>;
-    fn sorted_foreign_clocks(
-        &self,
-        cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
-    ) -> Self::SortedClocks;
+    fn foreign_clock_records(&self) -> Self::ClockRecords;
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
     fn schedule(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
@@ -27,18 +22,15 @@ pub trait Port {
 
 impl<P: Port> Port for Box<P> {
     type Clock = P::Clock;
-    type SortedClocks = P::SortedClocks;
+    type ClockRecords = P::ClockRecords;
     type Timeout = P::Timeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         self.as_ref().clock()
     }
 
-    fn sorted_foreign_clocks(
-        &self,
-        cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
-    ) -> Self::SortedClocks {
-        self.as_ref().sorted_foreign_clocks(cmp)
+    fn foreign_clock_records(&self) -> Self::ClockRecords {
+        self.as_ref().foreign_clock_records()
     }
 
     fn send_event(&self, msg: EventMessage) {
@@ -57,13 +49,12 @@ impl<P: Port> Port for Box<P> {
 #[cfg(test)]
 pub mod test_support {
     use std::cell::RefCell;
-    use std::cmp;
     use std::rc::Rc;
     use std::time::Duration;
 
     use crate::bmca::ForeignClock;
     use crate::clock::{LocalClock, SynchronizableClock};
-    use crate::infra::infra_support::SortedForeignClocksVec;
+    use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
     use super::{Port, Timeout};
@@ -109,9 +100,9 @@ pub mod test_support {
     }
 
     impl<C: SynchronizableClock> FakePort<C> {
-        pub fn new(clock: C) -> Self {
+        pub fn new(clock: C, self_bmca_view: ForeignClock) -> Self {
             Self {
-                clock: LocalClock::new(clock),
+                clock: LocalClock::new(clock, self_bmca_view),
                 event_messages: Rc::new(RefCell::new(Vec::new())),
                 general_messages: Rc::new(RefCell::new(Vec::new())),
                 system_messages: Rc::new(RefCell::new(Vec::new())),
@@ -133,18 +124,15 @@ pub mod test_support {
 
     impl<C: SynchronizableClock> Port for FakePort<C> {
         type Clock = C;
-        type SortedClocks = SortedForeignClocksVec;
+        type ClockRecords = SortedForeignClockRecordsVec;
         type Timeout = FakeTimeout;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
         }
 
-        fn sorted_foreign_clocks(
-            &self,
-            cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
-        ) -> Self::SortedClocks {
-            SortedForeignClocksVec::new(cmp)
+        fn foreign_clock_records(&self) -> Self::ClockRecords {
+            SortedForeignClockRecordsVec::new()
         }
 
         fn send_event(&self, msg: EventMessage) {
@@ -163,18 +151,15 @@ pub mod test_support {
 
     impl<C: SynchronizableClock> Port for &FakePort<C> {
         type Clock = C;
-        type SortedClocks = SortedForeignClocksVec;
+        type ClockRecords = SortedForeignClockRecordsVec;
         type Timeout = FakeTimeout;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
         }
 
-        fn sorted_foreign_clocks(
-            &self,
-            cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
-        ) -> Self::SortedClocks {
-            SortedForeignClocksVec::new(cmp)
+        fn foreign_clock_records(&self) -> Self::ClockRecords {
+            SortedForeignClockRecordsVec::new()
         }
 
         fn send_event(&self, msg: EventMessage) {

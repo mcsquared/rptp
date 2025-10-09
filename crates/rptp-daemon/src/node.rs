@@ -1,14 +1,14 @@
-use std::cmp;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rptp::clock::{ClockIdentity, ClockQuality};
 use tokio::sync::mpsc;
 
 use rptp::{
     bmca::ForeignClock,
     clock::{Clock, LocalClock, SynchronizableClock},
-    infra::infra_support::SortedForeignClocksVec,
+    infra::infra_support::SortedForeignClockRecordsVec,
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{InitializingNode, MasterNode, NodeState, SlaveNode},
     port::{Port, Timeout},
@@ -109,18 +109,15 @@ impl TokioPort {
 
 impl Port for TokioPort {
     type Clock = Rc<dyn SynchronizableClock>;
-    type SortedClocks = Box<SortedForeignClocksVec>;
+    type ClockRecords = Box<SortedForeignClockRecordsVec>;
     type Timeout = TokioTimeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         &self.clock
     }
 
-    fn sorted_foreign_clocks(
-        &self,
-        cmp: fn(&ForeignClock, &ForeignClock) -> cmp::Ordering,
-    ) -> Self::SortedClocks {
-        Box::new(SortedForeignClocksVec::new(cmp))
+    fn foreign_clock_records(&self) -> Self::ClockRecords {
+        Box::new(SortedForeignClockRecordsVec::new())
     }
 
     fn send_event(&self, msg: EventMessage) {
@@ -158,7 +155,13 @@ impl<P: NetPort> TokioNode<P> {
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
         let node = NodeState::Initializing(InitializingNode::new(Box::new(TokioPort::new(
-            LocalClock::new(clock.clone()),
+            LocalClock::new(
+                clock.clone(),
+                ForeignClock::new(
+                    ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+                    ClockQuality::new(248, 0xFE, 0xFFFF),
+                ),
+            ),
             event_tx,
             general_tx,
             system_tx,
@@ -185,7 +188,13 @@ impl<P: NetPort> TokioNode<P> {
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
         let node = NodeState::Master(MasterNode::new(Box::new(TokioPort::new(
-            LocalClock::new(clock.clone()),
+            LocalClock::new(
+                clock.clone(),
+                ForeignClock::new(
+                    ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+                    ClockQuality::new(248, 0xFE, 0xFFFF),
+                ),
+            ),
             event_tx,
             general_tx,
             system_tx,
@@ -212,7 +221,13 @@ impl<P: NetPort> TokioNode<P> {
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
         let node = NodeState::Slave(SlaveNode::new(Box::new(TokioPort::new(
-            LocalClock::new(clock.clone()),
+            LocalClock::new(
+                clock.clone(),
+                ForeignClock::new(
+                    ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
+                    ClockQuality::new(255, 0xFF, 0xFFFF),
+                ),
+            ),
             event_tx,
             general_tx,
             system_tx,
@@ -316,7 +331,6 @@ mod tests {
     use tokio::time;
 
     use rptp::clock::FakeClock;
-    use rptp::time::TimeStamp;
 
     use crate::net::FakeNetPort;
 
@@ -333,7 +347,7 @@ mod tests {
         let (event_port, mut event_rx) = FakeNetPort::new();
         let (general_port, mut general_rx) = FakeNetPort::new();
 
-        let clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let clock = Rc::new(FakeClock::default());
         let node = TokioNode::master(clock, event_port, general_port).await?;
 
         let mut sync_count = 0;
@@ -379,7 +393,7 @@ mod tests {
         let (event_port, mut event_rx) = FakeNetPort::new();
         let (general_port, _) = FakeNetPort::new();
 
-        let clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
+        let clock = Rc::new(FakeClock::default());
         let node = TokioNode::slave(clock, event_port, general_port).await?;
 
         let mut delay_request_count = 0;

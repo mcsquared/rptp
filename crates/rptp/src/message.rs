@@ -1,5 +1,6 @@
 use crate::{
     bmca::ForeignClock,
+    clock::{ClockIdentity, ClockQuality},
     time::{Duration, TimeStamp},
 };
 
@@ -76,7 +77,13 @@ impl TryFrom<&[u8]> for GeneralMessage {
             WireTimeStamp::new(buf.get(34..44).ok_or(())?.try_into().map_err(|_| ())?);
 
         match msgtype {
-            0x0B => Ok(Self::Announce(AnnounceMessage::new(sequence_id))),
+            0x0B => Ok(Self::Announce(AnnounceMessage::new(
+                sequence_id,
+                ForeignClock::new(
+                    ClockIdentity::new([0; 8]),
+                    ClockQuality::new(248, 0xFE, 0xFFFF),
+                ),
+            ))),
             0x08 => Ok(Self::FollowUp(FollowUpMessage::new(
                 sequence_id,
                 wire_timestamp.timestamp().ok_or(())?,
@@ -93,19 +100,29 @@ impl TryFrom<&[u8]> for GeneralMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnnounceMessage {
     sequence_id: u16,
+    foreign_clock: ForeignClock,
 }
 
 impl AnnounceMessage {
-    pub fn new(sequence_id: u16) -> Self {
-        Self { sequence_id }
+    pub fn new(sequence_id: u16, foreign_clock: ForeignClock) -> Self {
+        Self {
+            sequence_id,
+            foreign_clock,
+        }
     }
 
     pub fn follows(&self, previous: AnnounceMessage) -> Option<ForeignClock> {
-        if self.sequence_id.wrapping_sub(previous.sequence_id) == 1 {
-            Some(ForeignClock::new())
+        if self.sequence_id.wrapping_sub(previous.sequence_id) == 1
+            && self.foreign_clock == previous.foreign_clock
+        {
+            Some(self.foreign_clock)
         } else {
             None
         }
+    }
+
+    pub fn foreign_clock(&self) -> &ForeignClock {
+        &self.foreign_clock
     }
 
     pub fn to_wire(&self) -> [u8; 64] {
@@ -250,8 +267,8 @@ impl AnnounceCycleMessage {
         }
     }
 
-    pub fn announce(&self) -> AnnounceMessage {
-        AnnounceMessage::new(self.sequence_id)
+    pub fn announce(&self, foreign_clock: ForeignClock) -> AnnounceMessage {
+        AnnounceMessage::new(self.sequence_id, foreign_clock)
     }
 }
 
@@ -328,7 +345,13 @@ mod tests {
 
     #[test]
     fn announce_message_wire_roundtrip() {
-        let announce = AnnounceMessage::new(42);
+        let announce = AnnounceMessage::new(
+            42,
+            ForeignClock::new(
+                ClockIdentity::new([0; 8]),
+                ClockQuality::new(248, 0xFE, 0xFFFF),
+            ),
+        );
         let wire = announce.to_wire();
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
 
