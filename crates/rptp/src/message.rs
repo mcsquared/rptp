@@ -1,5 +1,5 @@
 use crate::{
-    bmca::ForeignClock,
+    bmca::ForeignClockDS,
     clock::{ClockIdentity, ClockQuality},
     time::{Duration, TimeStamp},
 };
@@ -79,7 +79,7 @@ impl TryFrom<&[u8]> for GeneralMessage {
         match msgtype {
             0x0B => Ok(Self::Announce(AnnounceMessage::new(
                 sequence_id,
-                ForeignClock::new(
+                ForeignClockDS::new(
                     ClockIdentity::new([0; 8]),
                     ClockQuality::new(248, 0xFE, 0xFFFF),
                 ),
@@ -100,18 +100,18 @@ impl TryFrom<&[u8]> for GeneralMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnnounceMessage {
     sequence_id: u16,
-    foreign_clock: ForeignClock,
+    foreign_clock: ForeignClockDS,
 }
 
 impl AnnounceMessage {
-    pub fn new(sequence_id: u16, foreign_clock: ForeignClock) -> Self {
+    pub fn new(sequence_id: u16, foreign_clock: ForeignClockDS) -> Self {
         Self {
             sequence_id,
             foreign_clock,
         }
     }
 
-    pub fn follows(&self, previous: AnnounceMessage) -> Option<ForeignClock> {
+    pub fn follows(&self, previous: AnnounceMessage) -> Option<ForeignClockDS> {
         if self.sequence_id.wrapping_sub(previous.sequence_id) == 1
             && self.foreign_clock == previous.foreign_clock
         {
@@ -121,7 +121,7 @@ impl AnnounceMessage {
         }
     }
 
-    pub fn foreign_clock(&self) -> &ForeignClock {
+    pub fn foreign_clock(&self) -> &ForeignClockDS {
         &self.foreign_clock
     }
 
@@ -347,7 +347,7 @@ mod tests {
     fn announce_message_wire_roundtrip() {
         let announce = AnnounceMessage::new(
             42,
-            ForeignClock::new(
+            ForeignClockDS::new(
                 ClockIdentity::new([0; 8]),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),

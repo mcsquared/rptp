@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::bmca::{BestForeignClock, ForeignClock};
+use crate::bmca::{BestForeignClock, ForeignClockDS};
 use crate::message::{
     AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
     SystemMessage,
@@ -294,11 +294,11 @@ impl<P: Port> PreMasterNode<P> {
 
 pub struct UncalibratedNode<P: Port> {
     _port: P,
-    _best_foreign: ForeignClock,
+    _best_foreign: ForeignClockDS,
 }
 
 impl<P: Port> UncalibratedNode<P> {
-    pub fn new(port: P, best_foreign: ForeignClock) -> Self {
+    pub fn new(port: P, best_foreign: ForeignClockDS) -> Self {
         Self {
             _port: port,
             _best_foreign: best_foreign,
@@ -312,6 +312,7 @@ mod tests {
 
     use std::rc::Rc;
 
+    use crate::bmca::LocalClockDS;
     use crate::clock::{Clock, FakeClock};
     use crate::message::{
         AnnounceCycleMessage, AnnounceMessage, DelayRequestMessage, DelayResponseMessage,
@@ -325,7 +326,7 @@ mod tests {
 
         let mut slave = NodeState::Slave(SlaveNode::new(FakePort::new(
             local_clock.clone(),
-            ForeignClock::mid_grade_test_clock(),
+            LocalClockDS::mid_grade_test_clock(),
         )));
 
         slave = slave.event_message(
@@ -350,7 +351,7 @@ mod tests {
 
     #[test]
     fn master_node_answers_delay_request_with_delay_response() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let node = MasterNode::new(&port);
 
@@ -370,7 +371,7 @@ mod tests {
 
     #[test]
     fn master_node_schedules_initial_sync() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let _ = MasterNode::new(&port);
 
@@ -380,7 +381,7 @@ mod tests {
 
     #[test]
     fn master_node_answers_sync_cycle_with_sync() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let node = MasterNode::new(&port);
 
@@ -392,7 +393,7 @@ mod tests {
 
     #[test]
     fn master_node_schedules_next_sync() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let node = MasterNode::new(&port);
 
@@ -407,7 +408,7 @@ mod tests {
 
     #[test]
     fn master_node_answers_timestamped_sync_with_follow_up() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let node = MasterNode::new(&port);
 
@@ -427,7 +428,7 @@ mod tests {
 
     #[test]
     fn master_node_schedules_initial_announce_cycle() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let _ = MasterNode::new(&port);
 
@@ -437,7 +438,7 @@ mod tests {
 
     #[test]
     fn master_node_schedules_next_announce() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let node = MasterNode::new(&port);
 
@@ -451,7 +452,7 @@ mod tests {
 
     #[test]
     fn master_node_answers_announce_cycle_with_announce() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let node = MasterNode::new(&port);
 
@@ -463,14 +464,14 @@ mod tests {
         assert!(
             messages.contains(&GeneralMessage::Announce(AnnounceMessage::new(
                 0,
-                ForeignClock::high_grade_test_clock()
+                ForeignClockDS::high_grade_test_clock()
             )))
         );
     }
 
     #[test]
     fn slave_node_schedules_initial_delay_cycle() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::mid_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
         let _ = SlaveNode::new(&port);
 
@@ -480,7 +481,7 @@ mod tests {
 
     #[test]
     fn slave_node_schedules_next_delay_request() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::mid_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
         let node = SlaveNode::new(&port);
 
@@ -494,7 +495,7 @@ mod tests {
 
     #[test]
     fn slave_node_answers_delay_cycle_with_delay_request() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::mid_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
         let node = SlaveNode::new(&port);
 
@@ -508,7 +509,7 @@ mod tests {
 
     #[test]
     fn initializing_node_to_listening_transition() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::mid_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
         let node = InitializingNode::new(&port);
 
         let node = node.system_message(SystemMessage::Initialized);
@@ -518,7 +519,7 @@ mod tests {
 
     #[test]
     fn listening_node_to_master_transition_on_announce_receipt_timeout() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let node = ListeningNode::new(&port);
 
         let node = node.system_message(SystemMessage::AnnounceReceiptTimeout);
@@ -528,10 +529,10 @@ mod tests {
 
     #[test]
     fn listening_node_stays_in_listening_on_single_announce() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::mid_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
         let node = ListeningNode::new(&port);
 
-        let foreign_clock = ForeignClock::mid_grade_test_clock();
+        let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
             0,
@@ -543,10 +544,10 @@ mod tests {
 
     #[test]
     fn listening_node_to_pre_master_transition_on_two_announces() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let node = ListeningNode::new(&port);
 
-        let foreign_clock = ForeignClock::mid_grade_test_clock();
+        let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
             0,
@@ -562,7 +563,7 @@ mod tests {
 
     #[test]
     fn listening_node_schedules_announce_receipt_timeout() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::mid_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
         let _ = ListeningNode::new(&port);
 
@@ -572,10 +573,10 @@ mod tests {
 
     #[test]
     fn listening_node_to_uncalibrated_transition_() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::mid_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
         let node = ListeningNode::new(&port);
 
-        let foreign_clock = ForeignClock::high_grade_test_clock();
+        let foreign_clock = ForeignClockDS::high_grade_test_clock();
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
             0,
@@ -591,7 +592,7 @@ mod tests {
 
     #[test]
     fn pre_master_node_schedules_qualification_timeout() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let _ = PreMasterNode::new(&port);
 
@@ -601,7 +602,7 @@ mod tests {
 
     #[test]
     fn pre_master_node_to_master_transition_on_qualification_timeout() {
-        let port = FakePort::new(FakeClock::default(), ForeignClock::high_grade_test_clock());
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let node = PreMasterNode::new(&port);
 
         let node = node.system_message(SystemMessage::QualificationTimeout);

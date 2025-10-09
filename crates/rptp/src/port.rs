@@ -52,7 +52,7 @@ pub mod test_support {
     use std::rc::Rc;
     use std::time::Duration;
 
-    use crate::bmca::ForeignClock;
+    use crate::bmca::LocalClockDS;
     use crate::clock::{LocalClock, SynchronizableClock};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
@@ -100,9 +100,9 @@ pub mod test_support {
     }
 
     impl<C: SynchronizableClock> FakePort<C> {
-        pub fn new(clock: C, self_bmca_view: ForeignClock) -> Self {
+        pub fn new(clock: C, localds: LocalClockDS) -> Self {
             Self {
-                clock: LocalClock::new(clock, self_bmca_view),
+                clock: LocalClock::new(clock, localds),
                 event_messages: Rc::new(RefCell::new(Vec::new())),
                 general_messages: Rc::new(RefCell::new(Vec::new())),
                 system_messages: Rc::new(RefCell::new(Vec::new())),

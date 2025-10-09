@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use crate::{
-    bmca::ForeignClock,
+    bmca::{ForeignClockDS, LocalClockDS},
     message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
         TwoStepSyncMessage,
@@ -14,7 +14,7 @@ use crate::{
 pub struct ClockIdentity([u8; 8]);
 
 impl ClockIdentity {
-    pub fn new(id: [u8; 8]) -> Self {
+    pub const fn new(id: [u8; 8]) -> Self {
         Self(id)
     }
 }
@@ -27,7 +27,7 @@ pub struct ClockQuality {
 }
 
 impl ClockQuality {
-    pub fn new(clock_class: u8, clock_accuracy: u8, offset_scaled_log_variance: u16) -> Self {
+    pub const fn new(clock_class: u8, clock_accuracy: u8, offset_scaled_log_variance: u16) -> Self {
         Self {
             clock_class,
             clock_accuracy,
@@ -58,25 +58,25 @@ pub struct LocalClock<C: SynchronizableClock> {
     clock: C,
     master_slave_offset: MasterSlaveOffset,
     slave_master_offset: SlaveMasterOffset,
-    self_bmca_view: ForeignClock,
+    localds: LocalClockDS,
 }
 
 impl<C: SynchronizableClock> LocalClock<C> {
-    pub fn new(clock: C, self_bmca_view: ForeignClock) -> Self {
+    pub fn new(clock: C, localds: LocalClockDS) -> Self {
         Self {
             clock,
             master_slave_offset: MasterSlaveOffset::new(),
             slave_master_offset: SlaveMasterOffset::new(),
-            self_bmca_view,
+            localds,
         }
     }
 
     pub fn announce(&self, sequence_id: u16) -> AnnounceMessage {
-        AnnounceMessage::new(sequence_id, self.self_bmca_view)
+        self.localds.announce(sequence_id)
     }
 
-    pub fn outranks_foreign(&self, other: &ForeignClock) -> bool {
-        self.self_bmca_view.outranks_other(other)
+    pub fn outranks_foreign(&self, other: &ForeignClockDS) -> bool {
+        self.localds.outranks_foreign(other)
     }
 
     pub fn ingest_two_step_sync(&self, sync: TwoStepSyncMessage, timestamp: TimeStamp) {
@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn local_clock_adjusts_wrapped_clock() {
         let clock = Rc::new(FakeClock::default());
-        let sync_clock = LocalClock::new(clock.clone(), ForeignClock::mid_grade_test_clock());
+        let sync_clock = LocalClock::new(clock.clone(), LocalClockDS::mid_grade_test_clock());
 
         sync_clock.ingest_two_step_sync(TwoStepSyncMessage::new(0), TimeStamp::new(1, 0));
         sync_clock.ingest_follow_up(FollowUpMessage::new(0, TimeStamp::new(1, 0)));

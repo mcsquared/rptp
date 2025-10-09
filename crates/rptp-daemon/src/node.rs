@@ -6,7 +6,7 @@ use rptp::clock::{ClockIdentity, ClockQuality};
 use tokio::sync::mpsc;
 
 use rptp::{
-    bmca::ForeignClock,
+    bmca::LocalClockDS,
     clock::{Clock, LocalClock, SynchronizableClock},
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{EventMessage, GeneralMessage, SystemMessage},
@@ -157,7 +157,7 @@ impl<P: NetPort> TokioNode<P> {
         let node = NodeState::Initializing(InitializingNode::new(Box::new(TokioPort::new(
             LocalClock::new(
                 clock.clone(),
-                ForeignClock::new(
+                LocalClockDS::new(
                     ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
                     ClockQuality::new(248, 0xFE, 0xFFFF),
                 ),
@@ -190,7 +190,7 @@ impl<P: NetPort> TokioNode<P> {
         let node = NodeState::Master(MasterNode::new(Box::new(TokioPort::new(
             LocalClock::new(
                 clock.clone(),
-                ForeignClock::new(
+                LocalClockDS::new(
                     ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
                     ClockQuality::new(248, 0xFE, 0xFFFF),
                 ),
@@ -223,7 +223,7 @@ impl<P: NetPort> TokioNode<P> {
         let node = NodeState::Slave(SlaveNode::new(Box::new(TokioPort::new(
             LocalClock::new(
                 clock.clone(),
-                ForeignClock::new(
+                LocalClockDS::new(
                     ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
                     ClockQuality::new(255, 0xFF, 0xFFFF),
                 ),

@@ -1,7 +1,7 @@
 pub mod infra_support {
     use std::rc::Rc;
 
-    use crate::bmca::{ForeignClock, ForeignClockRecord, SortedForeignClockRecords};
+    use crate::bmca::{ForeignClockDS, ForeignClockRecord, SortedForeignClockRecords};
     use crate::clock::{Clock, FakeClock, SynchronizableClock};
     use crate::time::TimeStamp;
 
@@ -51,7 +51,7 @@ pub mod infra_support {
             self.sort_records();
         }
 
-        fn update_record<F>(&mut self, foreign: &ForeignClock, update: F) -> bool
+        fn update_record<F>(&mut self, foreign: &ForeignClockDS, update: F) -> bool
         where
             F: FnOnce(&mut ForeignClockRecord),
         {
@@ -74,7 +74,7 @@ pub mod infra_support {
             self.as_mut().insert(record);
         }
 
-        fn update_record<F>(&mut self, foreign: &ForeignClock, update: F) -> bool
+        fn update_record<F>(&mut self, foreign: &ForeignClockDS, update: F) -> bool
         where
             F: FnOnce(&mut ForeignClockRecord),
         {
@@ -89,16 +89,16 @@ pub mod infra_support {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use crate::bmca::ForeignClock;
+        use crate::bmca::ForeignClockDS;
         use crate::message::AnnounceMessage;
 
         #[test]
         fn sorted_foreign_vec_maintains_best_record_first() {
             let mut records = SortedForeignClockRecordsVec::new();
 
-            let high_clock = ForeignClock::high_grade_test_clock();
-            let mid_clock = ForeignClock::mid_grade_test_clock();
-            let low_clock = ForeignClock::low_grade_test_clock();
+            let high_clock = ForeignClockDS::high_grade_test_clock();
+            let mid_clock = ForeignClockDS::mid_grade_test_clock();
+            let low_clock = ForeignClockDS::low_grade_test_clock();
 
             records.insert(ForeignClockRecord::new(AnnounceMessage::new(0, high_clock)));
             records.insert(ForeignClockRecord::new(AnnounceMessage::new(0, low_clock)));
