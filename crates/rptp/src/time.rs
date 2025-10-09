@@ -64,26 +64,19 @@ impl Duration {
         Self { seconds, nanos }
     }
 
-    pub fn from_secs_f64(secs_f64: f64) -> Self {
-        // Round to nearest nanosecond
-        let total_nanos = (secs_f64 * 1_000_000_000.0).round();
-
-        // Split total nanoseconds into integral seconds and nanoseconds
-        let mut seconds = (total_nanos / 1_000_000_000.0).trunc() as i64;
-        let mut nanos = (total_nanos % 1_000_000_000.0).abs() as u32;
-
-        // Normalize negative durations:
-        // If secs < 0 and nanos > 0, "borrow" one second to make nanos positive
-        if total_nanos < 0.0 && nanos > 0 {
-            seconds -= 1;
-            nanos = 1_000_000_000 - nanos;
-        }
-
-        Self { seconds, nanos }
+    fn total_nanos(&self) -> i128 {
+        (self.seconds as i128 * 1_000_000_000) + self.nanos as i128
     }
 
-    pub fn as_secs_f64(&self) -> f64 {
-        self.seconds as f64 + (self.nanos as f64 / 1_000_000_000 as f64)
+    fn from_total_nanos(total: i128) -> Self {
+        let seconds = total.div_euclid(1_000_000_000);
+        let nanos = total.rem_euclid(1_000_000_000);
+        debug_assert!(seconds >= i64::MIN as i128 && seconds <= i64::MAX as i128);
+        Self::new(seconds as i64, nanos as u32)
+    }
+
+    pub fn half(self) -> Self {
+        Self::from_total_nanos(self.total_nanos() / 2)
     }
 }
 
@@ -160,5 +153,29 @@ mod tests {
         let ts = TimeStamp::new(1, 500_000_000);
         let duration = ts - ts;
         assert_eq!(duration, Duration::new(0, 0));
+    }
+
+    #[test]
+    fn duration_half_zero() {
+        let duration = Duration::new(0, 0);
+        assert_eq!(duration.half(), Duration::new(0, 0));
+    }
+
+    #[test]
+    fn duration_half_even_positive() {
+        let duration = Duration::new(2, 0);
+        assert_eq!(duration.half(), Duration::new(1, 0));
+    }
+
+    #[test]
+    fn duration_half_positive_odd_rounds_towards_zero() {
+        let duration = Duration::new(0, 1);
+        assert_eq!(duration.half(), Duration::new(0, 0));
+    }
+
+    #[test]
+    fn duration_half_negative_odd_rounds_towards_zero() {
+        let duration = Duration::new(-1, 999_999_999);
+        assert_eq!(duration.half(), Duration::new(0, 0));
     }
 }

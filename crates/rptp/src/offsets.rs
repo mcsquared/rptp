@@ -50,8 +50,8 @@ impl MasterSlaveOffset {
             sm_offset.current(),
             self.sync_timestamp.borrow().clone(),
         ) {
-            let offset_from_master = (ms_offset - sm_offset).as_secs_f64() / 2.0;
-            let estimate = t2 - Duration::from_secs_f64(offset_from_master);
+            let offset_from_master = (ms_offset - sm_offset).half();
+            let estimate = t2 - offset_from_master;
             Some(estimate)
         } else {
             None
