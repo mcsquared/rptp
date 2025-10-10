@@ -2,11 +2,7 @@ use std::cell::Cell;
 
 use crate::{
     bmca::{ForeignClockDS, LocalClockDS},
-    message::{
-        AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
-        TwoStepSyncMessage,
-    },
-    offsets::{MasterSlaveOffset, SlaveMasterOffset},
+    message::AnnounceMessage,
     time::TimeStamp,
 };
 
@@ -56,19 +52,12 @@ pub trait SynchronizableClock: Clock {
 
 pub struct LocalClock<C: SynchronizableClock> {
     clock: C,
-    master_slave_offset: MasterSlaveOffset,
-    slave_master_offset: SlaveMasterOffset,
     localds: LocalClockDS,
 }
 
 impl<C: SynchronizableClock> LocalClock<C> {
     pub fn new(clock: C, localds: LocalClockDS) -> Self {
-        Self {
-            clock,
-            master_slave_offset: MasterSlaveOffset::new(),
-            slave_master_offset: SlaveMasterOffset::new(),
-            localds,
-        }
+        Self { clock, localds }
     }
 
     pub fn announce(&self, sequence_id: u16) -> AnnounceMessage {
@@ -79,35 +68,9 @@ impl<C: SynchronizableClock> LocalClock<C> {
         self.localds.outranks_foreign(other)
     }
 
-    pub fn ingest_two_step_sync(&self, sync: TwoStepSyncMessage, timestamp: TimeStamp) {
-        self.master_slave_offset
-            .ingest_two_step_sync(sync, timestamp);
-        self.discipline();
-    }
-
-    pub fn ingest_follow_up(&self, follow_up: FollowUpMessage) {
-        self.master_slave_offset.ingest_follow_up(follow_up);
-        self.discipline();
-    }
-
-    pub fn ingest_delay_request(&self, req: DelayRequestMessage, timestamp: TimeStamp) {
-        self.slave_master_offset
-            .ingest_delay_request(req, timestamp);
-        self.discipline();
-    }
-
-    pub fn ingest_delay_response(&self, resp: DelayResponseMessage) {
-        self.slave_master_offset.ingest_delay_response(resp);
-        self.discipline();
-    }
-
-    fn discipline(&self) {
-        if let Some(estimate) = self
-            .master_slave_offset
-            .master_estimate(&self.slave_master_offset)
-        {
-            self.clock.synchronize(estimate);
-        }
+    pub fn discipline(&self, estimate: TimeStamp) {
+        // TODO: apply filtering, slew rate limiting, feed to servo, etc.
+        self.clock.synchronize(estimate);
     }
 }
 
@@ -144,25 +107,5 @@ impl Clock for FakeClock {
 impl SynchronizableClock for FakeClock {
     fn synchronize(&self, to: TimeStamp) {
         self.now.set(to);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::rc::Rc;
-
-    #[test]
-    fn local_clock_adjusts_wrapped_clock() {
-        let clock = Rc::new(FakeClock::default());
-        let sync_clock = LocalClock::new(clock.clone(), LocalClockDS::mid_grade_test_clock());
-
-        sync_clock.ingest_two_step_sync(TwoStepSyncMessage::new(0), TimeStamp::new(1, 0));
-        sync_clock.ingest_follow_up(FollowUpMessage::new(0, TimeStamp::new(1, 0)));
-        sync_clock.ingest_delay_request(DelayRequestMessage::new(0), TimeStamp::new(0, 0));
-        sync_clock.ingest_delay_response(DelayResponseMessage::new(0, TimeStamp::new(2, 0)));
-
-        assert_eq!(clock.now(), TimeStamp::new(2, 0));
     }
 }

@@ -1,9 +1,10 @@
+use std::cell::RefCell;
 use std::time::Duration;
 
 use crate::bmca::{BestForeignClock, ForeignClockDS};
 use crate::message::{
-    AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
-    SystemMessage,
+    AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, MasterEstimate,
+    SyncCycleMessage, SystemMessage,
 };
 use crate::port::{Port, Timeout};
 use crate::time::TimeStamp;
@@ -126,6 +127,7 @@ impl<P: Port> ListeningNode<P> {
 pub struct SlaveNode<P: Port> {
     port: P,
     delay_cycle_timeout: P::Timeout,
+    master_estimate: RefCell<MasterEstimate>,
 }
 
 impl<P: Port> SlaveNode<P> {
@@ -138,13 +140,20 @@ impl<P: Port> SlaveNode<P> {
         Self {
             port,
             delay_cycle_timeout,
+            master_estimate: RefCell::new(MasterEstimate::new()),
         }
     }
 
     fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<P> {
         match msg {
             EventMessage::TwoStepSync(sync) => {
-                self.port.clock().ingest_two_step_sync(sync, timestamp);
+                if let Some(estimate) = self
+                    .master_estimate
+                    .borrow_mut()
+                    .ingest_two_step_sync(sync, timestamp)
+                {
+                    self.port.clock().discipline(estimate);
+                }
             }
             _ => {}
         }
@@ -156,10 +165,22 @@ impl<P: Port> SlaveNode<P> {
         match msg {
             GeneralMessage::Announce(_) => {}
             GeneralMessage::FollowUp(follow_up) => {
-                self.port.clock().ingest_follow_up(follow_up);
+                if let Some(estimate) = self
+                    .master_estimate
+                    .borrow_mut()
+                    .ingest_follow_up(follow_up)
+                {
+                    self.port.clock().discipline(estimate);
+                }
             }
             GeneralMessage::DelayResp(resp) => {
-                self.port.clock().ingest_delay_response(resp);
+                if let Some(estimate) = self
+                    .master_estimate
+                    .borrow_mut()
+                    .ingest_delay_response(resp)
+                {
+                    self.port.clock().discipline(estimate);
+                }
             }
         }
 
@@ -180,7 +201,13 @@ impl<P: Port> SlaveNode<P> {
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::DelayReq(req) => {
-                    self.port.clock().ingest_delay_request(req, timestamp);
+                    if let Some(estimate) = self
+                        .master_estimate
+                        .borrow_mut()
+                        .ingest_delay_request(req, timestamp)
+                    {
+                        self.port.clock().discipline(estimate);
+                    }
                 }
                 _ => {}
             },

@@ -339,7 +339,7 @@ mod tests {
         use std::mem::size_of;
         let s = size_of::<NodeState<Box<TokioPort>>>();
         println!("NodeState<Box<TokioPort>> size: {}", s);
-        assert!(s <= 64);
+        assert!(s <= 256);
     }
 
     #[tokio::test(start_paused = true)]
