@@ -92,7 +92,7 @@ impl<P: Port> ListeningNode<P> {
         }
     }
 
-    fn general_message(self, msg: GeneralMessage) -> NodeState<P> {
+    fn general_message(mut self, msg: GeneralMessage) -> NodeState<P> {
         match msg {
             GeneralMessage::Announce(msg) => {
                 self.announce_receipt_timeout
@@ -107,7 +107,7 @@ impl<P: Port> ListeningNode<P> {
                 match (best_foreign, self_wins) {
                     (Some(_foreign), true) => NodeState::PreMaster(PreMasterNode::new(self.port)),
                     (Some(foreign), false) => {
-                        NodeState::Uncalibrated(UncalibratedNode::new(self.port, foreign))
+                        NodeState::Uncalibrated(UncalibratedNode::new(self.port, foreign.clone()))
                     }
                     (None, _) => NodeState::Listening(self),
                 }

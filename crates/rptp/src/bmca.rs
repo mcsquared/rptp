@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use crate::clock::{ClockIdentity, ClockQuality};
 use crate::message::AnnounceMessage;
 
@@ -114,34 +112,31 @@ impl PartialOrd for ForeignClockRecord {
 }
 
 pub struct BestForeignClock<S: SortedForeignClockRecords> {
-    sorted_clock_records: RefCell<S>,
+    sorted_clock_records: S,
 }
 
 impl<S: SortedForeignClockRecords> BestForeignClock<S> {
     pub fn new(sorted_clock_records: S) -> Self {
         Self {
-            sorted_clock_records: RefCell::new(sorted_clock_records),
+            sorted_clock_records,
         }
     }
 
-    pub fn consider(&self, announce: AnnounceMessage) {
+    pub fn consider(&mut self, announce: AnnounceMessage) {
         let foreign = announce.foreign_clock();
-        let mut records = self.sorted_clock_records.borrow_mut();
 
-        let updated = records.update_record(foreign, |record| {
+        let updated = self.sorted_clock_records.update_record(foreign, |record| {
             record.consider(announce);
         });
 
         if !updated {
-            records.insert(ForeignClockRecord::new(announce));
+            self.sorted_clock_records
+                .insert(ForeignClockRecord::new(announce));
         }
     }
 
-    pub fn clock(&self) -> Option<ForeignClockDS> {
-        self.sorted_clock_records
-            .borrow()
-            .first()
-            .and_then(|record| record.clock().copied())
+    pub fn clock(&self) -> Option<&ForeignClockDS> {
+        self.sorted_clock_records.first()?.clock()
     }
 }
 
@@ -218,7 +213,7 @@ pub(crate) mod tests {
 
     #[test]
     fn best_foreign_clock_yields_from_interleaved_announce_sequence() {
-        let best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+        let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -228,12 +223,12 @@ pub(crate) mod tests {
         best_foreign_clock.consider(AnnounceMessage::new(1, foreign_high));
         best_foreign_clock.consider(AnnounceMessage::new(1, foreign_mid));
 
-        assert_eq!(best_foreign_clock.clock(), Some(foreign_high));
+        assert_eq!(best_foreign_clock.clock(), Some(&foreign_high));
     }
 
     #[test]
     fn best_foreign_clock_yields_from_segregated_announce_sequence() {
-        let best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+        let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -243,7 +238,7 @@ pub(crate) mod tests {
         best_foreign_clock.consider(AnnounceMessage::new(0, foreign_mid));
         best_foreign_clock.consider(AnnounceMessage::new(1, foreign_mid));
 
-        assert_eq!(best_foreign_clock.clock(), Some(foreign_high));
+        assert_eq!(best_foreign_clock.clock(), Some(&foreign_high));
     }
 
     #[test]
@@ -255,7 +250,7 @@ pub(crate) mod tests {
 
     #[test]
     fn best_foreign_clock_yields_none_when_no_clock_records() {
-        let best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+        let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
@@ -266,7 +261,7 @@ pub(crate) mod tests {
 
     #[test]
     fn best_foreign_clock_yields_none_when_only_single_announces_each() {
-        let best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+        let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -281,7 +276,7 @@ pub(crate) mod tests {
 
     #[test]
     fn best_foreign_clock_yields_none_when_gaps_in_sequence() {
-        let best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+        let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
