@@ -74,7 +74,10 @@ impl ForeignClockRecord {
     pub fn consider(&mut self, announce: AnnounceMessage) -> Option<&ForeignClockDS> {
         if let Some(clock) = announce.follows(self.last_announce) {
             self.foreign_clock = Some(clock);
+        } else {
+            self.foreign_clock = None;
         }
+
         self.last_announce = announce;
         self.foreign_clock.as_ref()
     }
@@ -275,7 +278,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn best_foreign_clock_yields_none_when_gaps_in_sequence() {
+    fn best_foreign_clock_yields_none_on_sequence_gap() {
         let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
@@ -284,5 +287,17 @@ pub(crate) mod tests {
         best_foreign_clock.consider(AnnounceMessage::new(2, foreign_high));
 
         assert_eq!(best_foreign_clock.clock(), None);
+    }
+
+    #[test]
+    fn best_foreign_clock_unqualifies_on_sequence_gap() {
+        let mut best_foreign = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+        let foreign_high = ForeignClockDS::high_grade_test_clock();
+
+        best_foreign.consider(AnnounceMessage::new(0, foreign_high));
+        best_foreign.consider(AnnounceMessage::new(1, foreign_high));
+        best_foreign.consider(AnnounceMessage::new(3, foreign_high));
+
+        assert_eq!(best_foreign.clock(), None);
     }
 }
