@@ -5,7 +5,6 @@ use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 pub trait Timeout {
     fn restart(&self, timeout: std::time::Duration);
     fn restart_with(&self, msg: SystemMessage, timeout: std::time::Duration);
-    fn cancel(&self);
 }
 
 pub trait Port {
@@ -88,8 +87,6 @@ pub mod test_support {
             self.system_messages.borrow_mut().push(msg);
             self.msg.replace(msg);
         }
-
-        fn cancel(&self) {}
     }
 
     pub struct FakePort<C: SynchronizableClock> {

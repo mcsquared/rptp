@@ -59,6 +59,12 @@ impl TokioTimeout {
             let _ = inner.tx.send(msg);
         })
     }
+
+    fn cancel(&self) {
+        if let Some(handle) = self.inner.handle.lock().unwrap().take() {
+            handle.abort();
+        }
+    }
 }
 
 impl Timeout for TokioTimeout {
@@ -69,12 +75,6 @@ impl Timeout for TokioTimeout {
     fn restart_with(&self, msg: SystemMessage, delay: Duration) {
         *self.inner.msg.lock().unwrap() = msg;
         self.reset(delay);
-    }
-
-    fn cancel(&self) {
-        if let Some(handle) = self.inner.handle.lock().unwrap().take() {
-            handle.abort();
-        }
     }
 }
 
