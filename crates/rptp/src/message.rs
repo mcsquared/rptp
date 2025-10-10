@@ -19,7 +19,7 @@ pub enum GeneralMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemMessage {
-    AnnounceCycle(AnnounceCycleMessage),
+    AnnounceSendTimeout,
     DelayCycle(DelayCycleMessage),
     SyncCycle(SyncCycleMessage),
     Timestamp {
@@ -248,27 +248,6 @@ impl DelayResponseMessage {
         buf[34..44].copy_from_slice(&self.receive_timestamp.to_wire());
 
         buf
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AnnounceCycleMessage {
-    pub sequence_id: u16,
-}
-
-impl AnnounceCycleMessage {
-    pub fn new(start: u16) -> Self {
-        Self { sequence_id: start }
-    }
-
-    pub fn sequence_id(&self) -> u16 {
-        self.sequence_id
-    }
-
-    pub fn next(self) -> Self {
-        Self {
-            sequence_id: self.sequence_id.wrapping_add(1),
-        }
     }
 }
 

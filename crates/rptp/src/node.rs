@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use crate::bmca::{BestForeignClock, ForeignClockDS};
+use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{
-    AnnounceCycleMessage, DelayCycleMessage, EventMessage, GeneralMessage, MasterEstimate,
+    AnnounceMessage, DelayCycleMessage, EventMessage, GeneralMessage, MasterEstimate,
     SyncCycleMessage, SystemMessage,
 };
 use crate::port::{Port, Timeout};
@@ -205,16 +206,15 @@ impl<P: Port> SlaveNode<P> {
 
 pub struct MasterNode<P: Port> {
     port: P,
-    announce_cycle_timeout: P::Timeout,
+    announce_send_timeout: P::Timeout,
     sync_cycle_timeout: P::Timeout,
+    announce_cycle: AnnounceCycle,
 }
 
 impl<P: Port> MasterNode<P> {
     pub fn new(port: P) -> Self {
-        let announce_cycle_timeout = port.schedule(
-            SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)),
-            Duration::ZERO,
-        );
+        let announce_send_timeout =
+            port.schedule(SystemMessage::AnnounceSendTimeout, Duration::ZERO);
         let sync_cycle_timeout = port.schedule(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
             Duration::ZERO,
@@ -222,8 +222,9 @@ impl<P: Port> MasterNode<P> {
 
         Self {
             port,
-            announce_cycle_timeout,
+            announce_send_timeout,
             sync_cycle_timeout,
+            announce_cycle: AnnounceCycle::new(0),
         }
     }
 
@@ -246,17 +247,13 @@ impl<P: Port> MasterNode<P> {
         NodeState::Master(self)
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<P> {
+    fn system_message(mut self, msg: SystemMessage) -> NodeState<P> {
         match msg {
-            SystemMessage::AnnounceCycle(announce_cycle) => {
-                let announce_message = self.port.clock().announce(announce_cycle.sequence_id());
-
+            SystemMessage::AnnounceSendTimeout => {
+                let announce_message = self.announce_cycle.announce(&self.port.clock());
                 self.port
                     .send_general(GeneralMessage::Announce(announce_message));
-                self.announce_cycle_timeout.restart_with(
-                    SystemMessage::AnnounceCycle(announce_cycle.next()),
-                    Duration::from_secs(1),
-                );
+                self.announce_send_timeout.restart(Duration::from_secs(1));
             }
             SystemMessage::SyncCycle(sync_cycle) => {
                 let sync_message = sync_cycle.two_step_sync();
@@ -318,6 +315,26 @@ impl<P: Port> UncalibratedNode<P> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnnounceCycle {
+    sequence_id: u16,
+}
+
+impl AnnounceCycle {
+    pub fn new(start: u16) -> Self {
+        Self { sequence_id: start }
+    }
+
+    pub fn announce<C: SynchronizableClock>(
+        &mut self,
+        local_clock: &LocalClock<C>,
+    ) -> AnnounceMessage {
+        let msg = local_clock.announce(self.sequence_id);
+        self.sequence_id = self.sequence_id.wrapping_add(1);
+        msg
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,8 +344,8 @@ mod tests {
     use crate::bmca::LocalClockDS;
     use crate::clock::{Clock, FakeClock};
     use crate::message::{
-        AnnounceCycleMessage, AnnounceMessage, DelayRequestMessage, DelayResponseMessage,
-        FollowUpMessage, TwoStepSyncMessage,
+        AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
+        TwoStepSyncMessage,
     };
     use crate::port::test_support::FakePort;
 
@@ -439,13 +456,13 @@ mod tests {
     }
 
     #[test]
-    fn master_node_schedules_initial_announce_cycle() {
+    fn master_node_schedules_initial_announce() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let _ = MasterNode::new(&port);
 
         let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0,))));
+        assert!(messages.contains(&SystemMessage::AnnounceSendTimeout));
     }
 
     #[test]
@@ -456,21 +473,21 @@ mod tests {
 
         port.take_system_messages();
 
-        node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
+        node.system_message(SystemMessage::AnnounceSendTimeout);
 
         let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(1))));
+        assert!(messages.contains(&SystemMessage::AnnounceSendTimeout));
     }
 
     #[test]
-    fn master_node_answers_announce_cycle_with_announce() {
+    fn master_node_sends_announce_on_send_timeout() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let node = MasterNode::new(&port);
 
         port.take_system_messages();
 
-        node.system_message(SystemMessage::AnnounceCycle(AnnounceCycleMessage::new(0)));
+        node.system_message(SystemMessage::AnnounceSendTimeout);
 
         let messages = port.take_general_messages();
         assert!(
@@ -620,5 +637,24 @@ mod tests {
         let node = node.system_message(SystemMessage::QualificationTimeout);
 
         assert!(matches!(node, NodeState::Master(_)));
+    }
+
+    #[test]
+    fn announce_cycle_produces_announce_messages_with_monotonic_sequence_ids() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+
+        let mut cycle = AnnounceCycle::new(0);
+        let msg1 = cycle.announce(&local_clock);
+        let msg2 = cycle.announce(&local_clock);
+
+        assert_eq!(
+            msg1,
+            AnnounceMessage::new(0, ForeignClockDS::high_grade_test_clock())
+        );
+        assert_eq!(
+            msg2,
+            AnnounceMessage::new(1, ForeignClockDS::high_grade_test_clock())
+        );
     }
 }
