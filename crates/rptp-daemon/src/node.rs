@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rptp::bmca::BestForeignClock;
+use rptp::bmca::{BestForeignClock, ForeignClockRecord};
 use rptp::clock::{ClockIdentity, ClockQuality};
 use tokio::sync::mpsc;
 
@@ -117,8 +117,8 @@ impl Port for TokioPort {
         &self.clock
     }
 
-    fn foreign_clock_records(&self) -> Self::ClockRecords {
-        Box::new(SortedForeignClockRecordsVec::new())
+    fn foreign_clock_records(&self, records: &[ForeignClockRecord]) -> Self::ClockRecords {
+        Box::new(SortedForeignClockRecordsVec::from_records(records))
     }
 
     fn send_event(&self, msg: EventMessage) {
@@ -150,19 +150,14 @@ impl<P: NetPort> TokioNode<P> {
         clock: Rc<dyn SynchronizableClock>,
         event_port: P,
         general_port: P,
+        localds: LocalClockDS,
     ) -> std::io::Result<Self> {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
         let node = NodeState::Initializing(InitializingNode::new(Box::new(TokioPort::new(
-            LocalClock::new(
-                clock.clone(),
-                LocalClockDS::new(
-                    ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
-                    ClockQuality::new(248, 0xFE, 0xFFFF),
-                ),
-            ),
+            LocalClock::new(clock.clone(), localds),
             event_tx,
             general_tx,
             system_tx,
@@ -200,7 +195,7 @@ impl<P: NetPort> TokioNode<P> {
             general_tx,
             system_tx,
         ));
-        let best_foreign = BestForeignClock::new(port.foreign_clock_records());
+        let best_foreign = BestForeignClock::new(port.foreign_clock_records(&[]));
 
         let node = NodeState::Master(MasterNode::new(port, best_foreign));
 

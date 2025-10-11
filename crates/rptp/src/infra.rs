@@ -40,6 +40,14 @@ pub mod infra_support {
             }
         }
 
+        pub fn from_records(records: &[ForeignClockRecord]) -> Self {
+            let mut vec = Self {
+                records: records.to_vec(),
+            };
+            vec.sort_records();
+            vec
+        }
+
         fn sort_records(&mut self) {
             self.records.sort();
         }

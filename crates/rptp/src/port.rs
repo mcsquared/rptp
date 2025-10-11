@@ -1,4 +1,4 @@
-use crate::bmca::SortedForeignClockRecords;
+use crate::bmca::{ForeignClockRecord, SortedForeignClockRecords};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
@@ -13,7 +13,7 @@ pub trait Port {
     type Timeout: Timeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock>;
-    fn foreign_clock_records(&self) -> Self::ClockRecords;
+    fn foreign_clock_records(&self, records: &[ForeignClockRecord]) -> Self::ClockRecords;
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
     fn schedule(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
@@ -28,8 +28,8 @@ impl<P: Port> Port for Box<P> {
         self.as_ref().clock()
     }
 
-    fn foreign_clock_records(&self) -> Self::ClockRecords {
-        self.as_ref().foreign_clock_records()
+    fn foreign_clock_records(&self, records: &[ForeignClockRecord]) -> Self::ClockRecords {
+        self.as_ref().foreign_clock_records(records)
     }
 
     fn send_event(&self, msg: EventMessage) {
@@ -51,7 +51,7 @@ pub mod test_support {
     use std::rc::Rc;
     use std::time::Duration;
 
-    use crate::bmca::LocalClockDS;
+    use crate::bmca::{ForeignClockRecord, LocalClockDS};
     use crate::clock::{LocalClock, SynchronizableClock};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
@@ -128,8 +128,8 @@ pub mod test_support {
             &self.clock
         }
 
-        fn foreign_clock_records(&self) -> Self::ClockRecords {
-            SortedForeignClockRecordsVec::new()
+        fn foreign_clock_records(&self, records: &[ForeignClockRecord]) -> Self::ClockRecords {
+            SortedForeignClockRecordsVec::from_records(records)
         }
 
         fn send_event(&self, msg: EventMessage) {
@@ -155,8 +155,8 @@ pub mod test_support {
             &self.clock
         }
 
-        fn foreign_clock_records(&self) -> Self::ClockRecords {
-            SortedForeignClockRecordsVec::new()
+        fn foreign_clock_records(&self, records: &[ForeignClockRecord]) -> Self::ClockRecords {
+            SortedForeignClockRecordsVec::from_records(records)
         }
 
         fn send_event(&self, msg: EventMessage) {

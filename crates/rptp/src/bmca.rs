@@ -188,6 +188,17 @@ pub(crate) mod tests {
         }
     }
 
+    impl ForeignClockRecord {
+        pub(crate) fn with_resolved_clock(self, foreign_clock: ForeignClockDS) -> Self {
+            assert!(self.same_source_as(&foreign_clock));
+
+            Self {
+                last_announce: self.last_announce,
+                foreign_clock: Some(foreign_clock),
+            }
+        }
+    }
+
     #[test]
     fn test_foreign_clock_ordering() {
         let high = ForeignClockDS::high_grade_test_clock();

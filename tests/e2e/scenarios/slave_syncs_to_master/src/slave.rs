@@ -3,7 +3,8 @@ use std::rc::Rc;
 use tokio::net::UdpSocket;
 use tokio::time::{Duration, timeout};
 
-use rptp::clock::{Clock, FakeClock};
+use rptp::bmca::LocalClockDS;
+use rptp::clock::{Clock, ClockIdentity, ClockQuality, FakeClock};
 use rptp::time::TimeStamp;
 use rptp_daemon::net::MulticastPort;
 use rptp_daemon::node::TokioNode;
@@ -13,8 +14,12 @@ async fn main() -> std::io::Result<()> {
     let clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
     let event_port = MulticastPort::ptp_event_testing_port().await?;
     let general_port = MulticastPort::ptp_general_testing_port().await?;
+    let localds = LocalClockDS::new(
+        ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
+        ClockQuality::new(250, 0xFE, 0xFFFF),
+    );
 
-    let slave = TokioNode::slave(clock.clone(), event_port, general_port).await?;
+    let slave = TokioNode::initializing(clock.clone(), event_port, general_port, localds).await?;
 
     println!("Slave ready");
 
