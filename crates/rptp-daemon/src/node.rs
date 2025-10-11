@@ -2,6 +2,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rptp::bmca::BestForeignClock;
 use rptp::clock::{ClockIdentity, ClockQuality};
 use tokio::sync::mpsc;
 
@@ -187,7 +188,7 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let node = NodeState::Master(MasterNode::new(Box::new(TokioPort::new(
+        let port = Box::new(TokioPort::new(
             LocalClock::new(
                 clock.clone(),
                 LocalClockDS::new(
@@ -198,7 +199,10 @@ impl<P: NetPort> TokioNode<P> {
             event_tx,
             general_tx,
             system_tx,
-        ))));
+        ));
+        let best_foreign = BestForeignClock::new(port.foreign_clock_records());
+
+        let node = NodeState::Master(MasterNode::new(port, best_foreign));
 
         Ok(Self {
             node,

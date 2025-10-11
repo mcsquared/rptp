@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::bmca::{BestForeignClock, ForeignClockDS};
+use crate::bmca::BestForeignClock;
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{
     AnnounceMessage, DelayCycleMessage, EventMessage, GeneralMessage, MasterEstimate,
@@ -100,14 +100,16 @@ impl<P: Port> ListeningNode<P> {
                 self.best_foreign.consider(msg);
 
                 let best_foreign = self.best_foreign.clock();
-                let self_wins = best_foreign
+                let local_wins = best_foreign
                     .map(|foreign| self.port.clock().outranks_foreign(&foreign))
                     .unwrap_or(false);
 
-                match (best_foreign, self_wins) {
-                    (Some(_foreign), true) => NodeState::PreMaster(PreMasterNode::new(self.port)),
-                    (Some(foreign), false) => {
-                        NodeState::Uncalibrated(UncalibratedNode::new(self.port, foreign.clone()))
+                match (best_foreign, local_wins) {
+                    (Some(_foreign), true) => {
+                        NodeState::PreMaster(PreMasterNode::new(self.port, self.best_foreign))
+                    }
+                    (Some(_foreign), false) => {
+                        NodeState::Uncalibrated(UncalibratedNode::new(self.port, self.best_foreign))
                     }
                     (None, _) => NodeState::Listening(self),
                 }
@@ -118,7 +120,9 @@ impl<P: Port> ListeningNode<P> {
 
     fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
-            SystemMessage::AnnounceReceiptTimeout => NodeState::Master(MasterNode::new(self.port)),
+            SystemMessage::AnnounceReceiptTimeout => {
+                NodeState::Master(MasterNode::new(self.port, self.best_foreign))
+            }
             _ => NodeState::Listening(self),
         }
     }
@@ -209,10 +213,11 @@ pub struct MasterNode<P: Port> {
     announce_send_timeout: P::Timeout,
     sync_cycle_timeout: P::Timeout,
     announce_cycle: AnnounceCycle,
+    best_foreign: BestForeignClock<P::ClockRecords>,
 }
 
 impl<P: Port> MasterNode<P> {
-    pub fn new(port: P) -> Self {
+    pub fn new(port: P, best_foreign: BestForeignClock<P::ClockRecords>) -> Self {
         let announce_send_timeout =
             port.schedule(SystemMessage::AnnounceSendTimeout, Duration::ZERO);
         let sync_cycle_timeout = port.schedule(
@@ -225,6 +230,7 @@ impl<P: Port> MasterNode<P> {
             announce_send_timeout,
             sync_cycle_timeout,
             announce_cycle: AnnounceCycle::new(0),
+            best_foreign,
         }
     }
 
@@ -239,8 +245,23 @@ impl<P: Port> MasterNode<P> {
         NodeState::Master(self)
     }
 
-    fn general_message(self, _msg: GeneralMessage) -> NodeState<P> {
+    fn general_message(mut self, _msg: GeneralMessage) -> NodeState<P> {
         match _msg {
+            GeneralMessage::Announce(msg) => {
+                self.best_foreign.consider(msg);
+
+                let best_foreign = self.best_foreign.clock();
+                let local_wins = best_foreign
+                    .map(|foreign| self.port.clock().outranks_foreign(foreign))
+                    .unwrap_or(true);
+
+                if !local_wins {
+                    return NodeState::Uncalibrated(UncalibratedNode::new(
+                        self.port,
+                        self.best_foreign,
+                    ));
+                }
+            }
             _ => {}
         }
 
@@ -280,22 +301,26 @@ impl<P: Port> MasterNode<P> {
 
 pub struct PreMasterNode<P: Port> {
     port: P,
+    best_foreign: BestForeignClock<P::ClockRecords>,
     _qualification_timeout: P::Timeout,
 }
 
 impl<P: Port> PreMasterNode<P> {
-    pub fn new(port: P) -> Self {
+    pub fn new(port: P, best_foreign: BestForeignClock<P::ClockRecords>) -> Self {
         let _qualification_timeout =
-            port.schedule(SystemMessage::QualificationTimeout, Duration::from_secs(2));
+            port.schedule(SystemMessage::QualificationTimeout, Duration::from_secs(5));
         Self {
             port,
+            best_foreign,
             _qualification_timeout,
         }
     }
 
     fn system_message(self, msg: SystemMessage) -> NodeState<P> {
         match msg {
-            SystemMessage::QualificationTimeout => NodeState::Master(MasterNode::new(self.port)),
+            SystemMessage::QualificationTimeout => {
+                NodeState::Master(MasterNode::new(self.port, self.best_foreign))
+            }
             _ => NodeState::PreMaster(self),
         }
     }
@@ -303,14 +328,14 @@ impl<P: Port> PreMasterNode<P> {
 
 pub struct UncalibratedNode<P: Port> {
     _port: P,
-    _best_foreign: ForeignClockDS,
+    _best_foreign: BestForeignClock<P::ClockRecords>,
 }
 
 impl<P: Port> UncalibratedNode<P> {
-    pub fn new(port: P, best_foreign: ForeignClockDS) -> Self {
+    pub fn new(port: P, _best_foreign: BestForeignClock<P::ClockRecords>) -> Self {
         Self {
             _port: port,
-            _best_foreign: best_foreign,
+            _best_foreign,
         }
     }
 }
@@ -341,7 +366,7 @@ mod tests {
 
     use std::rc::Rc;
 
-    use crate::bmca::LocalClockDS;
+    use crate::bmca::{ForeignClockDS, LocalClockDS};
     use crate::clock::{Clock, FakeClock};
     use crate::message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
@@ -382,7 +407,7 @@ mod tests {
     fn master_node_answers_delay_request_with_delay_response() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port);
+        let node = MasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
 
         node.event_message(
             EventMessage::DelayReq(DelayRequestMessage::new(0)),
@@ -402,7 +427,7 @@ mod tests {
     fn master_node_schedules_initial_sync() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let _ = MasterNode::new(&port);
+        let _ = MasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
 
         let messages = port.take_system_messages();
         assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0))));
@@ -412,7 +437,7 @@ mod tests {
     fn master_node_answers_sync_cycle_with_sync() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port);
+        let node = MasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
 
         node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
@@ -424,7 +449,7 @@ mod tests {
     fn master_node_schedules_next_sync() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port);
+        let node = MasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
 
         // Drain messages that could have been sent during initialization.
         port.take_system_messages();
@@ -439,7 +464,7 @@ mod tests {
     fn master_node_answers_timestamped_sync_with_follow_up() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port);
+        let node = MasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
 
         node.system_message(SystemMessage::Timestamp {
             msg: EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
@@ -459,7 +484,7 @@ mod tests {
     fn master_node_schedules_initial_announce() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let _ = MasterNode::new(&port);
+        let _ = MasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
 
         let messages = port.take_system_messages();
         assert!(messages.contains(&SystemMessage::AnnounceSendTimeout));
@@ -469,7 +494,7 @@ mod tests {
     fn master_node_schedules_next_announce() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port);
+        let node = MasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
 
         port.take_system_messages();
 
@@ -483,7 +508,7 @@ mod tests {
     fn master_node_sends_announce_on_send_timeout() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port);
+        let node = MasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
 
         port.take_system_messages();
 
@@ -496,6 +521,42 @@ mod tests {
                 ForeignClockDS::high_grade_test_clock()
             )))
         );
+    }
+
+    #[test]
+    fn master_node_to_uncalibrated_transition_on_better_announce_sequence() {
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let node = MasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
+
+        // master node sees two announces from a better clock
+        let foreign_clock = ForeignClockDS::high_grade_test_clock();
+
+        let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
+            0,
+            foreign_clock,
+        )));
+        let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
+            1,
+            foreign_clock,
+        )));
+
+        assert!(matches!(node, NodeState::Uncalibrated(_)));
+    }
+
+    #[test]
+    fn master_node_stays_master_on_single_better_announce() {
+        let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let node = MasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
+
+        // master node sees two announces from a better clock
+        let foreign_clock = ForeignClockDS::high_grade_test_clock();
+
+        let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
+            0,
+            foreign_clock,
+        )));
+
+        assert!(matches!(node, NodeState::Master(_)));
     }
 
     #[test]
@@ -623,7 +684,7 @@ mod tests {
     fn pre_master_node_schedules_qualification_timeout() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let _ = PreMasterNode::new(&port);
+        let _ = PreMasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
 
         let messages = port.take_system_messages();
         assert!(messages.contains(&SystemMessage::QualificationTimeout));
@@ -632,7 +693,7 @@ mod tests {
     #[test]
     fn pre_master_node_to_master_transition_on_qualification_timeout() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
-        let node = PreMasterNode::new(&port);
+        let node = PreMasterNode::new(&port, BestForeignClock::new(port.foreign_clock_records()));
 
         let node = node.system_message(SystemMessage::QualificationTimeout);
 
