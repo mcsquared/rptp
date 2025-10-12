@@ -5,6 +5,7 @@ use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 pub trait Timeout {
     fn restart(&self, timeout: std::time::Duration);
     fn restart_with(&self, msg: SystemMessage, timeout: std::time::Duration);
+    fn cancel(&self);
 }
 
 pub trait Port {
@@ -47,7 +48,7 @@ impl<P: Port> Port for Box<P> {
 
 #[cfg(test)]
 pub mod test_support {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::time::Duration;
 
@@ -61,6 +62,7 @@ pub mod test_support {
     pub struct FakeTimeout {
         msg: RefCell<SystemMessage>,
         system_messages: Rc<RefCell<Vec<SystemMessage>>>,
+        is_active: Cell<bool>,
     }
 
     impl FakeTimeout {
@@ -68,6 +70,7 @@ pub mod test_support {
             Self {
                 msg: RefCell::new(msg),
                 system_messages,
+                is_active: Cell::new(true),
             }
         }
 
@@ -75,17 +78,41 @@ pub mod test_support {
         pub fn fire(&self) -> SystemMessage {
             *self.msg.borrow()
         }
+
+        pub fn is_active(&self) -> bool {
+            self.is_active.get()
+        }
     }
 
     impl Timeout for FakeTimeout {
         fn restart(&self, _timeout: Duration) {
             let msg = *self.msg.borrow();
             self.system_messages.borrow_mut().push(msg);
+            self.is_active.set(true);
         }
 
         fn restart_with(&self, msg: SystemMessage, _timeout: Duration) {
             self.system_messages.borrow_mut().push(msg);
             self.msg.replace(msg);
+            self.is_active.set(true);
+        }
+
+        fn cancel(&self) {
+            self.is_active.set(false);
+        }
+    }
+
+    impl Timeout for Rc<FakeTimeout> {
+        fn restart(&self, timeout: Duration) {
+            self.as_ref().restart(timeout);
+        }
+
+        fn restart_with(&self, msg: SystemMessage, _timeout: Duration) {
+            self.as_ref().restart_with(msg, _timeout);
+        }
+
+        fn cancel(&self) {
+            self.as_ref().cancel();
         }
     }
 
@@ -122,7 +149,7 @@ pub mod test_support {
     impl<C: SynchronizableClock> Port for FakePort<C> {
         type Clock = C;
         type ClockRecords = SortedForeignClockRecordsVec;
-        type Timeout = FakeTimeout;
+        type Timeout = Rc<FakeTimeout>;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
@@ -142,14 +169,14 @@ pub mod test_support {
 
         fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
             self.system_messages.borrow_mut().push(msg);
-            FakeTimeout::new(msg, Rc::clone(&self.system_messages))
+            Rc::new(FakeTimeout::new(msg, Rc::clone(&self.system_messages)))
         }
     }
 
     impl<C: SynchronizableClock> Port for &FakePort<C> {
         type Clock = C;
         type ClockRecords = SortedForeignClockRecordsVec;
-        type Timeout = FakeTimeout;
+        type Timeout = Rc<FakeTimeout>;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
@@ -169,7 +196,7 @@ pub mod test_support {
 
         fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
             self.system_messages.borrow_mut().push(msg);
-            FakeTimeout::new(msg, Rc::clone(&self.system_messages))
+            Rc::new(FakeTimeout::new(msg, Rc::clone(&self.system_messages)))
         }
     }
 }

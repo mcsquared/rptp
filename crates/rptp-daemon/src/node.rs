@@ -77,6 +77,12 @@ impl Timeout for TokioTimeout {
         *self.inner.msg.lock().unwrap() = msg;
         self.reset(delay);
     }
+
+    fn cancel(&self) {
+        if let Some(handle) = self.inner.handle.lock().unwrap().take() {
+            handle.abort();
+        }
+    }
 }
 
 impl Drop for TokioTimeout {
