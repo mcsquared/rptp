@@ -8,6 +8,36 @@ pub trait Timeout {
     fn cancel(&self);
 }
 
+pub struct DropTimeout<T: Timeout> {
+    inner: T,
+}
+
+impl<T: Timeout> DropTimeout<T> {
+    pub fn new(inner: T) -> Self {
+        Self { inner }
+    }
+}
+
+impl<T: Timeout> Timeout for DropTimeout<T> {
+    fn restart(&self, timeout: std::time::Duration) {
+        self.inner.restart(timeout);
+    }
+
+    fn restart_with(&self, msg: SystemMessage, timeout: std::time::Duration) {
+        self.inner.restart_with(msg, timeout);
+    }
+
+    fn cancel(&self) {
+        self.inner.cancel();
+    }
+}
+
+impl<T: Timeout> Drop for DropTimeout<T> {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
 pub trait Port {
     type Clock: SynchronizableClock;
     type ClockRecords: SortedForeignClockRecords;
@@ -70,6 +100,14 @@ pub mod test_support {
             Self {
                 msg: RefCell::new(msg),
                 system_messages,
+                is_active: Cell::new(true),
+            }
+        }
+
+        pub fn from_system_message(msg: SystemMessage) -> Self {
+            Self {
+                msg: RefCell::new(msg),
+                system_messages: Rc::new(RefCell::new(Vec::new())),
                 is_active: Cell::new(true),
             }
         }

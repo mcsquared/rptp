@@ -12,12 +12,12 @@ use rptp::{
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{InitializingNode, MasterNode, NodeState, SlaveNode},
-    port::{Port, Timeout},
+    port::{DropTimeout, Port, Timeout},
 };
 
 use crate::net::NetPort;
 
-struct TokioTimeout {
+pub struct TokioTimeout {
     inner: Arc<TokioTimeoutInner>,
 }
 
@@ -225,7 +225,7 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let node = NodeState::Slave(SlaveNode::new(Box::new(TokioPort::new(
+        let port = Box::new(TokioPort::new(
             LocalClock::new(
                 clock.clone(),
                 LocalClockDS::new(
@@ -236,7 +236,16 @@ impl<P: NetPort> TokioNode<P> {
             event_tx,
             general_tx,
             system_tx,
-        ))));
+        ));
+        let bmca = Bmca::new(port.foreign_clock_records(&[]));
+        let announce_receipt_timeout = DropTimeout::new(port.schedule(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(30), // TODO: this is a hack to avoid tests running into timeouts
+                                     // -> long term solution would be to have Bmca trait and
+                                     // instantiate a slave-only Bmca here.
+        ));
+
+        let node = NodeState::Slave(SlaveNode::new(port, bmca, announce_receipt_timeout));
 
         Ok(Self {
             node,
