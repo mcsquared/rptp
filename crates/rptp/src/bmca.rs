@@ -1,4 +1,4 @@
-use crate::clock::{ClockIdentity, ClockQuality};
+use crate::clock::{ClockIdentity, ClockQuality, LocalClock, SynchronizableClock};
 use crate::message::AnnounceMessage;
 
 pub trait SortedForeignClockRecords {
@@ -114,11 +114,19 @@ impl PartialOrd for ForeignClockRecord {
     }
 }
 
-pub struct BestForeignClock<S: SortedForeignClockRecords> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BmcaRecommendation {
+    Undecided,
+    Master,
+    Slave,
+    // TODO: Passive,
+}
+
+pub struct Bmca<S: SortedForeignClockRecords> {
     sorted_clock_records: S,
 }
 
-impl<S: SortedForeignClockRecords> BestForeignClock<S> {
+impl<S: SortedForeignClockRecords> Bmca<S> {
     pub fn new(sorted_clock_records: S) -> Self {
         Self {
             sorted_clock_records,
@@ -138,8 +146,27 @@ impl<S: SortedForeignClockRecords> BestForeignClock<S> {
         }
     }
 
-    pub fn clock(&self) -> Option<&ForeignClockDS> {
-        self.sorted_clock_records.first()?.clock()
+    pub fn recommendation<C: SynchronizableClock>(
+        &self,
+        local_clock: &LocalClock<C>,
+    ) -> BmcaRecommendation {
+        let best_foreign_record = self.sorted_clock_records.first();
+
+        let recommendation = best_foreign_record
+            .map(|foreign_record| {
+                if let Some(foreign_clock) = foreign_record.clock() {
+                    if local_clock.outranks_foreign(foreign_clock) {
+                        BmcaRecommendation::Master
+                    } else {
+                        BmcaRecommendation::Slave
+                    }
+                } else {
+                    BmcaRecommendation::Undecided
+                }
+            })
+            .unwrap_or(BmcaRecommendation::Undecided);
+
+        recommendation
     }
 }
 
@@ -147,6 +174,7 @@ impl<S: SortedForeignClockRecords> BestForeignClock<S> {
 pub(crate) mod tests {
     use super::*;
 
+    use crate::clock::FakeClock;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
 
     const CLK_ID_HIGH: ClockIdentity =
@@ -183,7 +211,7 @@ pub(crate) mod tests {
             LocalClockDS::new(CLK_ID_MID, CLK_QUALITY_MID)
         }
 
-        pub(crate) fn _low_grade_test_clock() -> LocalClockDS {
+        pub(crate) fn low_grade_test_clock() -> LocalClockDS {
             LocalClockDS::new(CLK_ID_LOW, CLK_QUALITY_LOW)
         }
     }
@@ -226,89 +254,118 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn best_foreign_clock_yields_from_interleaved_announce_sequence() {
-        let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+    fn bmca_recommends_slave_from_interleaved_announce_sequence() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::low_grade_test_clock());
+        let mut bmca = Bmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
 
-        best_foreign_clock.consider(AnnounceMessage::new(0, foreign_high));
-        best_foreign_clock.consider(AnnounceMessage::new(0, foreign_mid));
-        best_foreign_clock.consider(AnnounceMessage::new(1, foreign_high));
-        best_foreign_clock.consider(AnnounceMessage::new(1, foreign_mid));
+        bmca.consider(AnnounceMessage::new(0, foreign_high));
+        bmca.consider(AnnounceMessage::new(0, foreign_mid));
+        bmca.consider(AnnounceMessage::new(1, foreign_high));
+        bmca.consider(AnnounceMessage::new(1, foreign_mid));
 
-        assert_eq!(best_foreign_clock.clock(), Some(&foreign_high));
+        assert_eq!(bmca.recommendation(&local_clock), BmcaRecommendation::Slave);
     }
 
     #[test]
-    fn best_foreign_clock_yields_from_segregated_announce_sequence() {
-        let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+    fn bmca_recommends_slave_from_non_interleaved_announce_sequence() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::low_grade_test_clock());
+        let mut bmca = Bmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
 
-        best_foreign_clock.consider(AnnounceMessage::new(0, foreign_high));
-        best_foreign_clock.consider(AnnounceMessage::new(1, foreign_high));
-        best_foreign_clock.consider(AnnounceMessage::new(0, foreign_mid));
-        best_foreign_clock.consider(AnnounceMessage::new(1, foreign_mid));
+        bmca.consider(AnnounceMessage::new(0, foreign_high));
+        bmca.consider(AnnounceMessage::new(1, foreign_high));
+        bmca.consider(AnnounceMessage::new(0, foreign_mid));
+        bmca.consider(AnnounceMessage::new(1, foreign_mid));
 
-        assert_eq!(best_foreign_clock.clock(), Some(&foreign_high));
+        assert_eq!(bmca.recommendation(&local_clock), BmcaRecommendation::Slave);
     }
 
     #[test]
-    fn best_foreign_clock_yields_none_when_no_announces() {
-        let best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+    fn bmca_undecided_when_no_announces_yet() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let bmca = Bmca::new(SortedForeignClockRecordsVec::new());
 
-        assert_eq!(best_foreign_clock.clock(), None);
+        assert_eq!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Undecided
+        );
     }
 
     #[test]
-    fn best_foreign_clock_yields_none_when_no_clock_records() {
-        let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+    fn bmca_undecided_when_no_qualified_clock_records_yet() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let mut bmca = Bmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        best_foreign_clock.consider(AnnounceMessage::new(0, foreign_high));
+        bmca.consider(AnnounceMessage::new(0, foreign_high));
 
-        assert_eq!(best_foreign_clock.clock(), None);
+        assert_eq!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Undecided
+        );
     }
 
     #[test]
-    fn best_foreign_clock_yields_none_when_only_single_announces_each() {
-        let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+    fn bmca_undecided_when_only_single_announces_each() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let mut bmca = Bmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
         let foreign_low = ForeignClockDS::low_grade_test_clock();
 
-        best_foreign_clock.consider(AnnounceMessage::new(0, foreign_high));
-        best_foreign_clock.consider(AnnounceMessage::new(5, foreign_mid));
-        best_foreign_clock.consider(AnnounceMessage::new(10, foreign_low));
+        bmca.consider(AnnounceMessage::new(0, foreign_high));
+        bmca.consider(AnnounceMessage::new(5, foreign_mid));
+        bmca.consider(AnnounceMessage::new(10, foreign_low));
 
-        assert_eq!(best_foreign_clock.clock(), None);
+        assert_eq!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Undecided
+        );
     }
 
     #[test]
-    fn best_foreign_clock_yields_none_on_sequence_gap() {
-        let mut best_foreign_clock = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+    fn bmca_undecided_on_sequence_gap() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let mut bmca = Bmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        best_foreign_clock.consider(AnnounceMessage::new(0, foreign_high));
-        best_foreign_clock.consider(AnnounceMessage::new(2, foreign_high));
+        bmca.consider(AnnounceMessage::new(0, foreign_high));
+        bmca.consider(AnnounceMessage::new(2, foreign_high));
 
-        assert_eq!(best_foreign_clock.clock(), None);
+        assert_eq!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Undecided
+        );
     }
 
     #[test]
-    fn best_foreign_clock_unqualifies_on_sequence_gap() {
-        let mut best_foreign = BestForeignClock::new(SortedForeignClockRecordsVec::new());
+    fn bmca_undecided_on_sequence_gap_after_being_qualified_before() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let mut bmca = Bmca::new(SortedForeignClockRecordsVec::new());
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        best_foreign.consider(AnnounceMessage::new(0, foreign_high));
-        best_foreign.consider(AnnounceMessage::new(1, foreign_high));
-        best_foreign.consider(AnnounceMessage::new(3, foreign_high));
+        bmca.consider(AnnounceMessage::new(0, foreign_high));
+        bmca.consider(AnnounceMessage::new(1, foreign_high));
+        bmca.consider(AnnounceMessage::new(3, foreign_high));
 
-        assert_eq!(best_foreign.clock(), None);
+        assert_eq!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Undecided
+        );
     }
 }
