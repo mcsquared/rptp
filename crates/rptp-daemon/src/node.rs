@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rptp::bmca::{Bmca, ForeignClockRecord};
+use rptp::bmca::FullBmca;
 use rptp::clock::{ClockIdentity, ClockQuality};
 use tokio::sync::mpsc;
 
@@ -116,15 +116,10 @@ impl TokioPort {
 
 impl Port for TokioPort {
     type Clock = Rc<dyn SynchronizableClock>;
-    type ClockRecords = Box<SortedForeignClockRecordsVec>;
     type Timeout = TokioTimeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         &self.clock
-    }
-
-    fn foreign_clock_records(&self, records: &[ForeignClockRecord]) -> Self::ClockRecords {
-        Box::new(SortedForeignClockRecordsVec::from_records(records))
     }
 
     fn send_event(&self, msg: EventMessage) {
@@ -142,7 +137,7 @@ impl Port for TokioPort {
 }
 
 pub struct TokioNode<P: NetPort> {
-    node: NodeState<Box<TokioPort>>,
+    node: NodeState<TokioPort, FullBmca<SortedForeignClockRecordsVec>>,
     clock: Rc<dyn SynchronizableClock>,
     event_port: P,
     general_port: P,
@@ -162,12 +157,15 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let node = NodeState::Initializing(InitializingNode::new(Box::new(TokioPort::new(
-            LocalClock::new(clock.clone(), localds),
-            event_tx,
-            general_tx,
-            system_tx,
-        ))));
+        let node = NodeState::Initializing(InitializingNode::new(
+            TokioPort::new(
+                LocalClock::new(clock.clone(), localds),
+                event_tx,
+                general_tx,
+                system_tx,
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+        ));
 
         Ok(Self {
             node: node.system_message(SystemMessage::Initialized),
@@ -189,7 +187,7 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let port = Box::new(TokioPort::new(
+        let port = TokioPort::new(
             LocalClock::new(
                 clock.clone(),
                 LocalClockDS::new(
@@ -200,8 +198,8 @@ impl<P: NetPort> TokioNode<P> {
             event_tx,
             general_tx,
             system_tx,
-        ));
-        let bmca = Bmca::new(port.foreign_clock_records(&[]));
+        );
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let node = NodeState::Master(MasterNode::new(port, bmca));
 
@@ -225,7 +223,7 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let port = Box::new(TokioPort::new(
+        let port = TokioPort::new(
             LocalClock::new(
                 clock.clone(),
                 LocalClockDS::new(
@@ -236,8 +234,8 @@ impl<P: NetPort> TokioNode<P> {
             event_tx,
             general_tx,
             system_tx,
-        ));
-        let bmca = Bmca::new(port.foreign_clock_records(&[]));
+        );
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let announce_receipt_timeout = DropTimeout::new(port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(30), // TODO: this is a hack to avoid tests running into timeouts
@@ -351,7 +349,7 @@ mod tests {
     #[test]
     fn tokio_node_state_size() {
         use std::mem::size_of;
-        let s = size_of::<NodeState<Box<TokioPort>>>();
+        let s = size_of::<NodeState<Box<TokioPort>, FullBmca<SortedForeignClockRecordsVec>>>();
         println!("NodeState<Box<TokioPort>> size: {}", s);
         assert!(s <= 256);
     }

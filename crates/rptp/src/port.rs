@@ -1,4 +1,3 @@
-use crate::bmca::{ForeignClockRecord, SortedForeignClockRecords};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
@@ -40,11 +39,9 @@ impl<T: Timeout> Drop for DropTimeout<T> {
 
 pub trait Port {
     type Clock: SynchronizableClock;
-    type ClockRecords: SortedForeignClockRecords;
     type Timeout: Timeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock>;
-    fn foreign_clock_records(&self, records: &[ForeignClockRecord]) -> Self::ClockRecords;
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
     fn schedule(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
@@ -52,15 +49,10 @@ pub trait Port {
 
 impl<P: Port> Port for Box<P> {
     type Clock = P::Clock;
-    type ClockRecords = P::ClockRecords;
     type Timeout = P::Timeout;
 
     fn clock(&self) -> &LocalClock<Self::Clock> {
         self.as_ref().clock()
-    }
-
-    fn foreign_clock_records(&self, records: &[ForeignClockRecord]) -> Self::ClockRecords {
-        self.as_ref().foreign_clock_records(records)
     }
 
     fn send_event(&self, msg: EventMessage) {
@@ -82,9 +74,8 @@ pub mod test_support {
     use std::rc::Rc;
     use std::time::Duration;
 
-    use crate::bmca::{ForeignClockRecord, LocalClockDS};
+    use crate::bmca::LocalClockDS;
     use crate::clock::{LocalClock, SynchronizableClock};
-    use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
     use super::{Port, Timeout};
@@ -186,15 +177,10 @@ pub mod test_support {
 
     impl<C: SynchronizableClock> Port for FakePort<C> {
         type Clock = C;
-        type ClockRecords = SortedForeignClockRecordsVec;
         type Timeout = Rc<FakeTimeout>;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
-        }
-
-        fn foreign_clock_records(&self, records: &[ForeignClockRecord]) -> Self::ClockRecords {
-            SortedForeignClockRecordsVec::from_records(records)
         }
 
         fn send_event(&self, msg: EventMessage) {
@@ -213,15 +199,10 @@ pub mod test_support {
 
     impl<C: SynchronizableClock> Port for &FakePort<C> {
         type Clock = C;
-        type ClockRecords = SortedForeignClockRecordsVec;
         type Timeout = Rc<FakeTimeout>;
 
         fn clock(&self) -> &LocalClock<Self::Clock> {
             &self.clock
-        }
-
-        fn foreign_clock_records(&self, records: &[ForeignClockRecord]) -> Self::ClockRecords {
-            SortedForeignClockRecordsVec::from_records(records)
         }
 
         fn send_event(&self, msg: EventMessage) {

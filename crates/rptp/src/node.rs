@@ -9,16 +9,16 @@ use crate::message::{
 use crate::port::{DropTimeout, Port, Timeout};
 use crate::time::TimeStamp;
 
-pub enum NodeState<P: Port> {
-    Initializing(InitializingNode<P>),
-    Listening(ListeningNode<P>),
-    Slave(SlaveNode<P>),
-    Master(MasterNode<P>),
-    PreMaster(PreMasterNode<P>),
-    Uncalibrated(UncalibratedNode<P>),
+pub enum NodeState<P: Port, B: Bmca> {
+    Initializing(InitializingNode<P, B>),
+    Listening(ListeningNode<P, B>),
+    Slave(SlaveNode<P, B>),
+    Master(MasterNode<P, B>),
+    PreMaster(PreMasterNode<P, B>),
+    Uncalibrated(UncalibratedNode<P, B>),
 }
 
-impl<P: Port> NodeState<P> {
+impl<P: Port, B: Bmca> NodeState<P, B> {
     pub fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> Self {
         match self {
             NodeState::Initializing(_) => self,
@@ -53,19 +53,19 @@ impl<P: Port> NodeState<P> {
     }
 }
 
-pub struct InitializingNode<P: Port> {
+pub struct InitializingNode<P: Port, B: Bmca> {
     port: P,
+    bmca: B,
 }
 
-impl<P: Port> InitializingNode<P> {
-    pub fn new(port: P) -> Self {
-        Self { port }
+impl<P: Port, B: Bmca> InitializingNode<P, B> {
+    pub fn new(port: P, bmca: B) -> Self {
+        Self { port, bmca }
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<P> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<P, B> {
         match msg {
             SystemMessage::Initialized => {
-                let bmca = Bmca::new(self.port.foreign_clock_records(&[]));
                 let announce_receipt_timeout = DropTimeout::new(self.port.schedule(
                     SystemMessage::AnnounceReceiptTimeout,
                     Duration::from_secs(5),
@@ -73,7 +73,7 @@ impl<P: Port> InitializingNode<P> {
 
                 NodeState::Listening(ListeningNode::new(
                     self.port,
-                    bmca,
+                    self.bmca,
                     announce_receipt_timeout,
                 ))
             }
@@ -82,18 +82,14 @@ impl<P: Port> InitializingNode<P> {
     }
 }
 
-pub struct ListeningNode<P: Port> {
+pub struct ListeningNode<P: Port, B: Bmca> {
     port: P,
-    bmca: Bmca<P::ClockRecords>,
+    bmca: B,
     announce_receipt_timeout: DropTimeout<P::Timeout>,
 }
 
-impl<P: Port> ListeningNode<P> {
-    pub fn new(
-        port: P,
-        bmca: Bmca<P::ClockRecords>,
-        announce_receipt_timeout: DropTimeout<P::Timeout>,
-    ) -> Self {
+impl<P: Port, B: Bmca> ListeningNode<P, B> {
+    pub fn new(port: P, bmca: B, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
         Self {
             port,
             bmca,
@@ -101,7 +97,7 @@ impl<P: Port> ListeningNode<P> {
         }
     }
 
-    fn general_message(mut self, msg: GeneralMessage) -> NodeState<P> {
+    fn general_message(mut self, msg: GeneralMessage) -> NodeState<P, B> {
         match msg {
             GeneralMessage::Announce(msg) => {
                 self.announce_receipt_timeout
@@ -124,7 +120,7 @@ impl<P: Port> ListeningNode<P> {
         }
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<P> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<P, B> {
         match msg {
             SystemMessage::AnnounceReceiptTimeout => {
                 NodeState::Master(MasterNode::new(self.port, self.bmca))
@@ -134,20 +130,16 @@ impl<P: Port> ListeningNode<P> {
     }
 }
 
-pub struct SlaveNode<P: Port> {
+pub struct SlaveNode<P: Port, B: Bmca> {
     port: P,
-    bmca: Bmca<P::ClockRecords>,
+    bmca: B,
     announce_receipt_timeout: DropTimeout<P::Timeout>,
     delay_cycle_timeout: P::Timeout,
     master_estimate: MasterEstimate,
 }
 
-impl<P: Port> SlaveNode<P> {
-    pub fn new(
-        port: P,
-        bmca: Bmca<P::ClockRecords>,
-        announce_receipt_timeout: DropTimeout<P::Timeout>,
-    ) -> Self {
+impl<P: Port, B: Bmca> SlaveNode<P, B> {
+    pub fn new(port: P, bmca: B, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
         let delay_cycle_timeout = port.schedule(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
             Duration::ZERO,
@@ -162,7 +154,7 @@ impl<P: Port> SlaveNode<P> {
         }
     }
 
-    fn event_message(mut self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<P> {
+    fn event_message(mut self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<P, B> {
         match msg {
             EventMessage::TwoStepSync(sync) => {
                 if let Some(estimate) = self.master_estimate.ingest_two_step_sync(sync, timestamp) {
@@ -175,7 +167,7 @@ impl<P: Port> SlaveNode<P> {
         NodeState::Slave(self)
     }
 
-    fn general_message(mut self, msg: GeneralMessage) -> NodeState<P> {
+    fn general_message(mut self, msg: GeneralMessage) -> NodeState<P, B> {
         match msg {
             GeneralMessage::Announce(_) => {
                 self.announce_receipt_timeout
@@ -196,7 +188,7 @@ impl<P: Port> SlaveNode<P> {
         NodeState::Slave(self)
     }
 
-    fn system_message(mut self, msg: SystemMessage) -> NodeState<P> {
+    fn system_message(mut self, msg: SystemMessage) -> NodeState<P, B> {
         match msg {
             SystemMessage::AnnounceReceiptTimeout => {
                 NodeState::Master(MasterNode::new(self.port, self.bmca))
@@ -230,16 +222,16 @@ impl<P: Port> SlaveNode<P> {
     }
 }
 
-pub struct MasterNode<P: Port> {
+pub struct MasterNode<P: Port, B: Bmca> {
     port: P,
+    bmca: B,
     announce_send_timeout: P::Timeout,
     sync_cycle_timeout: P::Timeout,
     announce_cycle: AnnounceCycle,
-    bmca: Bmca<P::ClockRecords>,
 }
 
-impl<P: Port> MasterNode<P> {
-    pub fn new(port: P, bmca: Bmca<P::ClockRecords>) -> Self {
+impl<P: Port, B: Bmca> MasterNode<P, B> {
+    pub fn new(port: P, bmca: B) -> Self {
         let announce_send_timeout =
             port.schedule(SystemMessage::AnnounceSendTimeout, Duration::ZERO);
         let sync_cycle_timeout = port.schedule(
@@ -249,14 +241,14 @@ impl<P: Port> MasterNode<P> {
 
         Self {
             port,
+            bmca,
             announce_send_timeout,
             sync_cycle_timeout,
             announce_cycle: AnnounceCycle::new(0),
-            bmca,
         }
     }
 
-    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<P> {
+    fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> NodeState<P, B> {
         match msg {
             EventMessage::DelayReq(req) => self
                 .port
@@ -267,7 +259,7 @@ impl<P: Port> MasterNode<P> {
         NodeState::Master(self)
     }
 
-    fn general_message(mut self, _msg: GeneralMessage) -> NodeState<P> {
+    fn general_message(mut self, _msg: GeneralMessage) -> NodeState<P, B> {
         match _msg {
             GeneralMessage::Announce(msg) => {
                 self.bmca.consider(msg);
@@ -292,7 +284,7 @@ impl<P: Port> MasterNode<P> {
         }
     }
 
-    fn system_message(mut self, msg: SystemMessage) -> NodeState<P> {
+    fn system_message(mut self, msg: SystemMessage) -> NodeState<P, B> {
         match msg {
             SystemMessage::AnnounceSendTimeout => {
                 let announce_message = self.announce_cycle.announce(&self.port.clock());
@@ -323,14 +315,14 @@ impl<P: Port> MasterNode<P> {
     }
 }
 
-pub struct PreMasterNode<P: Port> {
+pub struct PreMasterNode<P: Port, B: Bmca> {
     port: P,
-    bmca: Bmca<P::ClockRecords>,
+    bmca: B,
     _qualification_timeout: P::Timeout,
 }
 
-impl<P: Port> PreMasterNode<P> {
-    pub fn new(port: P, bmca: Bmca<P::ClockRecords>) -> Self {
+impl<P: Port, B: Bmca> PreMasterNode<P, B> {
+    pub fn new(port: P, bmca: B) -> Self {
         let _qualification_timeout =
             port.schedule(SystemMessage::QualificationTimeout, Duration::from_secs(5));
         Self {
@@ -340,7 +332,7 @@ impl<P: Port> PreMasterNode<P> {
         }
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<P> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<P, B> {
         match msg {
             SystemMessage::QualificationTimeout => {
                 NodeState::Master(MasterNode::new(self.port, self.bmca))
@@ -350,18 +342,14 @@ impl<P: Port> PreMasterNode<P> {
     }
 }
 
-pub struct UncalibratedNode<P: Port> {
+pub struct UncalibratedNode<P: Port, B: Bmca> {
     port: P,
-    bmca: Bmca<P::ClockRecords>,
+    bmca: B,
     announce_receipt_timeout: DropTimeout<P::Timeout>,
 }
 
-impl<P: Port> UncalibratedNode<P> {
-    pub fn new(
-        port: P,
-        bmca: Bmca<P::ClockRecords>,
-        announce_receipt_timeout: DropTimeout<P::Timeout>,
-    ) -> Self {
+impl<P: Port, B: Bmca> UncalibratedNode<P, B> {
+    pub fn new(port: P, bmca: B, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
         Self {
             port,
             bmca,
@@ -369,7 +357,7 @@ impl<P: Port> UncalibratedNode<P> {
         }
     }
 
-    fn general_message(mut self, msg: GeneralMessage) -> NodeState<P> {
+    fn general_message(mut self, msg: GeneralMessage) -> NodeState<P, B> {
         match msg {
             GeneralMessage::Announce(msg) => {
                 self.announce_receipt_timeout
@@ -406,7 +394,7 @@ impl<P: Port> UncalibratedNode<P> {
         }
     }
 
-    fn system_message(self, msg: SystemMessage) -> NodeState<P> {
+    fn system_message(self, msg: SystemMessage) -> NodeState<P, B> {
         match msg {
             SystemMessage::AnnounceReceiptTimeout => {
                 NodeState::Master(MasterNode::new(self.port, self.bmca))
@@ -442,8 +430,9 @@ mod tests {
 
     use std::rc::Rc;
 
-    use crate::bmca::{ForeignClockDS, ForeignClockRecord, LocalClockDS};
+    use crate::bmca::{ForeignClockDS, ForeignClockRecord, FullBmca, LocalClockDS};
     use crate::clock::{Clock, FakeClock};
+    use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
         TwoStepSyncMessage,
@@ -454,7 +443,7 @@ mod tests {
     fn slave_node_synchronizes_clock() {
         let local_clock = Rc::new(FakeClock::new(TimeStamp::new(0, 0)));
         let port = FakePort::new(local_clock.clone(), LocalClockDS::mid_grade_test_clock());
-        let bmca = Bmca::new(port.foreign_clock_records(&[]));
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let announce_receipt_timeout = DropTimeout::new(port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -486,7 +475,7 @@ mod tests {
     fn master_node_answers_delay_request_with_delay_response() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         node.event_message(
             EventMessage::DelayReq(DelayRequestMessage::new(0)),
@@ -506,7 +495,7 @@ mod tests {
     fn master_node_schedules_initial_sync() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let _ = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let _ = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         let messages = port.take_system_messages();
         assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0))));
@@ -516,7 +505,7 @@ mod tests {
     fn master_node_answers_sync_cycle_with_sync() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
 
@@ -528,7 +517,7 @@ mod tests {
     fn master_node_schedules_next_sync() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         // Drain messages that could have been sent during initialization.
         port.take_system_messages();
@@ -543,7 +532,7 @@ mod tests {
     fn master_node_answers_timestamped_sync_with_follow_up() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         node.system_message(SystemMessage::Timestamp {
             msg: EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
@@ -563,7 +552,7 @@ mod tests {
     fn master_node_schedules_initial_announce() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let _ = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let _ = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         let messages = port.take_system_messages();
         assert!(messages.contains(&SystemMessage::AnnounceSendTimeout));
@@ -573,7 +562,7 @@ mod tests {
     fn master_node_schedules_next_announce() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         port.take_system_messages();
 
@@ -587,7 +576,7 @@ mod tests {
     fn master_node_sends_announce_on_send_timeout() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         port.take_system_messages();
 
@@ -611,7 +600,10 @@ mod tests {
         ];
         let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
-        let node = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&prior_records)));
+        let node = MasterNode::new(
+            &port,
+            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+        );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
             42,
@@ -630,7 +622,10 @@ mod tests {
         ];
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let node = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&prior_records)));
+        let node = MasterNode::new(
+            &port,
+            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+        );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
             42,
@@ -646,7 +641,7 @@ mod tests {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         // start with an empty BMCA so that a single first announce makes it undecided
-        let node = MasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
             42,
@@ -659,7 +654,7 @@ mod tests {
     #[test]
     fn slave_node_schedules_initial_delay_cycle() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let bmca = Bmca::new(port.foreign_clock_records(&[]));
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let announce_receipt_timeout = DropTimeout::new(port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -674,7 +669,7 @@ mod tests {
     #[test]
     fn slave_node_schedules_next_delay_request() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let bmca = Bmca::new(port.foreign_clock_records(&[]));
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let announce_receipt_timeout = DropTimeout::new(port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -693,7 +688,7 @@ mod tests {
     #[test]
     fn slave_node_answers_delay_cycle_with_delay_request() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let bmca = Bmca::new(port.foreign_clock_records(&[]));
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let announce_receipt_timeout = DropTimeout::new(port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -712,7 +707,7 @@ mod tests {
     #[test]
     fn slave_node_to_master_transition_on_announce_receipt_timeout() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let bmca = Bmca::new(port.foreign_clock_records(&[]));
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let announce_receipt_timeout = port.schedule(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -732,7 +727,7 @@ mod tests {
     #[test]
     fn initializing_node_to_listening_transition() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let node = InitializingNode::new(&port);
+        let node = InitializingNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         let node = node.system_message(SystemMessage::Initialized);
 
@@ -748,7 +743,7 @@ mod tests {
         );
         let node = ListeningNode::new(
             &port,
-            Bmca::new(port.foreign_clock_records(&[])),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
 
@@ -767,7 +762,7 @@ mod tests {
         );
         let node = ListeningNode::new(
             &port,
-            Bmca::new(port.foreign_clock_records(&[])),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
 
@@ -791,7 +786,7 @@ mod tests {
         );
         let node = ListeningNode::new(
             &port,
-            Bmca::new(port.foreign_clock_records(&[])),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
 
@@ -816,7 +811,7 @@ mod tests {
 
         let _ = ListeningNode::new(
             &port,
-            Bmca::new(port.foreign_clock_records(&[])),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(port.schedule(
                 SystemMessage::AnnounceReceiptTimeout,
                 Duration::from_secs(5),
@@ -836,7 +831,7 @@ mod tests {
         );
         let node = ListeningNode::new(
             &port,
-            Bmca::new(port.foreign_clock_records(&[])),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
 
@@ -859,7 +854,7 @@ mod tests {
     fn pre_master_node_schedules_qualification_timeout() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let _ = PreMasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let _ = PreMasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         let messages = port.take_system_messages();
         assert!(messages.contains(&SystemMessage::QualificationTimeout));
@@ -868,7 +863,7 @@ mod tests {
     #[test]
     fn pre_master_node_to_master_transition_on_qualification_timeout() {
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
-        let node = PreMasterNode::new(&port, Bmca::new(port.foreign_clock_records(&[])));
+        let node = PreMasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         let node = node.system_message(SystemMessage::QualificationTimeout);
 
@@ -890,7 +885,7 @@ mod tests {
         );
         let node = UncalibratedNode::new(
             &port,
-            Bmca::new(port.foreign_clock_records(&prior_records)),
+            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
 
@@ -912,7 +907,7 @@ mod tests {
         );
         let node = UncalibratedNode::new(
             &port,
-            Bmca::new(port.foreign_clock_records(&[])),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
 
