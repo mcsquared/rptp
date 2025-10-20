@@ -130,7 +130,7 @@ impl Port for TokioPort {
         let _ = self.general_tx.send(msg);
     }
 
-    fn schedule(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
+    fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
         let tx = self.system_tx.clone();
         TokioTimeout::new(tx, msg, delay)
     }
@@ -236,7 +236,7 @@ impl<P: NetPort> TokioNode<P> {
             system_tx,
         );
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
-        let announce_receipt_timeout = DropTimeout::new(port.schedule(
+        let announce_receipt_timeout = DropTimeout::new(port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(30), // TODO: this is a hack to avoid tests running into timeouts
                                      // -> long term solution would be to have Bmca trait and

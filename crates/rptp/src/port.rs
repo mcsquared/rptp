@@ -44,7 +44,7 @@ pub trait Port {
     fn clock(&self) -> &LocalClock<Self::Clock>;
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
-    fn schedule(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
+    fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
 }
 
 impl<P: Port> Port for Box<P> {
@@ -63,8 +63,8 @@ impl<P: Port> Port for Box<P> {
         self.as_ref().send_general(msg)
     }
 
-    fn schedule(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout {
-        self.as_ref().schedule(msg, delay)
+    fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout {
+        self.as_ref().timeout(msg, delay)
     }
 }
 
@@ -191,7 +191,7 @@ pub mod test_support {
             self.general_messages.borrow_mut().push(msg);
         }
 
-        fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
+        fn timeout(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
             self.system_messages.borrow_mut().push(msg);
             Rc::new(FakeTimeout::new(msg, Rc::clone(&self.system_messages)))
         }
@@ -213,7 +213,7 @@ pub mod test_support {
             self.general_messages.borrow_mut().push(msg);
         }
 
-        fn schedule(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
+        fn timeout(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
             self.system_messages.borrow_mut().push(msg);
             Rc::new(FakeTimeout::new(msg, Rc::clone(&self.system_messages)))
         }
