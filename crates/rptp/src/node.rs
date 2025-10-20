@@ -134,16 +134,16 @@ pub struct SlaveNode<P: Port, B: Bmca> {
     port: P,
     bmca: B,
     announce_receipt_timeout: DropTimeout<P::Timeout>,
-    delay_cycle_timeout: P::Timeout,
+    delay_cycle_timeout: DropTimeout<P::Timeout>,
     master_estimate: MasterEstimate,
 }
 
 impl<P: Port, B: Bmca> SlaveNode<P, B> {
     pub fn new(port: P, bmca: B, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
-        let delay_cycle_timeout = port.timeout(
+        let delay_cycle_timeout = DropTimeout::new(port.timeout(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
             Duration::ZERO,
-        );
+        ));
 
         Self {
             port,
@@ -225,19 +225,19 @@ impl<P: Port, B: Bmca> SlaveNode<P, B> {
 pub struct MasterNode<P: Port, B: Bmca> {
     port: P,
     bmca: B,
-    announce_send_timeout: P::Timeout,
-    sync_cycle_timeout: P::Timeout,
+    announce_send_timeout: DropTimeout<P::Timeout>,
+    sync_cycle_timeout: DropTimeout<P::Timeout>,
     announce_cycle: AnnounceCycle,
 }
 
 impl<P: Port, B: Bmca> MasterNode<P, B> {
     pub fn new(port: P, bmca: B) -> Self {
         let announce_send_timeout =
-            port.timeout(SystemMessage::AnnounceSendTimeout, Duration::ZERO);
-        let sync_cycle_timeout = port.timeout(
+            DropTimeout::new(port.timeout(SystemMessage::AnnounceSendTimeout, Duration::ZERO));
+        let sync_cycle_timeout = DropTimeout::new(port.timeout(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
             Duration::ZERO,
-        );
+        ));
 
         Self {
             port,
@@ -318,13 +318,14 @@ impl<P: Port, B: Bmca> MasterNode<P, B> {
 pub struct PreMasterNode<P: Port, B: Bmca> {
     port: P,
     bmca: B,
-    _qualification_timeout: P::Timeout,
+    _qualification_timeout: DropTimeout<P::Timeout>,
 }
 
 impl<P: Port, B: Bmca> PreMasterNode<P, B> {
     pub fn new(port: P, bmca: B) -> Self {
-        let _qualification_timeout =
-            port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+        let _qualification_timeout = DropTimeout::new(
+            port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5)),
+        );
         Self {
             port,
             bmca,
