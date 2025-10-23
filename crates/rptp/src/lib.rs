@@ -4,4 +4,5 @@ pub mod infra;
 pub mod message;
 pub mod node;
 pub mod port;
+pub mod sync;
 pub mod time;

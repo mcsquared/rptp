@@ -3,10 +3,11 @@ use std::time::Duration;
 use crate::bmca::{Bmca, BmcaRecommendation};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{
-    AnnounceMessage, DelayCycleMessage, EventMessage, GeneralMessage, MasterEstimate,
-    SyncCycleMessage, SystemMessage,
+    AnnounceMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
+    SystemMessage,
 };
 use crate::port::{DropTimeout, Port, Timeout};
+use crate::sync::MasterEstimate;
 use crate::time::TimeStamp;
 
 pub enum NodeState<P: Port, B: Bmca> {
