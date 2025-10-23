@@ -229,6 +229,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "slave-syncs-to-ptp4l-master"
+version = "0.1.0"
+dependencies = [
+ "rptp",
+ "rptp-daemon",
+ "tokio",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

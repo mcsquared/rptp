@@ -2,4 +2,5 @@
 resolver = "3"
 members = [
     "slave_syncs_to_master",
+    "slave_syncs_to_ptp4l_master",
 ]
