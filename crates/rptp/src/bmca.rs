@@ -371,6 +371,9 @@ pub(crate) mod tests {
 
         bmca.consider(AnnounceMessage::new(0, foreign_high));
         bmca.consider(AnnounceMessage::new(1, foreign_high));
+
+        assert_eq!(bmca.recommendation(&local_clock), BmcaRecommendation::Slave);
+
         bmca.consider(AnnounceMessage::new(3, foreign_high));
 
         assert_eq!(
