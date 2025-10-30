@@ -11,7 +11,7 @@ use rptp::{
     clock::{Clock, LocalClock, SynchronizableClock},
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{EventMessage, GeneralMessage, SystemMessage},
-    node::{InitializingNode, MasterNode, NodeState, SlaveNode},
+    node::{InitializingPort, MasterPort, PortState, SlavePort},
     port::{DropTimeout, Port, Timeout},
 };
 
@@ -137,7 +137,7 @@ impl Port for TokioPort {
 }
 
 pub struct TokioNode<P: NetPort> {
-    node: NodeState<TokioPort, FullBmca<SortedForeignClockRecordsVec>>,
+    port: PortState<TokioPort, FullBmca<SortedForeignClockRecordsVec>>,
     clock: Rc<dyn SynchronizableClock>,
     event_port: P,
     general_port: P,
@@ -157,7 +157,7 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let node = NodeState::Initializing(InitializingNode::new(
+        let port = PortState::Initializing(InitializingPort::new(
             TokioPort::new(
                 LocalClock::new(clock.clone(), localds),
                 event_tx,
@@ -168,7 +168,7 @@ impl<P: NetPort> TokioNode<P> {
         ));
 
         Ok(Self {
-            node: node.system_message(SystemMessage::Initialized),
+            port: port.system_message(SystemMessage::Initialized),
             clock,
             event_port,
             general_port,
@@ -201,10 +201,10 @@ impl<P: NetPort> TokioNode<P> {
         );
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
-        let node = NodeState::Master(MasterNode::new(port, bmca));
+        let port = PortState::Master(MasterPort::new(port, bmca));
 
         Ok(Self {
-            node,
+            port,
             clock,
             event_port,
             general_port,
@@ -243,10 +243,10 @@ impl<P: NetPort> TokioNode<P> {
                                      // instantiate a slave-only Bmca here.
         ));
 
-        let node = NodeState::Slave(SlaveNode::new(port, bmca, announce_receipt_timeout));
+        let port = PortState::Slave(SlavePort::new(port, bmca, announce_receipt_timeout));
 
         Ok(Self {
-            node,
+            port,
             clock,
             event_port,
             general_port,
@@ -275,7 +275,7 @@ impl<P: NetPort> TokioNode<P> {
                     if let Ok((size, _peer)) = recv {
                         if let Ok(msg) = EventMessage::try_from(&event_buf[..size]) {
                             eprintln!("[event] recv {:?}", msg);
-                            self.node = self.node.event_message(msg, self.clock.now());
+                            self.port = self.port.event_message(msg, self.clock.now());
                         }
                     }
                 }
@@ -283,7 +283,7 @@ impl<P: NetPort> TokioNode<P> {
                     if let Ok((size, _peer)) = recv {
                         if let Ok(msg) = GeneralMessage::try_from(&general_buf[..size]) {
                             eprintln!("[general] recv {:?}", msg);
-                            self.node = self.node.general_message(msg);
+                            self.port = self.port.general_message(msg);
                         }
                     }
                 }
@@ -292,7 +292,7 @@ impl<P: NetPort> TokioNode<P> {
                         eprintln!("[event] send {:?}", msg);
                         let _ = self.event_port.send(msg.to_wire().as_ref()).await;
 
-                        self.node = self.node.system_message(SystemMessage::Timestamp {
+                        self.port = self.port.system_message(SystemMessage::Timestamp {
                             msg,
                             timestamp: self.clock.now(),
                         });
@@ -306,7 +306,7 @@ impl<P: NetPort> TokioNode<P> {
                 }
                 msg = self.system_rx.recv() => {
                     if let Some(msg) = msg {
-                        self.node = self.node.system_message(msg);
+                        self.port = self.port.system_message(msg);
                     }
                 }
                 _ = tokio::signal::ctrl_c() => {
@@ -349,8 +349,8 @@ mod tests {
     #[test]
     fn tokio_node_state_size() {
         use std::mem::size_of;
-        let s = size_of::<NodeState<Box<TokioPort>, FullBmca<SortedForeignClockRecordsVec>>>();
-        println!("NodeState<Box<TokioPort>> size: {}", s);
+        let s = size_of::<PortState<Box<TokioPort>, FullBmca<SortedForeignClockRecordsVec>>>();
+        println!("PortState<Box<TokioPort>> size: {}", s);
         assert!(s <= 256);
     }
 
