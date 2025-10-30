@@ -26,8 +26,8 @@ impl SyncExchange {
 
     pub fn master_slave_offset(&self) -> Option<Duration> {
         self.follow_up_window
-            .combine_latest(&self.two_step_sync_window, |follow, &(sync, ts)| {
-                follow.master_slave_offset(sync, ts)
+            .combine_latest(&self.two_step_sync_window, |follow_up, &(sync, ts)| {
+                follow_up.master_slave_offset(sync, ts)
             })
     }
 }
@@ -64,7 +64,7 @@ impl DelayExchange {
 pub struct MasterEstimate {
     sync_exchange: SyncExchange,
     delay_exchange: DelayExchange,
-    t2: Option<TimeStamp>,
+    sync_ingress_timestamp: Option<TimeStamp>,
 }
 
 impl MasterEstimate {
@@ -72,7 +72,7 @@ impl MasterEstimate {
         Self {
             sync_exchange: SyncExchange::new(),
             delay_exchange: DelayExchange::new(),
-            t2: None,
+            sync_ingress_timestamp: None,
         }
     }
 
@@ -82,7 +82,7 @@ impl MasterEstimate {
         timestamp: TimeStamp,
     ) -> Option<TimeStamp> {
         self.sync_exchange.ingest_two_step_sync(sync, timestamp);
-        self.t2.replace(timestamp);
+        self.sync_ingress_timestamp.replace(timestamp);
         self.estimate()
     }
 
@@ -109,9 +109,9 @@ impl MasterEstimate {
         let ms_offset = self.sync_exchange.master_slave_offset()?;
         let sm_offset = self.delay_exchange.slave_master_offset()?;
 
-        if let Some(t2) = self.t2 {
+        if let Some(sync_ingress) = self.sync_ingress_timestamp {
             let offset_from_master = (ms_offset - sm_offset).half();
-            Some(t2 - offset_from_master)
+            Some(sync_ingress - offset_from_master)
         } else {
             None
         }
