@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::bmca::{Bmca, BmcaRecommendation};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{
-    AnnounceMessage, DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage,
+    AnnounceMessage, DelayCycleMessage, EventMessage, GeneralMessage, SequenceId, SyncCycleMessage,
     SystemMessage,
 };
 use crate::port::{DropTimeout, Port, Timeout};
@@ -142,7 +142,7 @@ pub struct SlaveNode<P: Port, B: Bmca> {
 impl<P: Port, B: Bmca> SlaveNode<P, B> {
     pub fn new(port: P, bmca: B, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
         let delay_cycle_timeout = DropTimeout::new(port.timeout(
-            SystemMessage::DelayCycle(DelayCycleMessage::new(0)),
+            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
             Duration::ZERO,
         ));
 
@@ -236,7 +236,7 @@ impl<P: Port, B: Bmca> MasterNode<P, B> {
         let announce_send_timeout =
             DropTimeout::new(port.timeout(SystemMessage::AnnounceSendTimeout, Duration::ZERO));
         let sync_cycle_timeout = DropTimeout::new(port.timeout(
-            SystemMessage::SyncCycle(SyncCycleMessage::new(0)),
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
             Duration::ZERO,
         ));
 
@@ -245,7 +245,7 @@ impl<P: Port, B: Bmca> MasterNode<P, B> {
             bmca,
             announce_send_timeout,
             sync_cycle_timeout,
-            announce_cycle: AnnounceCycle::new(0),
+            announce_cycle: AnnounceCycle::new(0.into()),
         }
     }
 
@@ -408,11 +408,11 @@ impl<P: Port, B: Bmca> UncalibratedNode<P, B> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnnounceCycle {
-    sequence_id: u16,
+    sequence_id: SequenceId,
 }
 
 impl AnnounceCycle {
-    pub fn new(start: u16) -> Self {
+    pub fn new(start: SequenceId) -> Self {
         Self { sequence_id: start }
     }
 
@@ -421,7 +421,7 @@ impl AnnounceCycle {
         local_clock: &LocalClock<C>,
     ) -> AnnounceMessage {
         let msg = local_clock.announce(self.sequence_id);
-        self.sequence_id = self.sequence_id.wrapping_add(1);
+        self.sequence_id = self.sequence_id.next();
         msg
     }
 }
@@ -454,19 +454,19 @@ mod tests {
         let mut slave = NodeState::Slave(SlaveNode::new(port, bmca, announce_receipt_timeout));
 
         slave = slave.event_message(
-            EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
+            EventMessage::TwoStepSync(TwoStepSyncMessage::new(0.into())),
             TimeStamp::new(1, 0),
         );
         slave = slave.general_message(GeneralMessage::FollowUp(FollowUpMessage::new(
-            0,
+            0.into(),
             TimeStamp::new(1, 0),
         )));
         slave = slave.system_message(SystemMessage::Timestamp {
-            msg: EventMessage::DelayReq(DelayRequestMessage::new(0)),
+            msg: EventMessage::DelayReq(DelayRequestMessage::new(0.into())),
             timestamp: TimeStamp::new(0, 0),
         });
         let _ = slave.general_message(GeneralMessage::DelayResp(DelayResponseMessage::new(
-            0,
+            0.into(),
             TimeStamp::new(2, 0),
         )));
 
@@ -480,14 +480,14 @@ mod tests {
         let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         node.event_message(
-            EventMessage::DelayReq(DelayRequestMessage::new(0)),
+            EventMessage::DelayReq(DelayRequestMessage::new(0.into())),
             TimeStamp::new(0, 0),
         );
 
         let messages = port.take_general_messages();
         assert!(
             messages.contains(&GeneralMessage::DelayResp(DelayResponseMessage::new(
-                0,
+                0.into(),
                 TimeStamp::new(0, 0)
             )))
         );
@@ -500,7 +500,7 @@ mod tests {
         let _ = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0))));
+        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0.into()))));
     }
 
     #[test]
@@ -509,10 +509,14 @@ mod tests {
 
         let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
-        node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
+        node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())));
 
         let messages = port.take_event_messages();
-        assert!(messages.contains(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(0))));
+        assert!(
+            messages.contains(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(
+                0.into()
+            )))
+        );
     }
 
     #[test]
@@ -524,10 +528,10 @@ mod tests {
         // Drain messages that could have been sent during initialization.
         port.take_system_messages();
 
-        node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0)));
+        node.system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())));
 
         let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(1))));
+        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(1.into()))));
     }
 
     #[test]
@@ -537,14 +541,14 @@ mod tests {
         let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         node.system_message(SystemMessage::Timestamp {
-            msg: EventMessage::TwoStepSync(TwoStepSyncMessage::new(0)),
+            msg: EventMessage::TwoStepSync(TwoStepSyncMessage::new(0.into())),
             timestamp: TimeStamp::new(0, 0),
         });
 
         let messages = port.take_general_messages();
         assert!(
             messages.contains(&GeneralMessage::FollowUp(FollowUpMessage::new(
-                0,
+                0.into(),
                 TimeStamp::new(0, 0)
             )))
         );
@@ -587,7 +591,7 @@ mod tests {
         let messages = port.take_general_messages();
         assert!(
             messages.contains(&GeneralMessage::Announce(AnnounceMessage::new(
-                0,
+                0.into(),
                 ForeignClockDS::high_grade_test_clock()
             )))
         );
@@ -596,10 +600,11 @@ mod tests {
     #[test]
     fn master_node_to_uncalibrated_transition_on_following_announce() {
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
-        let prior_records = [
-            ForeignClockRecord::new(AnnounceMessage::new(41, foreign_clock_ds))
-                .with_resolved_clock(foreign_clock_ds),
-        ];
+        let prior_records =
+            [
+                ForeignClockRecord::new(AnnounceMessage::new(41.into(), foreign_clock_ds))
+                    .with_resolved_clock(foreign_clock_ds),
+            ];
         let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
         let node = MasterNode::new(
@@ -608,7 +613,7 @@ mod tests {
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
-            42,
+            42.into(),
             foreign_clock_ds,
         )));
 
@@ -618,10 +623,11 @@ mod tests {
     #[test]
     fn master_node_stays_master_on_subsequent_announce() {
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
-        let prior_records = [
-            ForeignClockRecord::new(AnnounceMessage::new(41, foreign_clock_ds))
-                .with_resolved_clock(foreign_clock_ds),
-        ];
+        let prior_records =
+            [
+                ForeignClockRecord::new(AnnounceMessage::new(41.into(), foreign_clock_ds))
+                    .with_resolved_clock(foreign_clock_ds),
+            ];
         let port = FakePort::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
         let node = MasterNode::new(
@@ -630,7 +636,7 @@ mod tests {
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
-            42,
+            42.into(),
             foreign_clock_ds,
         )));
 
@@ -646,7 +652,7 @@ mod tests {
         let node = MasterNode::new(&port, FullBmca::new(SortedForeignClockRecordsVec::new()));
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
-            42,
+            42.into(),
             foreign_clock_ds,
         )));
 
@@ -665,7 +671,7 @@ mod tests {
         let _ = SlaveNode::new(&port, bmca, announce_receipt_timeout);
 
         let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(0))));
+        assert!(messages.contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(0.into()))));
     }
 
     #[test]
@@ -681,10 +687,10 @@ mod tests {
 
         port.take_system_messages();
 
-        node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
+        node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())));
 
         let messages = port.take_system_messages();
-        assert!(messages.contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(1))));
+        assert!(messages.contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(1.into()))));
     }
 
     #[test]
@@ -700,10 +706,10 @@ mod tests {
 
         port.take_system_messages();
 
-        node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0)));
+        node.system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())));
 
         let events = port.take_event_messages();
-        assert!(events.contains(&EventMessage::DelayReq(DelayRequestMessage::new(0))));
+        assert!(events.contains(&EventMessage::DelayReq(DelayRequestMessage::new(0.into()))));
     }
 
     #[test]
@@ -771,7 +777,7 @@ mod tests {
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
-            0,
+            0.into(),
             foreign_clock,
         )));
 
@@ -795,11 +801,11 @@ mod tests {
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
-            0,
+            0.into(),
             foreign_clock.clone(),
         )));
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
-            1,
+            1.into(),
             foreign_clock.clone(),
         )));
 
@@ -840,11 +846,11 @@ mod tests {
         let foreign_clock = ForeignClockDS::high_grade_test_clock();
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
-            0,
+            0.into(),
             foreign_clock,
         )));
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
-            1,
+            1.into(),
             foreign_clock,
         )));
 
@@ -876,10 +882,11 @@ mod tests {
     fn uncalibrated_node_to_slave_transition_on_following_announce() {
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
 
-        let prior_records = [
-            ForeignClockRecord::new(AnnounceMessage::new(41, foreign_clock_ds))
-                .with_resolved_clock(foreign_clock_ds),
-        ];
+        let prior_records =
+            [
+                ForeignClockRecord::new(AnnounceMessage::new(41.into(), foreign_clock_ds))
+                    .with_resolved_clock(foreign_clock_ds),
+            ];
         let port = FakePort::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
         let announce_receipt_timeout = port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
@@ -892,7 +899,7 @@ mod tests {
         );
 
         let node = node.general_message(GeneralMessage::Announce(AnnounceMessage::new(
-            42,
+            42.into(),
             foreign_clock_ds,
         )));
 
@@ -924,17 +931,17 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
-        let mut cycle = AnnounceCycle::new(0);
+        let mut cycle = AnnounceCycle::new(0.into());
         let msg1 = cycle.announce(&local_clock);
         let msg2 = cycle.announce(&local_clock);
 
         assert_eq!(
             msg1,
-            AnnounceMessage::new(0, ForeignClockDS::high_grade_test_clock())
+            AnnounceMessage::new(0.into(), ForeignClockDS::high_grade_test_clock())
         );
         assert_eq!(
             msg2,
-            AnnounceMessage::new(1, ForeignClockDS::high_grade_test_clock())
+            AnnounceMessage::new(1.into(), ForeignClockDS::high_grade_test_clock())
         );
     }
 }

@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use crate::{
     bmca::{ForeignClockDS, LocalClockDS},
-    message::AnnounceMessage,
+    message::{AnnounceMessage, SequenceId},
     time::TimeStamp,
 };
 
@@ -60,7 +60,7 @@ impl<C: SynchronizableClock> LocalClock<C> {
         Self { clock, localds }
     }
 
-    pub fn announce(&self, sequence_id: u16) -> AnnounceMessage {
+    pub fn announce(&self, sequence_id: SequenceId) -> AnnounceMessage {
         self.localds.announce(sequence_id)
     }
 

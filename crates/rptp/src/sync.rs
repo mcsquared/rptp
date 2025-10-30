@@ -131,7 +131,8 @@ mod tests {
     #[test]
     fn sync_exchange_no_master_slave_offset_on_two_step_sync_only() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.ingest_two_step_sync(TwoStepSyncMessage::new(42), TimeStamp::new(2, 0));
+        sync_exchange
+            .ingest_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
 
         assert_eq!(sync_exchange.master_slave_offset(), None);
     }
@@ -139,7 +140,7 @@ mod tests {
     #[test]
     fn sync_exchange_no_master_slave_offset_on_follow_up_only() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.ingest_follow_up(FollowUpMessage::new(42, TimeStamp::new(1, 0)));
+        sync_exchange.ingest_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
 
         assert_eq!(sync_exchange.master_slave_offset(), None);
     }
@@ -147,8 +148,9 @@ mod tests {
     #[test]
     fn sync_exchange_produces_master_slave_offset_on_two_step_sync_then_follow_up() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.ingest_two_step_sync(TwoStepSyncMessage::new(42), TimeStamp::new(2, 0));
-        sync_exchange.ingest_follow_up(FollowUpMessage::new(42, TimeStamp::new(1, 0)));
+        sync_exchange
+            .ingest_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
+        sync_exchange.ingest_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
@@ -159,8 +161,9 @@ mod tests {
     #[test]
     fn sync_exchange_produces_master_slave_offset_on_follow_up_then_two_step_sync() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.ingest_follow_up(FollowUpMessage::new(42, TimeStamp::new(1, 0)));
-        sync_exchange.ingest_two_step_sync(TwoStepSyncMessage::new(42), TimeStamp::new(2, 0));
+        sync_exchange.ingest_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        sync_exchange
+            .ingest_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
@@ -171,8 +174,9 @@ mod tests {
     #[test]
     fn sync_exchange_produces_no_master_slave_offset_on_non_matching_follow_up() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.ingest_two_step_sync(TwoStepSyncMessage::new(42), TimeStamp::new(2, 0));
-        sync_exchange.ingest_follow_up(FollowUpMessage::new(43, TimeStamp::new(1, 0)));
+        sync_exchange
+            .ingest_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
+        sync_exchange.ingest_follow_up(FollowUpMessage::new(43.into(), TimeStamp::new(1, 0)));
 
         assert_eq!(sync_exchange.master_slave_offset(), None);
     }
@@ -180,8 +184,9 @@ mod tests {
     #[test]
     fn sync_exchange_produces_no_master_slave_offset_on_non_matching_two_step_sync() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.ingest_follow_up(FollowUpMessage::new(42, TimeStamp::new(1, 0)));
-        sync_exchange.ingest_two_step_sync(TwoStepSyncMessage::new(43), TimeStamp::new(2, 0));
+        sync_exchange.ingest_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        sync_exchange
+            .ingest_two_step_sync(TwoStepSyncMessage::new(43.into()), TimeStamp::new(2, 0));
 
         assert_eq!(sync_exchange.master_slave_offset(), None);
     }
@@ -189,9 +194,10 @@ mod tests {
     #[test]
     fn sync_exchange_recovers_when_matching_follow_up_arrives_later() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.ingest_follow_up(FollowUpMessage::new(42, TimeStamp::new(1, 0)));
-        sync_exchange.ingest_two_step_sync(TwoStepSyncMessage::new(43), TimeStamp::new(2, 0));
-        sync_exchange.ingest_follow_up(FollowUpMessage::new(43, TimeStamp::new(1, 0)));
+        sync_exchange.ingest_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        sync_exchange
+            .ingest_two_step_sync(TwoStepSyncMessage::new(43.into()), TimeStamp::new(2, 0));
+        sync_exchange.ingest_follow_up(FollowUpMessage::new(43.into(), TimeStamp::new(1, 0)));
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
@@ -202,9 +208,11 @@ mod tests {
     #[test]
     fn sync_exchange_recovers_when_matching_two_step_sync_arrives_later() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.ingest_two_step_sync(TwoStepSyncMessage::new(42), TimeStamp::new(2, 0));
-        sync_exchange.ingest_follow_up(FollowUpMessage::new(43, TimeStamp::new(1, 0)));
-        sync_exchange.ingest_two_step_sync(TwoStepSyncMessage::new(43), TimeStamp::new(2, 0));
+        sync_exchange
+            .ingest_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
+        sync_exchange.ingest_follow_up(FollowUpMessage::new(43.into(), TimeStamp::new(1, 0)));
+        sync_exchange
+            .ingest_two_step_sync(TwoStepSyncMessage::new(43.into()), TimeStamp::new(2, 0));
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
@@ -221,7 +229,8 @@ mod tests {
     #[test]
     fn delay_exchange_produces_no_slave_master_offset_on_request_only() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange.ingest_delay_request(DelayRequestMessage::new(42), TimeStamp::new(1, 0));
+        delay_exchange
+            .ingest_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
 
         assert_eq!(delay_exchange.slave_master_offset(), None);
     }
@@ -229,7 +238,8 @@ mod tests {
     #[test]
     fn delay_exchange_produces_no_slave_master_offset_on_response_only() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange.ingest_delay_response(DelayResponseMessage::new(42, TimeStamp::new(1, 0)));
+        delay_exchange
+            .ingest_delay_response(DelayResponseMessage::new(42.into(), TimeStamp::new(1, 0)));
 
         assert_eq!(delay_exchange.slave_master_offset(), None);
     }
@@ -237,8 +247,10 @@ mod tests {
     #[test]
     fn delay_exchange_produces_slave_master_offset_on_request_then_response_matching() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange.ingest_delay_request(DelayRequestMessage::new(42), TimeStamp::new(1, 0));
-        delay_exchange.ingest_delay_response(DelayResponseMessage::new(42, TimeStamp::new(2, 0)));
+        delay_exchange
+            .ingest_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
+        delay_exchange
+            .ingest_delay_response(DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0)));
 
         assert_eq!(
             delay_exchange.slave_master_offset(),
@@ -249,8 +261,10 @@ mod tests {
     #[test]
     fn delay_exchange_produces_slave_master_offset_on_response_then_request_matching() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange.ingest_delay_response(DelayResponseMessage::new(42, TimeStamp::new(2, 0)));
-        delay_exchange.ingest_delay_request(DelayRequestMessage::new(42), TimeStamp::new(1, 0));
+        delay_exchange
+            .ingest_delay_response(DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0)));
+        delay_exchange
+            .ingest_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
 
         assert_eq!(
             delay_exchange.slave_master_offset(),
@@ -261,8 +275,10 @@ mod tests {
     #[test]
     fn delay_exchange_produces_no_slave_master_offset_on_non_matching_response() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange.ingest_delay_request(DelayRequestMessage::new(42), TimeStamp::new(1, 0));
-        delay_exchange.ingest_delay_response(DelayResponseMessage::new(43, TimeStamp::new(2, 0)));
+        delay_exchange
+            .ingest_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
+        delay_exchange
+            .ingest_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
         assert_eq!(delay_exchange.slave_master_offset(), None);
     }
@@ -270,8 +286,10 @@ mod tests {
     #[test]
     fn delay_exchange_produces_no_slave_master_offset_on_non_matching_request() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange.ingest_delay_response(DelayResponseMessage::new(42, TimeStamp::new(2, 0)));
-        delay_exchange.ingest_delay_request(DelayRequestMessage::new(43), TimeStamp::new(1, 0));
+        delay_exchange
+            .ingest_delay_response(DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0)));
+        delay_exchange
+            .ingest_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(1, 0));
 
         assert_eq!(delay_exchange.slave_master_offset(), None);
     }
@@ -279,9 +297,12 @@ mod tests {
     #[test]
     fn delay_exchange_recovers_when_matching_response_arrives_later() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange.ingest_delay_response(DelayResponseMessage::new(42, TimeStamp::new(2, 0)));
-        delay_exchange.ingest_delay_request(DelayRequestMessage::new(43), TimeStamp::new(1, 0));
-        delay_exchange.ingest_delay_response(DelayResponseMessage::new(43, TimeStamp::new(2, 0)));
+        delay_exchange
+            .ingest_delay_response(DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0)));
+        delay_exchange
+            .ingest_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(1, 0));
+        delay_exchange
+            .ingest_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
         assert_eq!(
             delay_exchange.slave_master_offset(),
@@ -292,9 +313,12 @@ mod tests {
     #[test]
     fn delay_exchange_recovers_when_matching_request_arrives_later() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange.ingest_delay_request(DelayRequestMessage::new(42), TimeStamp::new(1, 0));
-        delay_exchange.ingest_delay_response(DelayResponseMessage::new(43, TimeStamp::new(2, 0)));
-        delay_exchange.ingest_delay_request(DelayRequestMessage::new(43), TimeStamp::new(1, 0));
+        delay_exchange
+            .ingest_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
+        delay_exchange
+            .ingest_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        delay_exchange
+            .ingest_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(1, 0));
 
         assert_eq!(
             delay_exchange.slave_master_offset(),
@@ -306,10 +330,10 @@ mod tests {
     fn master_estimate_yields_after_sync_and_delay_message_exchange() {
         let mut estimate = MasterEstimate::new();
 
-        estimate.ingest_two_step_sync(TwoStepSyncMessage::new(42), TimeStamp::new(1, 0));
-        estimate.ingest_follow_up(FollowUpMessage::new(42, TimeStamp::new(1, 0)));
-        estimate.ingest_delay_request(DelayRequestMessage::new(43), TimeStamp::new(0, 0));
-        estimate.ingest_delay_response(DelayResponseMessage::new(43, TimeStamp::new(2, 0)));
+        estimate.ingest_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(1, 0));
+        estimate.ingest_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        estimate.ingest_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
+        estimate.ingest_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
         assert_eq!(estimate.estimate(), Some(TimeStamp::new(2, 0)));
     }
@@ -318,10 +342,10 @@ mod tests {
     fn master_estimate_yields_after_reversed_sync_follow_up_and_delay_message_exchange() {
         let mut estimate = MasterEstimate::new();
 
-        estimate.ingest_follow_up(FollowUpMessage::new(42, TimeStamp::new(1, 0)));
-        estimate.ingest_two_step_sync(TwoStepSyncMessage::new(42), TimeStamp::new(1, 0));
-        estimate.ingest_delay_request(DelayRequestMessage::new(43), TimeStamp::new(0, 0));
-        estimate.ingest_delay_response(DelayResponseMessage::new(43, TimeStamp::new(2, 0)));
+        estimate.ingest_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        estimate.ingest_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(1, 0));
+        estimate.ingest_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
+        estimate.ingest_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
         assert_eq!(estimate.estimate(), Some(TimeStamp::new(2, 0)));
     }

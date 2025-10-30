@@ -108,18 +108,27 @@ pub mod infra_support {
             let mid_clock = ForeignClockDS::mid_grade_test_clock();
             let low_clock = ForeignClockDS::low_grade_test_clock();
 
-            records.insert(ForeignClockRecord::new(AnnounceMessage::new(0, high_clock)));
-            records.insert(ForeignClockRecord::new(AnnounceMessage::new(0, low_clock)));
-            records.insert(ForeignClockRecord::new(AnnounceMessage::new(0, mid_clock)));
+            records.insert(ForeignClockRecord::new(AnnounceMessage::new(
+                0.into(),
+                high_clock,
+            )));
+            records.insert(ForeignClockRecord::new(AnnounceMessage::new(
+                0.into(),
+                low_clock,
+            )));
+            records.insert(ForeignClockRecord::new(AnnounceMessage::new(
+                0.into(),
+                mid_clock,
+            )));
 
             records.update_record(&high_clock, |record| {
-                record.consider(AnnounceMessage::new(1, high_clock));
+                record.consider(AnnounceMessage::new(1.into(), high_clock));
             });
             records.update_record(&low_clock, |record| {
-                record.consider(AnnounceMessage::new(1, low_clock));
+                record.consider(AnnounceMessage::new(1.into(), low_clock));
             });
             records.update_record(&mid_clock, |record| {
-                record.consider(AnnounceMessage::new(1, mid_clock));
+                record.consider(AnnounceMessage::new(1.into(), mid_clock));
             });
 
             let best_clock = records.first().and_then(|record| record.clock());

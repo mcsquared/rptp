@@ -1,5 +1,5 @@
 use crate::clock::{ClockIdentity, ClockQuality, LocalClock, SynchronizableClock};
-use crate::message::AnnounceMessage;
+use crate::message::{AnnounceMessage, SequenceId};
 
 pub trait SortedForeignClockRecords {
     fn insert(&mut self, record: ForeignClockRecord);
@@ -48,7 +48,7 @@ impl LocalClockDS {
         self.ds.outranks_other(foreign)
     }
 
-    pub fn announce(&self, sequence_id: u16) -> AnnounceMessage {
+    pub fn announce(&self, sequence_id: SequenceId) -> AnnounceMessage {
         AnnounceMessage::new(sequence_id, self.ds)
     }
 }
@@ -272,10 +272,10 @@ pub(crate) mod tests {
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0, foreign_high));
-        bmca.consider(AnnounceMessage::new(0, foreign_mid));
-        bmca.consider(AnnounceMessage::new(1, foreign_high));
-        bmca.consider(AnnounceMessage::new(1, foreign_mid));
+        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
+        bmca.consider(AnnounceMessage::new(0.into(), foreign_mid));
+        bmca.consider(AnnounceMessage::new(1.into(), foreign_high));
+        bmca.consider(AnnounceMessage::new(1.into(), foreign_mid));
 
         assert_eq!(bmca.recommendation(&local_clock), BmcaRecommendation::Slave);
     }
@@ -289,10 +289,10 @@ pub(crate) mod tests {
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0, foreign_high));
-        bmca.consider(AnnounceMessage::new(1, foreign_high));
-        bmca.consider(AnnounceMessage::new(0, foreign_mid));
-        bmca.consider(AnnounceMessage::new(1, foreign_mid));
+        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
+        bmca.consider(AnnounceMessage::new(1.into(), foreign_high));
+        bmca.consider(AnnounceMessage::new(0.into(), foreign_mid));
+        bmca.consider(AnnounceMessage::new(1.into(), foreign_mid));
 
         assert_eq!(bmca.recommendation(&local_clock), BmcaRecommendation::Slave);
     }
@@ -317,7 +317,7 @@ pub(crate) mod tests {
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0, foreign_high));
+        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
 
         assert_eq!(
             bmca.recommendation(&local_clock),
@@ -335,9 +335,9 @@ pub(crate) mod tests {
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
         let foreign_low = ForeignClockDS::low_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0, foreign_high));
-        bmca.consider(AnnounceMessage::new(5, foreign_mid));
-        bmca.consider(AnnounceMessage::new(10, foreign_low));
+        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
+        bmca.consider(AnnounceMessage::new(5.into(), foreign_mid));
+        bmca.consider(AnnounceMessage::new(10.into(), foreign_low));
 
         assert_eq!(
             bmca.recommendation(&local_clock),
@@ -353,8 +353,8 @@ pub(crate) mod tests {
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0, foreign_high));
-        bmca.consider(AnnounceMessage::new(2, foreign_high));
+        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
+        bmca.consider(AnnounceMessage::new(2.into(), foreign_high));
 
         assert_eq!(
             bmca.recommendation(&local_clock),
@@ -369,12 +369,12 @@ pub(crate) mod tests {
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0, foreign_high));
-        bmca.consider(AnnounceMessage::new(1, foreign_high));
+        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
+        bmca.consider(AnnounceMessage::new(1.into(), foreign_high));
 
         assert_eq!(bmca.recommendation(&local_clock), BmcaRecommendation::Slave);
 
-        bmca.consider(AnnounceMessage::new(3, foreign_high));
+        bmca.consider(AnnounceMessage::new(3.into(), foreign_high));
 
         assert_eq!(
             bmca.recommendation(&local_clock),

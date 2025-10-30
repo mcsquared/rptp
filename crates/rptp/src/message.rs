@@ -45,7 +45,7 @@ impl TryFrom<&[u8]> for EventMessage {
 
     fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
         let msg_type = b.get(0).ok_or(())? & 0x0F;
-        let sequence_id = u16::from_be_bytes(b.get(30..32).ok_or(())?.try_into().map_err(|_| ())?);
+        let sequence_id = SequenceId::try_from(b.get(30..32).ok_or(())?)?;
 
         match msg_type {
             0x00 => Ok(Self::TwoStepSync(TwoStepSyncMessage::new(sequence_id))),
@@ -70,8 +70,7 @@ impl TryFrom<&[u8]> for GeneralMessage {
 
     fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
         let msgtype = buf.get(0).ok_or(())? & 0x0F;
-        let sequence_id =
-            u16::from_be_bytes(buf.get(30..32).ok_or(())?.try_into().map_err(|_| ())?);
+        let sequence_id = SequenceId::try_from(buf.get(30..32).ok_or(())?)?;
 
         let wire_timestamp =
             WireTimeStamp::new(buf.get(34..44).ok_or(())?.try_into().map_err(|_| ())?);
@@ -98,13 +97,53 @@ impl TryFrom<&[u8]> for GeneralMessage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SequenceId {
+    id: u16,
+}
+
+impl SequenceId {
+    pub fn new(id: u16) -> Self {
+        Self { id }
+    }
+
+    pub fn follows(&self, previous: SequenceId) -> bool {
+        self.id.wrapping_sub(previous.id) == 1
+    }
+
+    pub fn next(&self) -> Self {
+        Self {
+            id: self.id.wrapping_add(1),
+        }
+    }
+
+    pub fn to_wire(&self) -> [u8; 2] {
+        self.id.to_be_bytes()
+    }
+}
+
+impl From<u16> for SequenceId {
+    fn from(id: u16) -> Self {
+        Self::new(id)
+    }
+}
+
+impl TryFrom<&[u8]> for SequenceId {
+    type Error = ();
+
+    fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
+        let id = u16::from_be_bytes(buf.get(0..2).ok_or(())?.try_into().map_err(|_| ())?);
+        Ok(Self::new(id))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnnounceMessage {
-    sequence_id: u16,
+    sequence_id: SequenceId,
     foreign_clock: ForeignClockDS,
 }
 
 impl AnnounceMessage {
-    pub fn new(sequence_id: u16, foreign_clock: ForeignClockDS) -> Self {
+    pub fn new(sequence_id: SequenceId, foreign_clock: ForeignClockDS) -> Self {
         Self {
             sequence_id,
             foreign_clock,
@@ -112,7 +151,7 @@ impl AnnounceMessage {
     }
 
     pub fn follows(&self, previous: AnnounceMessage) -> Option<ForeignClockDS> {
-        if self.sequence_id.wrapping_sub(previous.sequence_id) == 1
+        if self.sequence_id.follows(previous.sequence_id)
             && self.foreign_clock == previous.foreign_clock
         {
             Some(self.foreign_clock)
@@ -128,7 +167,7 @@ impl AnnounceMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x0B & 0x0F;
-        buf[30..32].copy_from_slice(&self.sequence_id.to_be_bytes());
+        buf[30..32].copy_from_slice(&self.sequence_id.to_wire());
 
         buf
     }
@@ -136,11 +175,11 @@ impl AnnounceMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TwoStepSyncMessage {
-    sequence_id: u16,
+    sequence_id: SequenceId,
 }
 
 impl TwoStepSyncMessage {
-    pub fn new(sequence_id: u16) -> Self {
+    pub fn new(sequence_id: SequenceId) -> Self {
         Self { sequence_id }
     }
 
@@ -151,7 +190,7 @@ impl TwoStepSyncMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x00;
-        buf[30..32].copy_from_slice(&self.sequence_id.to_be_bytes());
+        buf[30..32].copy_from_slice(&self.sequence_id.to_wire());
 
         buf
     }
@@ -159,12 +198,12 @@ impl TwoStepSyncMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FollowUpMessage {
-    sequence_id: u16,
+    sequence_id: SequenceId,
     precise_origin_timestamp: TimeStamp,
 }
 
 impl FollowUpMessage {
-    pub fn new(sequence_id: u16, precise_origin_timestamp: TimeStamp) -> Self {
+    pub fn new(sequence_id: SequenceId, precise_origin_timestamp: TimeStamp) -> Self {
         Self {
             sequence_id,
             precise_origin_timestamp,
@@ -186,7 +225,7 @@ impl FollowUpMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x08 & 0x0F;
-        buf[30..32].copy_from_slice(&self.sequence_id.to_be_bytes());
+        buf[30..32].copy_from_slice(&self.sequence_id.to_wire());
         buf[34..44].copy_from_slice(&self.precise_origin_timestamp.to_wire());
         buf
     }
@@ -194,11 +233,11 @@ impl FollowUpMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayRequestMessage {
-    sequence_id: u16,
+    sequence_id: SequenceId,
 }
 
 impl DelayRequestMessage {
-    pub fn new(sequence_id: u16) -> Self {
+    pub fn new(sequence_id: SequenceId) -> Self {
         Self { sequence_id }
     }
 
@@ -209,7 +248,7 @@ impl DelayRequestMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x01 & 0x0F;
-        buf[30..32].copy_from_slice(&self.sequence_id.to_be_bytes());
+        buf[30..32].copy_from_slice(&self.sequence_id.to_wire());
 
         buf
     }
@@ -217,12 +256,12 @@ impl DelayRequestMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayResponseMessage {
-    sequence_id: u16,
+    sequence_id: SequenceId,
     receive_timestamp: TimeStamp,
 }
 
 impl DelayResponseMessage {
-    pub fn new(sequence_id: u16, receive_timestamp: TimeStamp) -> Self {
+    pub fn new(sequence_id: SequenceId, receive_timestamp: TimeStamp) -> Self {
         Self {
             sequence_id,
             receive_timestamp,
@@ -244,7 +283,7 @@ impl DelayResponseMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x09 & 0x0F;
-        buf[30..32].copy_from_slice(&self.sequence_id.to_be_bytes());
+        buf[30..32].copy_from_slice(&self.sequence_id.to_wire());
         buf[34..44].copy_from_slice(&self.receive_timestamp.to_wire());
 
         buf
@@ -253,17 +292,17 @@ impl DelayResponseMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SyncCycleMessage {
-    pub sequence_id: u16,
+    pub sequence_id: SequenceId,
 }
 
 impl SyncCycleMessage {
-    pub fn new(start: u16) -> Self {
+    pub fn new(start: SequenceId) -> Self {
         Self { sequence_id: start }
     }
 
     pub fn next(self) -> Self {
         Self {
-            sequence_id: self.sequence_id.wrapping_add(1),
+            sequence_id: self.sequence_id.next(),
         }
     }
 
@@ -274,17 +313,17 @@ impl SyncCycleMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayCycleMessage {
-    pub sequence_id: u16,
+    pub sequence_id: SequenceId,
 }
 
 impl DelayCycleMessage {
-    pub fn new(start: u16) -> Self {
+    pub fn new(start: SequenceId) -> Self {
         Self { sequence_id: start }
     }
 
     pub fn next(self) -> Self {
         Self {
-            sequence_id: self.sequence_id.wrapping_add(1),
+            sequence_id: self.sequence_id.next(),
         }
     }
 
@@ -351,7 +390,7 @@ mod tests {
     #[test]
     fn announce_message_wire_roundtrip() {
         let announce = AnnounceMessage::new(
-            42,
+            42.into(),
             ForeignClockDS::new(
                 ClockIdentity::new([0; 8]),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
@@ -365,7 +404,7 @@ mod tests {
 
     #[test]
     fn two_step_sync_message_wire_roundtrip() {
-        let sync = TwoStepSyncMessage::new(42);
+        let sync = TwoStepSyncMessage::new(42.into());
         let wire = sync.to_wire();
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
 
@@ -374,7 +413,7 @@ mod tests {
 
     #[test]
     fn follow_up_message_wire_roundtrip() {
-        let follow_up = FollowUpMessage::new(42, TimeStamp::new(1, 2));
+        let follow_up = FollowUpMessage::new(42.into(), TimeStamp::new(1, 2));
         let wire = follow_up.to_wire();
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
 
@@ -383,7 +422,7 @@ mod tests {
 
     #[test]
     fn delay_request_message_wire_roundtrip() {
-        let delay_req = DelayRequestMessage::new(42);
+        let delay_req = DelayRequestMessage::new(42.into());
         let wire = delay_req.to_wire();
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
 
@@ -392,7 +431,7 @@ mod tests {
 
     #[test]
     fn delay_response_message_wire_roundtrip() {
-        let delay_resp = DelayResponseMessage::new(42, TimeStamp::new(1, 2));
+        let delay_resp = DelayResponseMessage::new(42.into(), TimeStamp::new(1, 2));
         let wire = delay_resp.to_wire();
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
 
@@ -432,16 +471,19 @@ mod tests {
 
     #[test]
     fn twostep_sync_message_produces_follow_up() {
-        let sync = TwoStepSyncMessage::new(42);
+        let sync = TwoStepSyncMessage::new(42.into());
         let follow_up = sync.follow_up(TimeStamp::new(4, 0));
 
-        assert_eq!(follow_up, FollowUpMessage::new(42, TimeStamp::new(4, 0)));
+        assert_eq!(
+            follow_up,
+            FollowUpMessage::new(42.into(), TimeStamp::new(4, 0))
+        );
     }
 
     #[test]
     fn follow_up_message_produces_master_slave_offset() {
-        let sync = TwoStepSyncMessage::new(42);
-        let follow_up = FollowUpMessage::new(42, TimeStamp::new(4, 0));
+        let sync = TwoStepSyncMessage::new(42.into());
+        let follow_up = FollowUpMessage::new(42.into(), TimeStamp::new(4, 0));
 
         let sync_ingress_timestamp = TimeStamp::new(5, 0);
         let offset = follow_up.master_slave_offset(sync, sync_ingress_timestamp);
@@ -451,8 +493,8 @@ mod tests {
 
     #[test]
     fn follow_up_message_with_different_sequence_id_produces_no_master_slave_offset() {
-        let sync = TwoStepSyncMessage::new(42);
-        let follow_up = FollowUpMessage::new(43, TimeStamp::new(4, 0));
+        let sync = TwoStepSyncMessage::new(42.into());
+        let follow_up = FollowUpMessage::new(43.into(), TimeStamp::new(4, 0));
 
         let sync_ingress_timestamp = TimeStamp::new(5, 0);
         let offset = follow_up.master_slave_offset(sync, sync_ingress_timestamp);
@@ -462,8 +504,8 @@ mod tests {
 
     #[test]
     fn delay_response_produces_slave_master_offset() {
-        let delay_req = DelayRequestMessage::new(42);
-        let delay_resp = DelayResponseMessage::new(42, TimeStamp::new(5, 0));
+        let delay_req = DelayRequestMessage::new(42.into());
+        let delay_resp = DelayResponseMessage::new(42.into(), TimeStamp::new(5, 0));
 
         let delay_req_egress_timestamp = TimeStamp::new(4, 0);
         let offset = delay_resp.slave_master_offset(delay_req, delay_req_egress_timestamp);
@@ -473,8 +515,8 @@ mod tests {
 
     #[test]
     fn delay_response_with_different_sequence_id_produces_no_slave_master_offset() {
-        let delay_req = DelayRequestMessage::new(42);
-        let delay_resp = DelayResponseMessage::new(43, TimeStamp::new(5, 0));
+        let delay_req = DelayRequestMessage::new(42.into());
+        let delay_resp = DelayResponseMessage::new(43.into(), TimeStamp::new(5, 0));
 
         let delay_req_egress_timestamp = TimeStamp::new(4, 0);
         let offset = delay_resp.slave_master_offset(delay_req, delay_req_egress_timestamp);
@@ -484,60 +526,60 @@ mod tests {
 
     #[test]
     fn sync_cycle_message_produces_two_step_sync_message() {
-        let sync_cycle = SyncCycleMessage::new(0);
+        let sync_cycle = SyncCycleMessage::new(0.into());
         let two_step_sync = sync_cycle.two_step_sync();
 
-        assert_eq!(two_step_sync, TwoStepSyncMessage::new(0));
+        assert_eq!(two_step_sync, TwoStepSyncMessage::new(0.into()));
     }
 
     #[test]
     fn sync_cycle_next() {
-        let sync_cycle = SyncCycleMessage::new(0);
+        let sync_cycle = SyncCycleMessage::new(0.into());
         let next = sync_cycle.next();
 
-        assert_eq!(next, SyncCycleMessage::new(1));
+        assert_eq!(next, SyncCycleMessage::new(1.into()));
     }
 
     #[test]
     fn sync_cycle_next_wraps() {
-        let sync_cycle = SyncCycleMessage::new(u16::MAX);
+        let sync_cycle = SyncCycleMessage::new(u16::MAX.into());
         let next = sync_cycle.next();
 
-        assert_eq!(next, SyncCycleMessage::new(0));
+        assert_eq!(next, SyncCycleMessage::new(0.into()));
     }
 
     #[test]
     fn delay_cycle_message_produces_delay_request_message() {
-        let delay_cycle = DelayCycleMessage::new(0);
+        let delay_cycle = DelayCycleMessage::new(0.into());
         let delay_request = delay_cycle.delay_request();
 
-        assert_eq!(delay_request, DelayRequestMessage::new(0));
+        assert_eq!(delay_request, DelayRequestMessage::new(0.into()));
     }
 
     #[test]
     fn delay_cycle_next() {
-        let delay_cycle = DelayCycleMessage::new(0);
+        let delay_cycle = DelayCycleMessage::new(0.into());
         let next = delay_cycle.next();
 
-        assert_eq!(next, DelayCycleMessage::new(1));
+        assert_eq!(next, DelayCycleMessage::new(1.into()));
     }
 
     #[test]
     fn delay_cycle_next_wraps() {
-        let delay_cycle = DelayCycleMessage::new(u16::MAX);
+        let delay_cycle = DelayCycleMessage::new(u16::MAX.into());
         let next = delay_cycle.next();
 
-        assert_eq!(next, DelayCycleMessage::new(0));
+        assert_eq!(next, DelayCycleMessage::new(0.into()));
     }
 
     #[test]
     fn delay_request_message_produces_delay_response_message() {
-        let delay_req = DelayRequestMessage::new(42);
+        let delay_req = DelayRequestMessage::new(42.into());
         let delay_resp = delay_req.response(TimeStamp::new(4, 0));
 
         assert_eq!(
             delay_resp,
-            DelayResponseMessage::new(42, TimeStamp::new(4, 0))
+            DelayResponseMessage::new(42.into(), TimeStamp::new(4, 0))
         );
     }
 
@@ -546,8 +588,8 @@ mod tests {
         let mut sync_window = MessageWindow::new();
         let mut follow_up_window = MessageWindow::new();
 
-        sync_window.record((TwoStepSyncMessage::new(1), TimeStamp::new(2, 0)));
-        follow_up_window.record(FollowUpMessage::new(1, TimeStamp::new(1, 0)));
+        sync_window.record((TwoStepSyncMessage::new(1.into()), TimeStamp::new(2, 0)));
+        follow_up_window.record(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0)));
 
         let offset = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
@@ -561,7 +603,7 @@ mod tests {
         let mut sync_window = MessageWindow::new();
         let follow_up_window = MessageWindow::<FollowUpMessage>::new();
 
-        sync_window.record((TwoStepSyncMessage::new(1), TimeStamp::new(2, 0)));
+        sync_window.record((TwoStepSyncMessage::new(1.into()), TimeStamp::new(2, 0)));
 
         let offset = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
