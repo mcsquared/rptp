@@ -37,7 +37,7 @@ impl<T: Timeout> Drop for DropTimeout<T> {
     }
 }
 
-pub trait Port {
+pub trait PhysicalPort {
     type Clock: SynchronizableClock;
     type Timeout: Timeout;
 
@@ -47,7 +47,7 @@ pub trait Port {
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
 }
 
-impl<P: Port> Port for Box<P> {
+impl<P: PhysicalPort> PhysicalPort for Box<P> {
     type Clock = P::Clock;
     type Timeout = P::Timeout;
 
@@ -70,6 +70,8 @@ impl<P: Port> Port for Box<P> {
 
 #[cfg(test)]
 pub mod test_support {
+    use super::*;
+
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::time::Duration;
@@ -78,7 +80,7 @@ pub mod test_support {
     use crate::clock::{LocalClock, SynchronizableClock};
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
-    use super::{Port, Timeout};
+    use super::Timeout;
 
     pub struct FakeTimeout {
         msg: RefCell<SystemMessage>,
@@ -175,7 +177,7 @@ pub mod test_support {
         }
     }
 
-    impl<C: SynchronizableClock> Port for FakePort<C> {
+    impl<C: SynchronizableClock> PhysicalPort for FakePort<C> {
         type Clock = C;
         type Timeout = Rc<FakeTimeout>;
 
@@ -197,7 +199,7 @@ pub mod test_support {
         }
     }
 
-    impl<C: SynchronizableClock> Port for &FakePort<C> {
+    impl<C: SynchronizableClock> PhysicalPort for &FakePort<C> {
         type Clock = C;
         type Timeout = Rc<FakeTimeout>;
 

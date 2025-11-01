@@ -6,11 +6,11 @@ use crate::message::{
     AnnounceMessage, DelayCycleMessage, EventMessage, GeneralMessage, SequenceId, SyncCycleMessage,
     SystemMessage,
 };
-use crate::port::{DropTimeout, Port, Timeout};
+use crate::port::{DropTimeout, PhysicalPort, Timeout};
 use crate::sync::MasterEstimate;
 use crate::time::TimeStamp;
 
-pub enum PortState<P: Port, B: Bmca> {
+pub enum PortState<P: PhysicalPort, B: Bmca> {
     Initializing(InitializingPort<P, B>),
     Listening(ListeningPort<P, B>),
     Slave(SlavePort<P, B>),
@@ -19,7 +19,7 @@ pub enum PortState<P: Port, B: Bmca> {
     Uncalibrated(UncalibratedPort<P, B>),
 }
 
-impl<P: Port, B: Bmca> PortState<P, B> {
+impl<P: PhysicalPort, B: Bmca> PortState<P, B> {
     pub fn event_message(self, msg: EventMessage, timestamp: TimeStamp) -> Self {
         match self {
             PortState::Initializing(_) => self,
@@ -54,12 +54,12 @@ impl<P: Port, B: Bmca> PortState<P, B> {
     }
 }
 
-pub struct InitializingPort<P: Port, B: Bmca> {
+pub struct InitializingPort<P: PhysicalPort, B: Bmca> {
     port: P,
     bmca: B,
 }
 
-impl<P: Port, B: Bmca> InitializingPort<P, B> {
+impl<P: PhysicalPort, B: Bmca> InitializingPort<P, B> {
     pub fn new(port: P, bmca: B) -> Self {
         Self { port, bmca }
     }
@@ -83,13 +83,13 @@ impl<P: Port, B: Bmca> InitializingPort<P, B> {
     }
 }
 
-pub struct ListeningPort<P: Port, B: Bmca> {
+pub struct ListeningPort<P: PhysicalPort, B: Bmca> {
     port: P,
     bmca: B,
     announce_receipt_timeout: DropTimeout<P::Timeout>,
 }
 
-impl<P: Port, B: Bmca> ListeningPort<P, B> {
+impl<P: PhysicalPort, B: Bmca> ListeningPort<P, B> {
     pub fn new(port: P, bmca: B, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
         Self {
             port,
@@ -131,7 +131,7 @@ impl<P: Port, B: Bmca> ListeningPort<P, B> {
     }
 }
 
-pub struct SlavePort<P: Port, B: Bmca> {
+pub struct SlavePort<P: PhysicalPort, B: Bmca> {
     port: P,
     bmca: B,
     announce_receipt_timeout: DropTimeout<P::Timeout>,
@@ -139,7 +139,7 @@ pub struct SlavePort<P: Port, B: Bmca> {
     master_estimate: MasterEstimate,
 }
 
-impl<P: Port, B: Bmca> SlavePort<P, B> {
+impl<P: PhysicalPort, B: Bmca> SlavePort<P, B> {
     pub fn new(port: P, bmca: B, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
         let delay_cycle_timeout = DropTimeout::new(port.timeout(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
@@ -223,7 +223,7 @@ impl<P: Port, B: Bmca> SlavePort<P, B> {
     }
 }
 
-pub struct MasterPort<P: Port, B: Bmca> {
+pub struct MasterPort<P: PhysicalPort, B: Bmca> {
     port: P,
     bmca: B,
     announce_send_timeout: DropTimeout<P::Timeout>,
@@ -231,7 +231,7 @@ pub struct MasterPort<P: Port, B: Bmca> {
     announce_cycle: AnnounceCycle,
 }
 
-impl<P: Port, B: Bmca> MasterPort<P, B> {
+impl<P: PhysicalPort, B: Bmca> MasterPort<P, B> {
     pub fn new(port: P, bmca: B) -> Self {
         let announce_send_timeout =
             DropTimeout::new(port.timeout(SystemMessage::AnnounceSendTimeout, Duration::ZERO));
@@ -316,13 +316,13 @@ impl<P: Port, B: Bmca> MasterPort<P, B> {
     }
 }
 
-pub struct PreMasterPort<P: Port, B: Bmca> {
+pub struct PreMasterPort<P: PhysicalPort, B: Bmca> {
     port: P,
     bmca: B,
     _qualification_timeout: DropTimeout<P::Timeout>,
 }
 
-impl<P: Port, B: Bmca> PreMasterPort<P, B> {
+impl<P: PhysicalPort, B: Bmca> PreMasterPort<P, B> {
     pub fn new(port: P, bmca: B) -> Self {
         let _qualification_timeout = DropTimeout::new(
             port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5)),
@@ -344,13 +344,13 @@ impl<P: Port, B: Bmca> PreMasterPort<P, B> {
     }
 }
 
-pub struct UncalibratedPort<P: Port, B: Bmca> {
+pub struct UncalibratedPort<P: PhysicalPort, B: Bmca> {
     port: P,
     bmca: B,
     announce_receipt_timeout: DropTimeout<P::Timeout>,
 }
 
-impl<P: Port, B: Bmca> UncalibratedPort<P, B> {
+impl<P: PhysicalPort, B: Bmca> UncalibratedPort<P, B> {
     pub fn new(port: P, bmca: B, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
         Self {
             port,

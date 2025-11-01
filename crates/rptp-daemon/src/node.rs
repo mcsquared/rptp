@@ -12,7 +12,7 @@ use rptp::{
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{EventMessage, GeneralMessage, SystemMessage},
     node::{InitializingPort, MasterPort, PortState, SlavePort},
-    port::{DropTimeout, Port, Timeout},
+    port::{DropTimeout, PhysicalPort, Timeout},
 };
 
 use crate::net::NetPort;
@@ -114,7 +114,7 @@ impl TokioPort {
     }
 }
 
-impl Port for TokioPort {
+impl PhysicalPort for TokioPort {
     type Clock = Rc<dyn SynchronizableClock>;
     type Timeout = TokioTimeout;
 
