@@ -1,5 +1,8 @@
+use crate::bmca::Bmca;
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
+use crate::node::{InitializingPort, MasterPort, PortState, SlavePort};
+use crate::time::TimeStamp;
 
 pub trait Timeout {
     fn restart(&self, timeout: std::time::Duration);
@@ -38,22 +41,15 @@ impl<T: Timeout> Drop for DropTimeout<T> {
 }
 
 pub trait PhysicalPort {
-    type Clock: SynchronizableClock;
     type Timeout: Timeout;
 
-    fn clock(&self) -> &LocalClock<Self::Clock>;
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
 }
 
 impl<P: PhysicalPort> PhysicalPort for Box<P> {
-    type Clock = P::Clock;
     type Timeout = P::Timeout;
-
-    fn clock(&self) -> &LocalClock<Self::Clock> {
-        self.as_ref().clock()
-    }
 
     fn send_event(&self, msg: EventMessage) {
         self.as_ref().send_event(msg)
@@ -68,6 +64,69 @@ impl<P: PhysicalPort> PhysicalPort for Box<P> {
     }
 }
 
+pub struct Port<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
+    port_state: Option<PortState<'a, C, P, B>>,
+}
+
+impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> Port<'a, C, P, B> {
+    pub fn initializing(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
+        Self {
+            port_state: Some(PortState::Initializing(InitializingPort::new(
+                local_clock,
+                physical_port,
+                bmca,
+            ))),
+        }
+    }
+
+    pub fn master(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
+        Self {
+            port_state: Some(PortState::Master(MasterPort::new(
+                local_clock,
+                physical_port,
+                bmca,
+            ))),
+        }
+    }
+
+    pub fn slave(
+        local_clock: &'a LocalClock<C>,
+        physical_port: P,
+        bmca: B,
+        announce_receipt_timeout: P::Timeout,
+    ) -> Self {
+        Self {
+            port_state: Some(PortState::Slave(SlavePort::new(
+                local_clock,
+                physical_port,
+                bmca,
+                DropTimeout::new(announce_receipt_timeout),
+            ))),
+        }
+    }
+
+    pub fn process_event_message(&mut self, msg: EventMessage, timestamp: TimeStamp) {
+        self.port_state = self
+            .port_state
+            .take()
+            .and_then(|state| Some(state.process_event_message(msg, timestamp)));
+    }
+
+    pub fn process_general_message(&mut self, msg: GeneralMessage) {
+        self.port_state = self
+            .port_state
+            .take()
+            .and_then(|state| Some(state.process_general_message(msg)));
+    }
+
+    pub fn process_system_message(&mut self, msg: SystemMessage) {
+        self.port_state = self
+            .port_state
+            .take()
+            .and_then(|state| Some(state.process_system_message(msg)));
+    }
+}
+
 #[cfg(test)]
 pub mod test_support {
     use super::*;
@@ -76,8 +135,6 @@ pub mod test_support {
     use std::rc::Rc;
     use std::time::Duration;
 
-    use crate::bmca::LocalClockDS;
-    use crate::clock::{LocalClock, SynchronizableClock};
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 
     use super::Timeout;
@@ -147,17 +204,15 @@ pub mod test_support {
         }
     }
 
-    pub struct FakePort<C: SynchronizableClock> {
-        clock: LocalClock<C>,
+    pub struct FakePort {
         event_messages: Rc<RefCell<Vec<EventMessage>>>,
         general_messages: Rc<RefCell<Vec<GeneralMessage>>>,
         system_messages: Rc<RefCell<Vec<SystemMessage>>>,
     }
 
-    impl<C: SynchronizableClock> FakePort<C> {
-        pub fn new(clock: C, localds: LocalClockDS) -> Self {
+    impl FakePort {
+        pub fn new() -> Self {
             Self {
-                clock: LocalClock::new(clock, localds),
                 event_messages: Rc::new(RefCell::new(Vec::new())),
                 general_messages: Rc::new(RefCell::new(Vec::new())),
                 system_messages: Rc::new(RefCell::new(Vec::new())),
@@ -177,13 +232,8 @@ pub mod test_support {
         }
     }
 
-    impl<C: SynchronizableClock> PhysicalPort for FakePort<C> {
-        type Clock = C;
+    impl PhysicalPort for FakePort {
         type Timeout = Rc<FakeTimeout>;
-
-        fn clock(&self) -> &LocalClock<Self::Clock> {
-            &self.clock
-        }
 
         fn send_event(&self, msg: EventMessage) {
             self.event_messages.borrow_mut().push(msg);
@@ -199,13 +249,8 @@ pub mod test_support {
         }
     }
 
-    impl<C: SynchronizableClock> PhysicalPort for &FakePort<C> {
-        type Clock = C;
+    impl PhysicalPort for &FakePort {
         type Timeout = Rc<FakeTimeout>;
-
-        fn clock(&self) -> &LocalClock<Self::Clock> {
-            &self.clock
-        }
 
         fn send_event(&self, msg: EventMessage) {
             self.event_messages.borrow_mut().push(msg);

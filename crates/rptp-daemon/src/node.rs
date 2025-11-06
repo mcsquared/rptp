@@ -3,16 +3,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rptp::bmca::FullBmca;
-use rptp::clock::{ClockIdentity, ClockQuality};
 use tokio::sync::mpsc;
 
 use rptp::{
-    bmca::LocalClockDS,
-    clock::{Clock, LocalClock, SynchronizableClock},
+    clock::{FakeClock, LocalClock},
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{EventMessage, GeneralMessage, SystemMessage},
-    node::{InitializingPort, MasterPort, PortState, SlavePort},
-    port::{DropTimeout, PhysicalPort, Timeout},
+    port::{PhysicalPort, Port, Timeout},
 };
 
 use crate::net::NetPort;
@@ -92,7 +89,6 @@ impl Drop for TokioTimeout {
 }
 
 struct TokioPort {
-    clock: LocalClock<Rc<dyn SynchronizableClock>>,
     event_tx: mpsc::UnboundedSender<EventMessage>,
     general_tx: mpsc::UnboundedSender<GeneralMessage>,
     system_tx: mpsc::UnboundedSender<SystemMessage>,
@@ -100,13 +96,11 @@ struct TokioPort {
 
 impl TokioPort {
     fn new(
-        clock: LocalClock<Rc<dyn SynchronizableClock>>,
         event_tx: mpsc::UnboundedSender<EventMessage>,
         general_tx: mpsc::UnboundedSender<GeneralMessage>,
         system_tx: mpsc::UnboundedSender<SystemMessage>,
     ) -> Self {
         Self {
-            clock,
             event_tx,
             general_tx,
             system_tx,
@@ -115,12 +109,7 @@ impl TokioPort {
 }
 
 impl PhysicalPort for TokioPort {
-    type Clock = Rc<dyn SynchronizableClock>;
     type Timeout = TokioTimeout;
-
-    fn clock(&self) -> &LocalClock<Self::Clock> {
-        &self.clock
-    }
 
     fn send_event(&self, msg: EventMessage) {
         let _ = self.event_tx.send(msg);
@@ -136,9 +125,9 @@ impl PhysicalPort for TokioPort {
     }
 }
 
-pub struct TokioNode<P: NetPort> {
-    port: PortState<TokioPort, FullBmca<SortedForeignClockRecordsVec>>,
-    clock: Rc<dyn SynchronizableClock>,
+pub struct TokioNode<'a, P: NetPort> {
+    local_clock: &'a LocalClock<Rc<FakeClock>>,
+    port: Port<'a, Rc<FakeClock>, TokioPort, FullBmca<SortedForeignClockRecordsVec>>,
     event_port: P,
     general_port: P,
     event_rx: mpsc::UnboundedReceiver<EventMessage>,
@@ -146,30 +135,25 @@ pub struct TokioNode<P: NetPort> {
     system_rx: mpsc::UnboundedReceiver<SystemMessage>,
 }
 
-impl<P: NetPort> TokioNode<P> {
+impl<'a, P: NetPort> TokioNode<'a, P> {
     pub async fn initializing(
-        clock: Rc<dyn SynchronizableClock>,
+        local_clock: &'a LocalClock<Rc<FakeClock>>,
         event_port: P,
         general_port: P,
-        localds: LocalClockDS,
     ) -> std::io::Result<Self> {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let port = PortState::Initializing(InitializingPort::new(
-            TokioPort::new(
-                LocalClock::new(clock.clone(), localds),
-                event_tx,
-                general_tx,
-                system_tx,
-            ),
+        let port = Port::initializing(
+            local_clock,
+            TokioPort::new(event_tx, general_tx, system_tx),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-        ));
+        );
 
         Ok(Self {
-            port: port.system_message(SystemMessage::Initialized),
-            clock,
+            local_clock,
+            port,
             event_port,
             general_port,
             event_rx,
@@ -179,7 +163,7 @@ impl<P: NetPort> TokioNode<P> {
     }
 
     pub async fn master(
-        clock: Rc<dyn SynchronizableClock>,
+        local_clock: &'a LocalClock<Rc<FakeClock>>,
         event_port: P,
         general_port: P,
     ) -> std::io::Result<Self> {
@@ -187,25 +171,15 @@ impl<P: NetPort> TokioNode<P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let port = TokioPort::new(
-            LocalClock::new(
-                clock.clone(),
-                LocalClockDS::new(
-                    ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
-                    ClockQuality::new(248, 0xFE, 0xFFFF),
-                ),
-            ),
-            event_tx,
-            general_tx,
-            system_tx,
+        let port = Port::master(
+            local_clock,
+            TokioPort::new(event_tx, general_tx, system_tx),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
-
-        let port = PortState::Master(MasterPort::new(port, bmca));
 
         Ok(Self {
+            local_clock,
             port,
-            clock,
             event_port,
             general_port,
             event_rx,
@@ -215,39 +189,29 @@ impl<P: NetPort> TokioNode<P> {
     }
 
     pub async fn slave(
-        clock: Rc<dyn SynchronizableClock>,
+        local_clock: &'a LocalClock<Rc<FakeClock>>,
         event_port: P,
         general_port: P,
+        announce_receipt_timeout: Duration,
     ) -> std::io::Result<Self> {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let port = TokioPort::new(
-            LocalClock::new(
-                clock.clone(),
-                LocalClockDS::new(
-                    ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
-                    ClockQuality::new(255, 0xFF, 0xFFFF),
-                ),
+        let port = Port::slave(
+            local_clock,
+            TokioPort::new(event_tx, general_tx, system_tx.clone()),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            TokioTimeout::new(
+                system_tx.clone(),
+                SystemMessage::AnnounceReceiptTimeout,
+                announce_receipt_timeout,
             ),
-            event_tx,
-            general_tx,
-            system_tx,
         );
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
-        let announce_receipt_timeout = DropTimeout::new(port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
-            Duration::from_secs(30), // TODO: this is a hack to avoid tests running into timeouts
-                                     // -> long term solution would be to have Bmca trait and
-                                     // instantiate a slave-only Bmca here.
-        ));
-
-        let port = PortState::Slave(SlavePort::new(port, bmca, announce_receipt_timeout));
 
         Ok(Self {
+            local_clock,
             port,
-            clock,
             event_port,
             general_port,
             event_rx,
@@ -269,13 +233,15 @@ impl<P: NetPort> TokioNode<P> {
 
         tokio::pin!(shutdown);
 
+        self.port.process_system_message(SystemMessage::Initialized);
+
         loop {
             tokio::select! {
                 recv = self.event_port.recv(&mut event_buf) => {
                     if let Ok((size, _peer)) = recv {
                         if let Ok(msg) = EventMessage::try_from(&event_buf[..size]) {
                             eprintln!("[event] recv {:?}", msg);
-                            self.port = self.port.event_message(msg, self.clock.now());
+                            self.port.process_event_message(msg, self.local_clock.now());
                         }
                     }
                 }
@@ -283,7 +249,7 @@ impl<P: NetPort> TokioNode<P> {
                     if let Ok((size, _peer)) = recv {
                         if let Ok(msg) = GeneralMessage::try_from(&general_buf[..size]) {
                             eprintln!("[general] recv {:?}", msg);
-                            self.port = self.port.general_message(msg);
+                            self.port.process_general_message(msg);
                         }
                     }
                 }
@@ -292,9 +258,9 @@ impl<P: NetPort> TokioNode<P> {
                         eprintln!("[event] send {:?}", msg);
                         let _ = self.event_port.send(msg.to_wire().as_ref()).await;
 
-                        self.port = self.port.system_message(SystemMessage::Timestamp {
+                        self.port.process_system_message(SystemMessage::Timestamp {
                             msg,
-                            timestamp: self.clock.now(),
+                            timestamp: self.local_clock.now(),
                         });
                     }
                 }
@@ -306,7 +272,7 @@ impl<P: NetPort> TokioNode<P> {
                 }
                 msg = self.system_rx.recv() => {
                     if let Some(msg) = msg {
-                        self.port = self.port.system_message(msg);
+                        self.port.process_system_message(msg);
                     }
                 }
                 _ = tokio::signal::ctrl_c() => {
@@ -342,14 +308,18 @@ mod tests {
     use futures::FutureExt;
     use tokio::time;
 
-    use rptp::clock::FakeClock;
+    use rptp::bmca::LocalClockDS;
+    use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
+    use rptp::node::PortState;
 
     use crate::net::FakeNetPort;
 
     #[test]
     fn tokio_node_state_size() {
         use std::mem::size_of;
-        let s = size_of::<PortState<Box<TokioPort>, FullBmca<SortedForeignClockRecordsVec>>>();
+        let s = size_of::<
+            PortState<FakeClock, Box<TokioPort>, FullBmca<SortedForeignClockRecordsVec>>,
+        >();
         println!("PortState<Box<TokioPort>> size: {}", s);
         assert!(s <= 256);
     }
@@ -359,8 +329,14 @@ mod tests {
         let (event_port, mut event_rx) = FakeNetPort::new();
         let (general_port, mut general_rx) = FakeNetPort::new();
 
-        let clock = Rc::new(FakeClock::default());
-        let node = TokioNode::master(clock, event_port, general_port).await?;
+        let local_clock = LocalClock::new(
+            Rc::new(FakeClock::default()),
+            LocalClockDS::new(
+                ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+                ClockQuality::new(248, 0xFE, 0xFFFF),
+            ),
+        );
+        let node = TokioNode::master(&local_clock, event_port, general_port).await?;
 
         let mut sync_count = 0;
         let mut follow_up_count = 0;
@@ -405,8 +381,20 @@ mod tests {
         let (event_port, mut event_rx) = FakeNetPort::new();
         let (general_port, _) = FakeNetPort::new();
 
-        let clock = Rc::new(FakeClock::default());
-        let node = TokioNode::slave(clock, event_port, general_port).await?;
+        let local_clock = LocalClock::new(
+            Rc::new(FakeClock::default()),
+            LocalClockDS::new(
+                ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
+                ClockQuality::new(248, 0xFE, 0xFFFF),
+            ),
+        );
+        let node = TokioNode::slave(
+            &local_clock,
+            event_port,
+            general_port,
+            Duration::from_secs(10),
+        )
+        .await?;
 
         let mut delay_request_count = 0;
 

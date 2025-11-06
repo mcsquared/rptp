@@ -60,6 +60,10 @@ impl<C: SynchronizableClock> LocalClock<C> {
         Self { clock, localds }
     }
 
+    pub fn now(&self) -> TimeStamp {
+        self.clock.now()
+    }
+
     pub fn announce(&self, sequence_id: SequenceId) -> AnnounceMessage {
         self.localds.announce(sequence_id)
     }
