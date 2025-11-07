@@ -20,6 +20,28 @@ pub enum PortState<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
 }
 
 impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> PortState<'a, C, P, B> {
+    pub fn initializing(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
+        PortState::Initializing(InitializingPort::new(local_clock, physical_port, bmca))
+    }
+
+    pub fn master(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
+        PortState::Master(MasterPort::new(local_clock, physical_port, bmca))
+    }
+
+    pub fn slave(
+        local_clock: &'a LocalClock<C>,
+        physical_port: P,
+        bmca: B,
+        announce_receipt_timeout: P::Timeout,
+    ) -> Self {
+        PortState::Slave(SlavePort::new(
+            local_clock,
+            physical_port,
+            bmca,
+            DropTimeout::new(announce_receipt_timeout),
+        ))
+    }
+
     pub fn process_event_message(self, msg: EventMessage, timestamp: TimeStamp) -> Self {
         match self {
             PortState::Initializing(_) => self,

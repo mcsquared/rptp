@@ -1,16 +1,21 @@
 pub type Result<T> = core::result::Result<T, Error>;
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     Parse(ParseError),
     Protocol(ProtocolError),
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParseError {
     BadLength,
+    BadMessageType,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum ProtocolError {
     DomainNotFound,
+    InvalidTimestamp,
 }
 
 impl From<ParseError> for Error {

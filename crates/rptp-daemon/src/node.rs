@@ -8,8 +8,9 @@ use tokio::sync::mpsc;
 use rptp::{
     clock::{FakeClock, LocalClock},
     infra::infra_support::SortedForeignClockRecordsVec,
-    message::{EventMessage, GeneralMessage, SystemMessage},
-    port::{PhysicalPort, Port, Timeout},
+    message::{DomainMessage, EventMessage, GeneralMessage, SystemMessage},
+    node::PortState,
+    port::{DomainZeroOnlyPortMap, PhysicalPort, Timeout},
 };
 
 use crate::net::NetPort;
@@ -127,7 +128,8 @@ impl PhysicalPort for TokioPort {
 
 pub struct TokioNode<'a, P: NetPort> {
     local_clock: &'a LocalClock<Rc<FakeClock>>,
-    port: Port<'a, Rc<FakeClock>, TokioPort, FullBmca<SortedForeignClockRecordsVec>>,
+    portmap:
+        DomainZeroOnlyPortMap<'a, Rc<FakeClock>, TokioPort, FullBmca<SortedForeignClockRecordsVec>>,
     event_port: P,
     general_port: P,
     event_rx: mpsc::UnboundedReceiver<EventMessage>,
@@ -145,7 +147,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let port = Port::initializing(
+        let port = PortState::initializing(
             local_clock,
             TokioPort::new(event_tx, general_tx, system_tx),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -153,7 +155,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
 
         Ok(Self {
             local_clock,
-            port,
+            portmap: DomainZeroOnlyPortMap::new(port),
             event_port,
             general_port,
             event_rx,
@@ -171,7 +173,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let port = Port::master(
+        let port = PortState::master(
             local_clock,
             TokioPort::new(event_tx, general_tx, system_tx),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -179,7 +181,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
 
         Ok(Self {
             local_clock,
-            port,
+            portmap: DomainZeroOnlyPortMap::new(port),
             event_port,
             general_port,
             event_rx,
@@ -198,7 +200,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-        let port = Port::slave(
+        let port = PortState::slave(
             local_clock,
             TokioPort::new(event_tx, general_tx, system_tx.clone()),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -211,7 +213,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
 
         Ok(Self {
             local_clock,
-            port,
+            portmap: DomainZeroOnlyPortMap::new(port),
             event_port,
             general_port,
             event_rx,
@@ -233,7 +235,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
 
         tokio::pin!(shutdown);
 
-        self.port.process_system_message(SystemMessage::Initialized);
+        let _ = SystemMessage::Initialized.dispatch(&mut self.portmap);
 
         loop {
             tokio::select! {
@@ -241,7 +243,8 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
                     if let Ok((size, _peer)) = recv {
                         if let Ok(msg) = EventMessage::try_from(&event_buf[..size]) {
                             eprintln!("[event] recv {:?}", msg);
-                            self.port.process_event_message(msg, self.local_clock.now());
+                            let domain_msg = DomainMessage::new(&event_buf[..size]);
+                            let _ = domain_msg.dispatch_event(&mut self.portmap, self.local_clock.now());
                         }
                     }
                 }
@@ -249,7 +252,8 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
                     if let Ok((size, _peer)) = recv {
                         if let Ok(msg) = GeneralMessage::try_from(&general_buf[..size]) {
                             eprintln!("[general] recv {:?}", msg);
-                            self.port.process_general_message(msg);
+                            let domain_msg = DomainMessage::new(&general_buf[..size]);
+                            let _ = domain_msg.dispatch_general(&mut self.portmap);
                         }
                     }
                 }
@@ -258,10 +262,11 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
                         eprintln!("[event] send {:?}", msg);
                         let _ = self.event_port.send(msg.to_wire().as_ref()).await;
 
-                        self.port.process_system_message(SystemMessage::Timestamp {
+                        let _ = SystemMessage::Timestamp {
                             msg,
                             timestamp: self.local_clock.now(),
-                        });
+                        }
+                        .dispatch(&mut self.portmap);
                     }
                 }
                 msg = self.general_rx.recv() => {
@@ -272,7 +277,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
                 }
                 msg = self.system_rx.recv() => {
                     if let Some(msg) = msg {
-                        self.port.process_system_message(msg);
+                        let _ = msg.dispatch(&mut self.portmap);
                     }
                 }
                 _ = tokio::signal::ctrl_c() => {

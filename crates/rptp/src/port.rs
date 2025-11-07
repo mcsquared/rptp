@@ -1,7 +1,8 @@
 use crate::bmca::Bmca;
-use crate::clock::{LocalClock, SynchronizableClock};
+use crate::clock::SynchronizableClock;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-use crate::node::{InitializingPort, MasterPort, PortState, SlavePort};
+use crate::node::PortState;
+use crate::result::{ProtocolError, Result};
 use crate::time::TimeStamp;
 
 pub trait Timeout {
@@ -64,64 +65,55 @@ impl<P: PhysicalPort> PhysicalPort for Box<P> {
     }
 }
 
-pub struct Port<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
-    port_state: Option<PortState<'a, C, P, B>>,
+pub trait PortMap {
+    fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn Port>;
 }
 
-impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> Port<'a, C, P, B> {
-    pub fn initializing(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
+pub struct DomainZeroOnlyPortMap<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
+    pub port_state: Option<PortState<'a, C, P, B>>,
+}
+
+impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> DomainZeroOnlyPortMap<'a, C, P, B> {
+    pub fn new(port_state: PortState<'a, C, P, B>) -> Self {
         Self {
-            port_state: Some(PortState::Initializing(InitializingPort::new(
-                local_clock,
-                physical_port,
-                bmca,
-            ))),
+            port_state: Some(port_state),
         }
     }
+}
 
-    pub fn master(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
-        Self {
-            port_state: Some(PortState::Master(MasterPort::new(
-                local_clock,
-                physical_port,
-                bmca,
-            ))),
+impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> PortMap
+    for DomainZeroOnlyPortMap<'a, C, P, B>
+{
+    fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn Port> {
+        if domain_number == 0 {
+            Ok(&mut self.port_state)
+        } else {
+            Err(ProtocolError::DomainNotFound.into())
         }
     }
+}
 
-    pub fn slave(
-        local_clock: &'a LocalClock<C>,
-        physical_port: P,
-        bmca: B,
-        announce_receipt_timeout: P::Timeout,
-    ) -> Self {
-        Self {
-            port_state: Some(PortState::Slave(SlavePort::new(
-                local_clock,
-                physical_port,
-                bmca,
-                DropTimeout::new(announce_receipt_timeout),
-            ))),
-        }
-    }
+pub trait Port {
+    fn process_event_message(&mut self, msg: EventMessage, timestamp: TimeStamp);
+    fn process_general_message(&mut self, msg: GeneralMessage);
+    fn process_system_message(&mut self, msg: SystemMessage);
+}
 
-    pub fn process_event_message(&mut self, msg: EventMessage, timestamp: TimeStamp) {
-        self.port_state = self
-            .port_state
+impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> Port for Option<PortState<'a, C, P, B>> {
+    fn process_event_message(&mut self, msg: EventMessage, timestamp: TimeStamp) {
+        *self = self
             .take()
             .and_then(|state| Some(state.process_event_message(msg, timestamp)));
     }
 
-    pub fn process_general_message(&mut self, msg: GeneralMessage) {
-        self.port_state = self
-            .port_state
+    fn process_general_message(&mut self, msg: GeneralMessage) {
+        *self = self
             .take()
             .and_then(|state| Some(state.process_general_message(msg)));
     }
 
-    pub fn process_system_message(&mut self, msg: SystemMessage) {
-        self.port_state = self
-            .port_state
+    fn process_system_message(&mut self, msg: SystemMessage) {
+        *self = self
             .take()
             .and_then(|state| Some(state.process_system_message(msg)));
     }

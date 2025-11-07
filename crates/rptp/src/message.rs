@@ -1,8 +1,45 @@
 use crate::{
     bmca::ForeignClockDS,
     clock::{ClockIdentity, ClockQuality},
+    port::PortMap,
+    result::{ParseError, ProtocolError, Result},
     time::{Duration, TimeStamp},
 };
+
+pub struct DomainMessage<'a> {
+    buf: &'a [u8],
+}
+
+impl<'a> DomainMessage<'a> {
+    pub fn new(buf: &'a [u8]) -> Self {
+        Self { buf }
+    }
+
+    pub fn dispatch_event(self, ports: &mut impl PortMap, timestamp: TimeStamp) -> Result<()> {
+        let domain_number = self.domain_number()?;
+        let port = ports.port_by_domain(domain_number)?;
+        let msg = EventMessage::try_from(self.buf).map_err(|_| ProtocolError::DomainNotFound)?;
+        port.process_event_message(msg, timestamp);
+
+        Ok(())
+    }
+
+    pub fn dispatch_general(self, ports: &mut impl PortMap) -> Result<()> {
+        let domain_number = self.domain_number()?;
+        let port = ports.port_by_domain(domain_number)?;
+        let msg = GeneralMessage::try_from(self.buf).map_err(|_| ProtocolError::DomainNotFound)?;
+        port.process_general_message(msg);
+
+        Ok(())
+    }
+
+    fn domain_number(&self) -> Result<u8> {
+        self.buf
+            .get(4)
+            .copied()
+            .ok_or(ProtocolError::DomainNotFound.into())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventMessage {
@@ -41,16 +78,16 @@ impl EventMessage {
 }
 
 impl TryFrom<&[u8]> for EventMessage {
-    type Error = ();
+    type Error = crate::result::Error;
 
-    fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
-        let msg_type = b.get(0).ok_or(())? & 0x0F;
-        let sequence_id = SequenceId::try_from(b.get(30..32).ok_or(())?)?;
+    fn try_from(b: &[u8]) -> Result<Self> {
+        let msg_type = b.get(0).ok_or(ParseError::BadLength)? & 0x0F;
+        let sequence_id = SequenceId::try_from(b.get(30..32).ok_or(ParseError::BadLength)?)?;
 
         match msg_type {
             0x00 => Ok(Self::TwoStepSync(TwoStepSyncMessage::new(sequence_id))),
             0x01 => Ok(Self::DelayReq(DelayRequestMessage::new(sequence_id))),
-            _ => Err(()),
+            _ => Err(ParseError::BadMessageType.into()),
         }
     }
 }
@@ -66,14 +103,18 @@ impl GeneralMessage {
 }
 
 impl TryFrom<&[u8]> for GeneralMessage {
-    type Error = ();
+    type Error = crate::result::Error;
 
-    fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
-        let msgtype = buf.get(0).ok_or(())? & 0x0F;
-        let sequence_id = SequenceId::try_from(buf.get(30..32).ok_or(())?)?;
+    fn try_from(buf: &[u8]) -> Result<Self> {
+        let msgtype = buf.get(0).ok_or(ParseError::BadLength)? & 0x0F;
+        let sequence_id = SequenceId::try_from(buf.get(30..32).ok_or(ParseError::BadLength)?)?;
 
-        let wire_timestamp =
-            WireTimeStamp::new(buf.get(34..44).ok_or(())?.try_into().map_err(|_| ())?);
+        let wire_timestamp = WireTimeStamp::new(
+            buf.get(34..44)
+                .ok_or(ParseError::BadLength)?
+                .try_into()
+                .map_err(|_| ParseError::BadLength)?,
+        );
 
         match msgtype {
             0x0B => Ok(Self::Announce(AnnounceMessage::new(
@@ -85,14 +126,22 @@ impl TryFrom<&[u8]> for GeneralMessage {
             ))),
             0x08 => Ok(Self::FollowUp(FollowUpMessage::new(
                 sequence_id,
-                wire_timestamp.timestamp().ok_or(())?,
+                wire_timestamp.timestamp()?,
             ))),
             0x09 => Ok(Self::DelayResp(DelayResponseMessage::new(
                 sequence_id,
-                wire_timestamp.timestamp().ok_or(())?,
+                wire_timestamp.timestamp()?,
             ))),
-            _ => Err(()),
+            _ => Err(ParseError::BadMessageType.into()),
         }
+    }
+}
+
+impl SystemMessage {
+    pub fn dispatch(self, ports: &mut impl PortMap) -> Result<()> {
+        let port = ports.port_by_domain(0)?; // System messages are domain-independent
+        port.process_system_message(self);
+        Ok(())
     }
 }
 
@@ -128,10 +177,15 @@ impl From<u16> for SequenceId {
 }
 
 impl TryFrom<&[u8]> for SequenceId {
-    type Error = ();
+    type Error = crate::result::Error;
 
-    fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
-        let id = u16::from_be_bytes(buf.get(0..2).ok_or(())?.try_into().map_err(|_| ())?);
+    fn try_from(buf: &[u8]) -> Result<Self> {
+        let id = u16::from_be_bytes(
+            buf.get(0..2)
+                .ok_or(ParseError::BadLength)?
+                .try_into()
+                .map_err(|_| ParseError::BadLength)?,
+        );
         Ok(Self::new(id))
     }
 }
@@ -342,17 +396,29 @@ impl<'a> WireTimeStamp<'a> {
         Self { buf }
     }
 
-    pub fn timestamp(&self) -> Option<TimeStamp> {
-        let secs_msb = u16::from_be_bytes(self.buf[0..2].try_into().ok()?);
-        let secs_lsb = u32::from_be_bytes(self.buf[2..6].try_into().ok()?);
+    pub fn timestamp(&self) -> Result<TimeStamp> {
+        let secs_msb = u16::from_be_bytes(
+            self.buf[0..2]
+                .try_into()
+                .map_err(|_| ParseError::BadLength)?,
+        );
+        let secs_lsb = u32::from_be_bytes(
+            self.buf[2..6]
+                .try_into()
+                .map_err(|_| ParseError::BadLength)?,
+        );
 
         let seconds = ((secs_msb as u64) << 32) | (secs_lsb as u64);
-        let nanos = u32::from_be_bytes(self.buf[6..10].try_into().ok()?);
+        let nanos = u32::from_be_bytes(
+            self.buf[6..10]
+                .try_into()
+                .map_err(|_| ParseError::BadLength)?,
+        );
 
         if nanos < 1_000_000_000 {
-            Some(TimeStamp::new(seconds, nanos))
+            Ok(TimeStamp::new(seconds, nanos))
         } else {
-            None
+            Err(ProtocolError::InvalidTimestamp.into())
         }
     }
 }
@@ -444,7 +510,7 @@ mod tests {
         let wire = ts.to_wire();
         let parsed = WireTimeStamp::new(&wire).timestamp();
 
-        assert_eq!(parsed, Some(ts));
+        assert_eq!(parsed, Ok(ts));
     }
 
     #[test]
@@ -455,7 +521,7 @@ mod tests {
         ];
         let parsed = WireTimeStamp::new(&wire).timestamp();
 
-        assert_eq!(parsed, Some(TimeStamp::new(42, 42)));
+        assert_eq!(parsed, Ok(TimeStamp::new(42, 42)));
     }
 
     #[test]
@@ -466,7 +532,7 @@ mod tests {
         ];
         let parsed = WireTimeStamp::new(&wire).timestamp();
 
-        assert_eq!(parsed, None);
+        assert_eq!(parsed, Err(ProtocolError::InvalidTimestamp.into()));
     }
 
     #[test]
