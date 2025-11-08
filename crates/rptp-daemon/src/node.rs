@@ -186,20 +186,14 @@ impl<'a, N: NetworkSocket> TokioNetwork<'a, N> {
             tokio::select! {
                 recv = self.event_socket.recv(&mut event_buf) => {
                     if let Ok((size, _peer)) = recv {
-                        if let Ok(msg) = EventMessage::try_from(&event_buf[..size]) {
-                            eprintln!("[event] recv {:?}", msg);
-                            let domain_msg = DomainMessage::new(&event_buf[..size]);
-                            let _ = domain_msg.dispatch_event(&mut self.portmap, self.local_clock.now());
-                        }
+                        let domain_msg = DomainMessage::new(&event_buf[..size]);
+                        let _ = domain_msg.dispatch_event(&mut self.portmap, self.local_clock.now());
                     }
                 }
                 recv = self.general_socket.recv(&mut general_buf) => {
                     if let Ok((size, _peer)) = recv {
-                        if let Ok(msg) = GeneralMessage::try_from(&general_buf[..size]) {
-                            eprintln!("[general] recv {:?}", msg);
-                            let domain_msg = DomainMessage::new(&general_buf[..size]);
-                            let _ = domain_msg.dispatch_general(&mut self.portmap);
-                        }
+                        let domain_msg = DomainMessage::new(&general_buf[..size]);
+                        let _ = domain_msg.dispatch_general(&mut self.portmap);
                     }
                 }
                 msg = self.event_rx.recv() => {

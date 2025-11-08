@@ -19,6 +19,7 @@ impl<'a> DomainMessage<'a> {
         let domain_number = self.domain_number()?;
         let port = ports.port_by_domain(domain_number)?;
         let msg = EventMessage::try_from(self.buf).map_err(|_| ProtocolError::DomainNotFound)?;
+        eprintln!("[event] recv {:?}", msg);
         port.process_event_message(msg, timestamp);
 
         Ok(())
@@ -28,6 +29,7 @@ impl<'a> DomainMessage<'a> {
         let domain_number = self.domain_number()?;
         let port = ports.port_by_domain(domain_number)?;
         let msg = GeneralMessage::try_from(self.buf).map_err(|_| ProtocolError::DomainNotFound)?;
+        eprintln!("[general] recv {:?}", msg);
         port.process_general_message(msg);
 
         Ok(())
