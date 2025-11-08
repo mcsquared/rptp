@@ -33,12 +33,10 @@ async fn main() -> std::io::Result<()> {
     let (general_tx, general_rx) = mpsc::unbounded_channel();
     let (system_tx, system_rx) = mpsc::unbounded_channel();
     let physical_port = TokioPhysicalPort::new(event_tx, general_tx, system_tx);
+    let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
-    let port_state = PortState::initializing(
-        &local_clock,
-        DomainPort::new(domain, physical_port),
-        FullBmca::new(SortedForeignClockRecordsVec::new()),
-    );
+    let port_state =
+        PortState::initializing(DomainPort::new(&local_clock, bmca, physical_port, domain));
 
     let portmap = SingleDomainPortMap::new(domain, port_state);
 

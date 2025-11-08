@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::clock::{ClockIdentity, ClockQuality, LocalClock, SynchronizableClock};
 use crate::message::{AnnounceMessage, SequenceId};
 
@@ -123,7 +125,7 @@ pub enum BmcaRecommendation {
 }
 
 pub trait Bmca {
-    fn consider(&mut self, announce: AnnounceMessage);
+    fn consider(&self, announce: AnnounceMessage);
     fn recommendation<C: SynchronizableClock>(
         &self,
         local_clock: &LocalClock<C>,
@@ -131,27 +133,31 @@ pub trait Bmca {
 }
 
 pub struct FullBmca<S: SortedForeignClockRecords> {
-    sorted_clock_records: S,
+    sorted_clock_records: RefCell<S>,
 }
 
 impl<S: SortedForeignClockRecords> FullBmca<S> {
     pub fn new(sorted_clock_records: S) -> Self {
         Self {
-            sorted_clock_records,
+            sorted_clock_records: RefCell::new(sorted_clock_records),
         }
     }
 }
 
 impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
-    fn consider(&mut self, announce: AnnounceMessage) {
+    fn consider(&self, announce: AnnounceMessage) {
         let foreign = announce.foreign_clock();
 
-        let updated = self.sorted_clock_records.update_record(foreign, |record| {
-            record.consider(announce);
-        });
+        let updated = self
+            .sorted_clock_records
+            .borrow_mut()
+            .update_record(foreign, |record| {
+                record.consider(announce);
+            });
 
         if !updated {
             self.sorted_clock_records
+                .borrow_mut()
                 .insert(ForeignClockRecord::new(announce));
         }
     }
@@ -160,9 +166,10 @@ impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
         &self,
         local_clock: &LocalClock<C>,
     ) -> BmcaRecommendation {
-        let best_foreign_record = self.sorted_clock_records.first();
-
-        let recommendation = best_foreign_record
+        let recommendation = self
+            .sorted_clock_records
+            .borrow()
+            .first()
             .map(|foreign_record| {
                 if let Some(foreign_clock) = foreign_record.clock() {
                     if local_clock.outranks_foreign(foreign_clock) {
@@ -267,7 +274,7 @@ pub(crate) mod tests {
     fn full_bmca_recommends_slave_from_interleaved_announce_sequence() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::low_grade_test_clock());
-        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -284,7 +291,7 @@ pub(crate) mod tests {
     fn full_bmca_recommends_slave_from_non_interleaved_announce_sequence() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::low_grade_test_clock());
-        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -313,7 +320,7 @@ pub(crate) mod tests {
     fn full_bmca_undecided_when_no_qualified_clock_records_yet() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
@@ -329,7 +336,7 @@ pub(crate) mod tests {
     fn full_bmca_undecided_when_only_single_announces_each() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -349,7 +356,7 @@ pub(crate) mod tests {
     fn bmca_undecided_on_sequence_gap() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
@@ -366,7 +373,7 @@ pub(crate) mod tests {
     fn bmca_undecided_on_sequence_gap_after_being_qualified_before() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
         bmca.consider(AnnounceMessage::new(0.into(), foreign_high));

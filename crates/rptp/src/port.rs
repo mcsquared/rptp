@@ -1,5 +1,5 @@
 use crate::bmca::Bmca;
-use crate::clock::SynchronizableClock;
+use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::PortState;
 use crate::result::{ProtocolError, Result};
@@ -65,45 +65,86 @@ impl<P: PhysicalPort> PhysicalPort for Box<P> {
     }
 }
 
-pub struct DomainPort<P: PhysicalPort> {
-    pub domain_number: u8,
-    pub physical_port: P,
+pub trait Port {
+    type Clock: SynchronizableClock;
+    type PhysicalPort: PhysicalPort;
+    type Bmca: Bmca;
+    type Timeout: Timeout;
+
+    fn local_clock(&self) -> &LocalClock<Self::Clock>;
+    fn bmca(&self) -> &Self::Bmca;
+    fn send_event(&self, msg: EventMessage);
+    fn send_general(&self, msg: GeneralMessage);
+    fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
 }
 
-impl<P: PhysicalPort> DomainPort<P> {
-    pub fn new(domain_number: u8, physical_port: P) -> Self {
+pub struct DomainPort<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort> {
+    local_clock: &'a LocalClock<C>,
+    bmca: B,
+    physical_port: P,
+    _domain_number: u8,
+}
+
+impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort> DomainPort<'a, C, B, P> {
+    pub fn new(
+        local_clock: &'a LocalClock<C>,
+        bmca: B,
+        physical_port: P,
+        _domain_number: u8,
+    ) -> Self {
         Self {
-            domain_number,
+            local_clock,
+            bmca,
             physical_port,
+            _domain_number,
         }
     }
 
-    pub fn send_event(&self, msg: EventMessage) {
+    // pub fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> P::Timeout {
+    //     self.physical_port.timeout(msg, delay)
+    // }
+}
+
+impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort> Port for DomainPort<'a, C, B, P> {
+    type Clock = C;
+    type PhysicalPort = P;
+    type Bmca = B;
+    type Timeout = P::Timeout;
+
+    fn local_clock(&self) -> &LocalClock<Self::Clock> {
+        &self.local_clock
+    }
+
+    fn bmca(&self) -> &Self::Bmca {
+        &self.bmca
+    }
+
+    fn send_event(&self, msg: EventMessage) {
         // TODO: attach domain_number to msg
         self.physical_port.send_event(msg);
     }
 
-    pub fn send_general(&self, msg: GeneralMessage) {
+    fn send_general(&self, msg: GeneralMessage) {
         // TODO: attach domain_number to msg
         self.physical_port.send_general(msg);
     }
 
-    pub fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> P::Timeout {
+    fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout {
         self.physical_port.timeout(msg, delay)
     }
 }
 
 pub trait PortMap {
-    fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn Port>;
+    fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn PortIngress>;
 }
 
-pub struct SingleDomainPortMap<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
+pub struct SingleDomainPortMap<P: Port> {
     domain_number: u8,
-    port_state: Option<PortState<'a, C, P, B>>,
+    port_state: Option<PortState<P>>,
 }
 
-impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> SingleDomainPortMap<'a, C, P, B> {
-    pub fn new(domain_number: u8, port_state: PortState<'a, C, P, B>) -> Self {
+impl<P: Port> SingleDomainPortMap<P> {
+    pub fn new(domain_number: u8, port_state: PortState<P>) -> Self {
         Self {
             domain_number,
             port_state: Some(port_state),
@@ -111,10 +152,8 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> SingleDomainPortMap<'
     }
 }
 
-impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> PortMap
-    for SingleDomainPortMap<'a, C, P, B>
-{
-    fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn Port> {
+impl<P: Port> PortMap for SingleDomainPortMap<P> {
+    fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn PortIngress> {
         if self.domain_number == domain_number {
             Ok(&mut self.port_state)
         } else {
@@ -123,13 +162,13 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> PortMap
     }
 }
 
-pub trait Port {
+pub trait PortIngress {
     fn process_event_message(&mut self, msg: EventMessage, timestamp: TimeStamp);
     fn process_general_message(&mut self, msg: GeneralMessage);
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
-impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> Port for Option<PortState<'a, C, P, B>> {
+impl<P: Port> PortIngress for Option<PortState<P>> {
     fn process_event_message(&mut self, msg: EventMessage, timestamp: TimeStamp) {
         *self = self
             .take()

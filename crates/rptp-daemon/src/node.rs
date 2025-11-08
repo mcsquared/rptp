@@ -9,7 +9,7 @@ use rptp::{
     clock::{FakeClock, LocalClock},
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{DomainMessage, EventMessage, GeneralMessage, SystemMessage},
-    port::{PhysicalPort, SingleDomainPortMap, Timeout},
+    port::{DomainPort, PhysicalPort, SingleDomainPortMap, Timeout},
 };
 
 use crate::net::NetworkSocket;
@@ -130,10 +130,7 @@ impl PhysicalPort for TokioPhysicalPort {
 pub struct TokioNetwork<'a, N: NetworkSocket> {
     local_clock: &'a LocalClock<Rc<FakeClock>>,
     portmap: SingleDomainPortMap<
-        'a,
-        Rc<FakeClock>,
-        TokioPhysicalPort,
-        FullBmca<SortedForeignClockRecordsVec>,
+        DomainPort<'a, Rc<FakeClock>, FullBmca<SortedForeignClockRecordsVec>, TokioPhysicalPort>,
     >,
     event_socket: Rc<N>,
     general_socket: Rc<N>,
@@ -148,10 +145,12 @@ impl<'a, N: NetworkSocket> TokioNetwork<'a, N> {
         event_socket: Rc<N>,
         general_socket: Rc<N>,
         portmap: SingleDomainPortMap<
-            'a,
-            Rc<FakeClock>,
-            TokioPhysicalPort,
-            FullBmca<SortedForeignClockRecordsVec>,
+            DomainPort<
+                'a,
+                Rc<FakeClock>,
+                FullBmca<SortedForeignClockRecordsVec>,
+                TokioPhysicalPort,
+            >,
         >,
         event_rx: mpsc::UnboundedReceiver<EventMessage>,
         general_rx: mpsc::UnboundedReceiver<GeneralMessage>,
@@ -270,7 +269,14 @@ mod tests {
     fn tokio_node_state_size() {
         use std::mem::size_of;
         let s = size_of::<
-            PortState<FakeClock, Box<TokioPhysicalPort>, FullBmca<SortedForeignClockRecordsVec>>,
+            PortState<
+                DomainPort<
+                    '_,
+                    Rc<FakeClock>,
+                    FullBmca<SortedForeignClockRecordsVec>,
+                    Box<TokioPhysicalPort>,
+                >,
+            >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
         assert!(s <= 256);
@@ -295,11 +301,12 @@ mod tests {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let physical_port = TokioPhysicalPort::new(event_tx, general_tx, system_tx);
-        let port_state = PortState::master(
+        let port_state = PortState::master(DomainPort::new(
             &local_clock,
-            DomainPort::new(0, physical_port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-        );
+            physical_port,
+            0,
+        ));
         let portmap = SingleDomainPortMap::new(0, port_state);
         let net = TokioNetwork::new(
             &local_clock,
@@ -370,9 +377,12 @@ mod tests {
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let physical_port = TokioPhysicalPort::new(event_tx, general_tx, system_tx.clone());
         let port_state = PortState::slave(
-            &local_clock,
-            DomainPort::new(0, physical_port),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            DomainPort::new(
+                &local_clock,
+                FullBmca::new(SortedForeignClockRecordsVec::new()),
+                physical_port,
+                0,
+            ),
             TokioTimeout::new(
                 system_tx,
                 SystemMessage::AnnounceReceiptTimeout,
