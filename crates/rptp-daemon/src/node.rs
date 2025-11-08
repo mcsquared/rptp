@@ -9,7 +9,7 @@ use rptp::{
     clock::{FakeClock, LocalClock},
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{DomainMessage, EventMessage, GeneralMessage, SystemMessage},
-    port::{DomainZeroOnlyPortMap, PhysicalPort, Timeout},
+    port::{PhysicalPort, SingleDomainPortMap, Timeout},
     portstate::PortState,
 };
 
@@ -129,7 +129,7 @@ impl PhysicalPort for TokioPort {
 pub struct TokioNode<'a, P: NetPort> {
     local_clock: &'a LocalClock<Rc<FakeClock>>,
     portmap:
-        DomainZeroOnlyPortMap<'a, Rc<FakeClock>, TokioPort, FullBmca<SortedForeignClockRecordsVec>>,
+        SingleDomainPortMap<'a, Rc<FakeClock>, TokioPort, FullBmca<SortedForeignClockRecordsVec>>,
     event_port: P,
     general_port: P,
     event_rx: mpsc::UnboundedReceiver<EventMessage>,
@@ -155,7 +155,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
 
         Ok(Self {
             local_clock,
-            portmap: DomainZeroOnlyPortMap::new(port),
+            portmap: SingleDomainPortMap::new(0, port),
             event_port,
             general_port,
             event_rx,
@@ -181,7 +181,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
 
         Ok(Self {
             local_clock,
-            portmap: DomainZeroOnlyPortMap::new(port),
+            portmap: SingleDomainPortMap::new(0, port),
             event_port,
             general_port,
             event_rx,
@@ -213,7 +213,7 @@ impl<'a, P: NetPort> TokioNode<'a, P> {
 
         Ok(Self {
             local_clock,
-            portmap: DomainZeroOnlyPortMap::new(port),
+            portmap: SingleDomainPortMap::new(0, port),
             event_port,
             general_port,
             event_rx,

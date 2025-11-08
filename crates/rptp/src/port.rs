@@ -69,23 +69,25 @@ pub trait PortMap {
     fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn Port>;
 }
 
-pub struct DomainZeroOnlyPortMap<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
-    pub port_state: Option<PortState<'a, C, P, B>>,
+pub struct SingleDomainPortMap<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
+    domain_number: u8,
+    port_state: Option<PortState<'a, C, P, B>>,
 }
 
-impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> DomainZeroOnlyPortMap<'a, C, P, B> {
-    pub fn new(port_state: PortState<'a, C, P, B>) -> Self {
+impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> SingleDomainPortMap<'a, C, P, B> {
+    pub fn new(domain_number: u8, port_state: PortState<'a, C, P, B>) -> Self {
         Self {
+            domain_number,
             port_state: Some(port_state),
         }
     }
 }
 
 impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> PortMap
-    for DomainZeroOnlyPortMap<'a, C, P, B>
+    for SingleDomainPortMap<'a, C, P, B>
 {
     fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn Port> {
-        if domain_number == 0 {
+        if self.domain_number == domain_number {
             Ok(&mut self.port_state)
         } else {
             Err(ProtocolError::DomainNotFound.into())
