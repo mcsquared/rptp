@@ -99,10 +99,6 @@ impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort> DomainPort<'a, C, B, 
             _domain_number,
         }
     }
-
-    // pub fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> P::Timeout {
-    //     self.physical_port.timeout(msg, delay)
-    // }
 }
 
 impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort> Port for DomainPort<'a, C, B, P> {

@@ -26,8 +26,8 @@ async fn main() -> std::io::Result<()> {
         ),
     );
 
-    let event_socket = Rc::new(MulticastSocket::event().await?);
-    let general_socket = Rc::new(MulticastSocket::general().await?);
+    let event_socket = MulticastSocket::event().await?;
+    let general_socket = MulticastSocket::general().await?;
 
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     let (general_tx, general_rx) = mpsc::unbounded_channel();

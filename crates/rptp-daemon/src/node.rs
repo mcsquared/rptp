@@ -132,8 +132,8 @@ pub struct TokioNetwork<'a, N: NetworkSocket> {
     portmap: SingleDomainPortMap<
         DomainPort<'a, Rc<FakeClock>, FullBmca<SortedForeignClockRecordsVec>, TokioPhysicalPort>,
     >,
-    event_socket: Rc<N>,
-    general_socket: Rc<N>,
+    event_socket: N,
+    general_socket: N,
     event_rx: mpsc::UnboundedReceiver<EventMessage>,
     general_rx: mpsc::UnboundedReceiver<GeneralMessage>,
     system_rx: mpsc::UnboundedReceiver<SystemMessage>,
@@ -142,8 +142,8 @@ pub struct TokioNetwork<'a, N: NetworkSocket> {
 impl<'a, N: NetworkSocket> TokioNetwork<'a, N> {
     pub async fn new(
         local_clock: &'a LocalClock<Rc<FakeClock>>,
-        event_socket: Rc<N>,
-        general_socket: Rc<N>,
+        event_socket: N,
+        general_socket: N,
         portmap: SingleDomainPortMap<
             DomainPort<
                 'a,
@@ -280,8 +280,6 @@ mod tests {
     async fn master_node_sends_periodic_sync_follow_up() -> std::io::Result<()> {
         let (event_socket, mut event_socket_rx) = FakeNetworkSocket::new();
         let (general_socket, mut general_socket_rx) = FakeNetworkSocket::new();
-        let event_socket = Rc::new(event_socket);
-        let general_socket = Rc::new(general_socket);
 
         let local_clock = LocalClock::new(
             Rc::new(FakeClock::default()),
@@ -304,8 +302,8 @@ mod tests {
         let portmap = SingleDomainPortMap::new(0, port_state);
         let net = TokioNetwork::new(
             &local_clock,
-            event_socket.clone(),
-            general_socket.clone(),
+            event_socket,
+            general_socket,
             portmap,
             event_rx,
             general_rx,
@@ -355,8 +353,6 @@ mod tests {
     async fn slave_node_sends_periodic_delay_requests() -> std::io::Result<()> {
         let (event_socket, mut event_socket_rx) = FakeNetworkSocket::new();
         let (general_socket, _) = FakeNetworkSocket::new();
-        let event_socket = Rc::new(event_socket);
-        let general_socket = Rc::new(general_socket);
 
         let local_clock = LocalClock::new(
             Rc::new(FakeClock::default()),
@@ -386,8 +382,8 @@ mod tests {
         let portmap = SingleDomainPortMap::new(0, port_state);
         let net = TokioNetwork::new(
             &local_clock,
-            event_socket.clone(),
-            general_socket.clone(),
+            event_socket,
+            general_socket,
             portmap,
             event_rx,
             general_rx,
