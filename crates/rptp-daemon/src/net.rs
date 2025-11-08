@@ -4,41 +4,34 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use tokio::net::UdpSocket;
 
-pub trait NetPort {
+pub trait NetworkSocket {
     fn recv<'a>(
         &'a self,
         buf: &'a mut [u8],
     ) -> impl Future<Output = Result<(usize, SocketAddr)>> + 'a;
 
     fn send<'a>(&'a self, bytes: &'a [u8]) -> impl Future<Output = Result<usize>> + 'a;
+    fn try_send(&self, bytes: &[u8]) -> Result<usize>;
 }
 
 #[derive(Debug)]
-pub struct MulticastPort {
+pub struct MulticastSocket {
     socket: UdpSocket,
     dest: SocketAddrV4,
 }
 
-impl MulticastPort {
+impl MulticastSocket {
     const PTP_MCAST: Ipv4Addr = Ipv4Addr::new(224, 0, 1, 129);
 
-    pub async fn ptp_event_port() -> Result<Self> {
+    pub async fn event() -> Result<Self> {
         Self::bind_v4(Self::PTP_MCAST, 319).await
     }
 
-    pub async fn ptp_general_port() -> Result<Self> {
+    pub async fn general() -> Result<Self> {
         Self::bind_v4(Self::PTP_MCAST, 320).await
     }
 
-    pub async fn ptp_event_testing_port() -> Result<Self> {
-        Self::bind_v4(Self::PTP_MCAST, 5319).await
-    }
-
-    pub async fn ptp_general_testing_port() -> Result<Self> {
-        Self::bind_v4(Self::PTP_MCAST, 5320).await
-    }
-
-    pub async fn bind_v4(multicast: Ipv4Addr, port: u16) -> Result<Self> {
+    async fn bind_v4(multicast: Ipv4Addr, port: u16) -> Result<Self> {
         let socket = UdpSocket::bind(("0.0.0.0", port)).await?;
         socket.join_multicast_v4(multicast, Ipv4Addr::UNSPECIFIED)?;
         socket.set_multicast_loop_v4(false)?;
@@ -50,7 +43,7 @@ impl MulticastPort {
     }
 }
 
-impl NetPort for MulticastPort {
+impl NetworkSocket for MulticastSocket {
     fn recv<'a>(
         &'a self,
         buf: &'a mut [u8],
@@ -61,20 +54,25 @@ impl NetPort for MulticastPort {
     fn send<'a>(&'a self, bytes: &'a [u8]) -> impl Future<Output = Result<usize>> + 'a {
         self.socket.send_to(bytes, self.dest)
     }
+
+    fn try_send(&self, bytes: &[u8]) -> Result<usize> {
+        let dest = SocketAddr::V4(self.dest);
+        self.socket.try_send_to(bytes, dest)
+    }
 }
 
-pub struct FakeNetPort {
+pub struct FakeNetworkSocket {
     tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
 }
 
-impl FakeNetPort {
+impl FakeNetworkSocket {
     pub fn new() -> (Self, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         (Self { tx }, rx)
     }
 }
 
-impl NetPort for FakeNetPort {
+impl NetworkSocket for FakeNetworkSocket {
     fn recv<'a>(
         &'a self,
         _buf: &'a mut [u8],
@@ -97,5 +95,13 @@ impl NetPort for FakeNetPort {
                 .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "send failed"))?;
             Ok(len)
         }
+    }
+
+    fn try_send(&self, bytes: &[u8]) -> Result<usize> {
+        let len = bytes.len();
+        self.tx
+            .send(bytes.to_vec())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "send failed"))?;
+        Ok(len)
     }
 }

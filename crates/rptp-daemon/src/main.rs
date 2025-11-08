@@ -3,16 +3,20 @@ pub mod node;
 
 use std::rc::Rc;
 
-use rptp::bmca::LocalClockDS;
-use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
+use tokio::sync::mpsc;
 
-use crate::net::MulticastPort;
-use crate::node::TokioNode;
+use rptp::bmca::{FullBmca, LocalClockDS};
+use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
+use rptp::infra::infra_support::SortedForeignClockRecordsVec;
+use rptp::port::{DomainPort, SingleDomainPortMap};
+use rptp::portstate::PortState;
+
+use crate::net::MulticastSocket;
+use crate::node::{TokioNetwork, TokioPhysicalPort};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::io::Result<()> {
-    let event_port = MulticastPort::ptp_event_port().await?;
-    let general_port = MulticastPort::ptp_general_port().await?;
+    let domain = 0;
 
     let local_clock = LocalClock::new(
         Rc::new(FakeClock::default()),
@@ -21,7 +25,35 @@ async fn main() -> std::io::Result<()> {
             ClockQuality::new(248, 0xFE, 0xFFFF),
         ),
     );
-    let master = TokioNode::master(&local_clock, event_port, general_port).await?;
-    println!("Master ready");
-    master.run().await
+
+    let event_socket = Rc::new(MulticastSocket::event().await?);
+    let general_socket = Rc::new(MulticastSocket::general().await?);
+
+    let (event_tx, event_rx) = mpsc::unbounded_channel();
+    let (general_tx, general_rx) = mpsc::unbounded_channel();
+    let (system_tx, system_rx) = mpsc::unbounded_channel();
+    let physical_port = TokioPhysicalPort::new(event_tx, general_tx, system_tx);
+
+    let port_state = PortState::initializing(
+        &local_clock,
+        DomainPort::new(domain, physical_port),
+        FullBmca::new(SortedForeignClockRecordsVec::new()),
+    );
+
+    let portmap = SingleDomainPortMap::new(domain, port_state);
+
+    let tokio_network = TokioNetwork::new(
+        &local_clock,
+        event_socket,
+        general_socket,
+        portmap,
+        event_rx,
+        general_rx,
+        system_rx,
+    )
+    .await?;
+
+    tokio_network.run().await?;
+
+    Ok(())
 }

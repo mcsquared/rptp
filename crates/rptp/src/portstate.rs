@@ -6,7 +6,7 @@ use crate::message::{
     AnnounceMessage, DelayCycleMessage, EventMessage, GeneralMessage, SequenceId, SyncCycleMessage,
     SystemMessage,
 };
-use crate::port::{DropTimeout, PhysicalPort, Timeout};
+use crate::port::{DomainPort, DropTimeout, PhysicalPort, Timeout};
 use crate::sync::MasterEstimate;
 use crate::time::TimeStamp;
 
@@ -20,23 +20,23 @@ pub enum PortState<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
 }
 
 impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> PortState<'a, C, P, B> {
-    pub fn initializing(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
-        PortState::Initializing(InitializingPort::new(local_clock, physical_port, bmca))
+    pub fn initializing(local_clock: &'a LocalClock<C>, port: DomainPort<P>, bmca: B) -> Self {
+        PortState::Initializing(InitializingPort::new(local_clock, port, bmca))
     }
 
-    pub fn master(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
-        PortState::Master(MasterPort::new(local_clock, physical_port, bmca))
+    pub fn master(local_clock: &'a LocalClock<C>, port: DomainPort<P>, bmca: B) -> Self {
+        PortState::Master(MasterPort::new(local_clock, port, bmca))
     }
 
     pub fn slave(
         local_clock: &'a LocalClock<C>,
-        physical_port: P,
+        port: DomainPort<P>,
         bmca: B,
         announce_receipt_timeout: P::Timeout,
     ) -> Self {
         PortState::Slave(SlavePort::new(
             local_clock,
-            physical_port,
+            port,
             bmca,
             DropTimeout::new(announce_receipt_timeout),
         ))
@@ -78,15 +78,15 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> PortState<'a, C, P, B
 
 pub struct InitializingPort<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
     local_clock: &'a LocalClock<C>,
-    physical_port: P,
+    port: DomainPort<P>,
     bmca: B,
 }
 
 impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> InitializingPort<'a, C, P, B> {
-    pub fn new(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
+    pub fn new(local_clock: &'a LocalClock<C>, port: DomainPort<P>, bmca: B) -> Self {
         Self {
             local_clock,
-            physical_port,
+            port,
             bmca,
         }
     }
@@ -94,14 +94,14 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> InitializingPort<'a, 
     fn process_system_message(self, msg: SystemMessage) -> PortState<'a, C, P, B> {
         match msg {
             SystemMessage::Initialized => {
-                let announce_receipt_timeout = DropTimeout::new(self.physical_port.timeout(
+                let announce_receipt_timeout = DropTimeout::new(self.port.timeout(
                     SystemMessage::AnnounceReceiptTimeout,
                     Duration::from_secs(5),
                 ));
 
                 PortState::Listening(ListeningPort::new(
                     self.local_clock,
-                    self.physical_port,
+                    self.port,
                     self.bmca,
                     announce_receipt_timeout,
                 ))
@@ -113,7 +113,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> InitializingPort<'a, 
 
 pub struct ListeningPort<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
     local_clock: &'a LocalClock<C>,
-    physical_port: P,
+    port: DomainPort<P>,
     bmca: B,
     announce_receipt_timeout: DropTimeout<P::Timeout>,
 }
@@ -121,13 +121,13 @@ pub struct ListeningPort<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
 impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> ListeningPort<'a, C, P, B> {
     pub fn new(
         local_clock: &'a LocalClock<C>,
-        physical_port: P,
+        port: DomainPort<P>,
         bmca: B,
         announce_receipt_timeout: DropTimeout<P::Timeout>,
     ) -> Self {
         Self {
             local_clock,
-            physical_port,
+            port,
             bmca,
             announce_receipt_timeout,
         }
@@ -144,12 +144,12 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> ListeningPort<'a, C, 
                     BmcaRecommendation::Undecided => PortState::Listening(self),
                     BmcaRecommendation::Master => PortState::PreMaster(PreMasterPort::new(
                         self.local_clock,
-                        self.physical_port,
+                        self.port,
                         self.bmca,
                     )),
                     BmcaRecommendation::Slave => PortState::Uncalibrated(UncalibratedPort::new(
                         self.local_clock,
-                        self.physical_port,
+                        self.port,
                         self.bmca,
                         self.announce_receipt_timeout,
                     )),
@@ -161,11 +161,9 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> ListeningPort<'a, C, 
 
     fn process_system_message(self, msg: SystemMessage) -> PortState<'a, C, P, B> {
         match msg {
-            SystemMessage::AnnounceReceiptTimeout => PortState::Master(MasterPort::new(
-                self.local_clock,
-                self.physical_port,
-                self.bmca,
-            )),
+            SystemMessage::AnnounceReceiptTimeout => {
+                PortState::Master(MasterPort::new(self.local_clock, self.port, self.bmca))
+            }
             _ => PortState::Listening(self),
         }
     }
@@ -173,7 +171,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> ListeningPort<'a, C, 
 
 pub struct SlavePort<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
     local_clock: &'a LocalClock<C>,
-    physical_port: P,
+    port: DomainPort<P>,
     bmca: B,
     announce_receipt_timeout: DropTimeout<P::Timeout>,
     delay_cycle_timeout: DropTimeout<P::Timeout>,
@@ -183,18 +181,18 @@ pub struct SlavePort<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
 impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> SlavePort<'a, C, P, B> {
     pub fn new(
         local_clock: &'a LocalClock<C>,
-        physical_port: P,
+        port: DomainPort<P>,
         bmca: B,
         announce_receipt_timeout: DropTimeout<P::Timeout>,
     ) -> Self {
-        let delay_cycle_timeout = DropTimeout::new(physical_port.timeout(
+        let delay_cycle_timeout = DropTimeout::new(port.timeout(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
             Duration::ZERO,
         ));
 
         Self {
             local_clock,
-            physical_port,
+            port,
             bmca,
             announce_receipt_timeout,
             delay_cycle_timeout,
@@ -242,17 +240,14 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> SlavePort<'a, C, P, B
 
     fn process_system_message(mut self, msg: SystemMessage) -> PortState<'a, C, P, B> {
         match msg {
-            SystemMessage::AnnounceReceiptTimeout => PortState::Master(MasterPort::new(
-                self.local_clock,
-                self.physical_port,
-                self.bmca,
-            )),
+            SystemMessage::AnnounceReceiptTimeout => {
+                PortState::Master(MasterPort::new(self.local_clock, self.port, self.bmca))
+            }
             SystemMessage::DelayCycle(delay_cycle) => {
                 let delay_request = delay_cycle.delay_request();
                 let next_cycle = delay_cycle.next();
 
-                self.physical_port
-                    .send_event(EventMessage::DelayReq(delay_request));
+                self.port.send_event(EventMessage::DelayReq(delay_request));
                 self.delay_cycle_timeout.restart_with(
                     SystemMessage::DelayCycle(next_cycle),
                     Duration::from_secs(1),
@@ -279,7 +274,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> SlavePort<'a, C, P, B
 
 pub struct MasterPort<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
     local_clock: &'a LocalClock<C>,
-    physical_port: P,
+    port: DomainPort<P>,
     bmca: B,
     announce_send_timeout: DropTimeout<P::Timeout>,
     sync_cycle_timeout: DropTimeout<P::Timeout>,
@@ -287,18 +282,17 @@ pub struct MasterPort<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
 }
 
 impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> MasterPort<'a, C, P, B> {
-    pub fn new(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
-        let announce_send_timeout = DropTimeout::new(
-            physical_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::ZERO),
-        );
-        let sync_cycle_timeout = DropTimeout::new(physical_port.timeout(
+    pub fn new(local_clock: &'a LocalClock<C>, port: DomainPort<P>, bmca: B) -> Self {
+        let announce_send_timeout =
+            DropTimeout::new(port.timeout(SystemMessage::AnnounceSendTimeout, Duration::ZERO));
+        let sync_cycle_timeout = DropTimeout::new(port.timeout(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
             Duration::ZERO,
         ));
 
         Self {
             local_clock,
-            physical_port,
+            port,
             bmca,
             announce_send_timeout,
             sync_cycle_timeout,
@@ -313,7 +307,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> MasterPort<'a, C, P, 
     ) -> PortState<'a, C, P, B> {
         match msg {
             EventMessage::DelayReq(req) => self
-                .physical_port
+                .port
                 .send_general(GeneralMessage::DelayResp(req.response(timestamp))),
             _ => {}
         }
@@ -329,14 +323,13 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> MasterPort<'a, C, P, 
                 match self.bmca.recommendation(self.local_clock) {
                     BmcaRecommendation::Undecided => PortState::Master(self),
                     BmcaRecommendation::Slave => {
-                        let announce_receipt_timeout =
-                            DropTimeout::new(self.physical_port.timeout(
-                                SystemMessage::AnnounceReceiptTimeout,
-                                Duration::from_secs(5),
-                            ));
+                        let announce_receipt_timeout = DropTimeout::new(self.port.timeout(
+                            SystemMessage::AnnounceReceiptTimeout,
+                            Duration::from_secs(5),
+                        ));
                         PortState::Uncalibrated(UncalibratedPort::new(
                             self.local_clock,
-                            self.physical_port,
+                            self.port,
                             self.bmca,
                             announce_receipt_timeout,
                         ))
@@ -352,7 +345,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> MasterPort<'a, C, P, 
         match msg {
             SystemMessage::AnnounceSendTimeout => {
                 let announce_message = self.announce_cycle.announce(&self.local_clock);
-                self.physical_port
+                self.port
                     .send_general(GeneralMessage::Announce(announce_message));
                 self.announce_send_timeout.restart(Duration::from_secs(1));
             }
@@ -360,14 +353,14 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> MasterPort<'a, C, P, 
                 let sync_message = sync_cycle.two_step_sync();
                 let next_cycle = sync_cycle.next();
 
-                self.physical_port
+                self.port
                     .send_event(EventMessage::TwoStepSync(sync_message));
                 self.sync_cycle_timeout
                     .restart_with(SystemMessage::SyncCycle(next_cycle), Duration::from_secs(1));
             }
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::TwoStepSync(twostep) => {
-                    self.physical_port
+                    self.port
                         .send_general(GeneralMessage::FollowUp(twostep.follow_up(timestamp)));
                 }
                 _ => {}
@@ -381,19 +374,19 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> MasterPort<'a, C, P, 
 
 pub struct PreMasterPort<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
     local_clock: &'a LocalClock<C>,
-    physical_port: P,
+    port: DomainPort<P>,
     bmca: B,
     _qualification_timeout: DropTimeout<P::Timeout>,
 }
 
 impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> PreMasterPort<'a, C, P, B> {
-    pub fn new(local_clock: &'a LocalClock<C>, physical_port: P, bmca: B) -> Self {
+    pub fn new(local_clock: &'a LocalClock<C>, port: DomainPort<P>, bmca: B) -> Self {
         let _qualification_timeout = DropTimeout::new(
-            physical_port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5)),
+            port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5)),
         );
         Self {
             local_clock,
-            physical_port,
+            port,
             bmca,
             _qualification_timeout,
         }
@@ -401,11 +394,9 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> PreMasterPort<'a, C, 
 
     fn process_system_message(self, msg: SystemMessage) -> PortState<'a, C, P, B> {
         match msg {
-            SystemMessage::QualificationTimeout => PortState::Master(MasterPort::new(
-                self.local_clock,
-                self.physical_port,
-                self.bmca,
-            )),
+            SystemMessage::QualificationTimeout => {
+                PortState::Master(MasterPort::new(self.local_clock, self.port, self.bmca))
+            }
             _ => PortState::PreMaster(self),
         }
     }
@@ -413,7 +404,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> PreMasterPort<'a, C, 
 
 pub struct UncalibratedPort<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> {
     local_clock: &'a LocalClock<C>,
-    physical_port: P,
+    port: DomainPort<P>,
     bmca: B,
     announce_receipt_timeout: DropTimeout<P::Timeout>,
 }
@@ -421,13 +412,13 @@ pub struct UncalibratedPort<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca
 impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> UncalibratedPort<'a, C, P, B> {
     pub fn new(
         local_clock: &'a LocalClock<C>,
-        physical_port: P,
+        port: DomainPort<P>,
         bmca: B,
         announce_receipt_timeout: DropTimeout<P::Timeout>,
     ) -> Self {
         Self {
             local_clock,
-            physical_port,
+            port,
             bmca,
             announce_receipt_timeout,
         }
@@ -443,15 +434,14 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> UncalibratedPort<'a, 
 
                 match self.bmca.recommendation(self.local_clock) {
                     BmcaRecommendation::Undecided => {
-                        let announce_receipt_timeout =
-                            DropTimeout::new(self.physical_port.timeout(
-                                SystemMessage::AnnounceReceiptTimeout,
-                                Duration::from_secs(5),
-                            ));
+                        let announce_receipt_timeout = DropTimeout::new(self.port.timeout(
+                            SystemMessage::AnnounceReceiptTimeout,
+                            Duration::from_secs(5),
+                        ));
 
                         return PortState::Listening(ListeningPort::new(
                             self.local_clock,
-                            self.physical_port,
+                            self.port,
                             self.bmca,
                             announce_receipt_timeout,
                         ));
@@ -459,7 +449,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> UncalibratedPort<'a, 
                     BmcaRecommendation::Slave => {
                         return PortState::Slave(SlavePort::new(
                             self.local_clock,
-                            self.physical_port,
+                            self.port,
                             self.bmca,
                             self.announce_receipt_timeout,
                         ));
@@ -467,7 +457,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> UncalibratedPort<'a, 
                     BmcaRecommendation::Master => {
                         return PortState::PreMaster(PreMasterPort::new(
                             self.local_clock,
-                            self.physical_port,
+                            self.port,
                             self.bmca,
                         ));
                     }
@@ -479,11 +469,9 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, B: Bmca> UncalibratedPort<'a, 
 
     fn process_system_message(self, msg: SystemMessage) -> PortState<'a, C, P, B> {
         match msg {
-            SystemMessage::AnnounceReceiptTimeout => PortState::Master(MasterPort::new(
-                self.local_clock,
-                self.physical_port,
-                self.bmca,
-            )),
+            SystemMessage::AnnounceReceiptTimeout => {
+                PortState::Master(MasterPort::new(self.local_clock, self.port, self.bmca))
+            }
             _ => PortState::Uncalibrated(self),
         }
     }
@@ -537,7 +525,7 @@ mod tests {
 
         let mut slave = PortState::Slave(SlavePort::new(
             &local_clock,
-            port,
+            DomainPort::new(0, &port),
             bmca,
             announce_receipt_timeout,
         ));
@@ -571,7 +559,7 @@ mod tests {
 
         let master = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -597,7 +585,7 @@ mod tests {
 
         let _ = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -613,7 +601,7 @@ mod tests {
 
         let master = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -635,7 +623,7 @@ mod tests {
 
         let master = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -656,7 +644,7 @@ mod tests {
 
         let master = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -682,7 +670,7 @@ mod tests {
 
         let _ = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -698,7 +686,7 @@ mod tests {
 
         let master = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -718,7 +706,7 @@ mod tests {
 
         let master = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -749,7 +737,7 @@ mod tests {
 
         let master = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
         );
 
@@ -775,7 +763,7 @@ mod tests {
 
         let master = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
         );
 
@@ -797,7 +785,7 @@ mod tests {
         // start with an empty BMCA so that a single first announce makes it undecided
         let master = MasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -820,7 +808,12 @@ mod tests {
             Duration::from_secs(5),
         ));
 
-        let _ = SlavePort::new(&local_clock, &port, bmca, announce_receipt_timeout);
+        let _ = SlavePort::new(
+            &local_clock,
+            DomainPort::new(0, &port),
+            bmca,
+            announce_receipt_timeout,
+        );
 
         let messages = port.take_system_messages();
         assert!(messages.contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(0.into()))));
@@ -837,7 +830,12 @@ mod tests {
             Duration::from_secs(5),
         ));
 
-        let slave = SlavePort::new(&local_clock, &port, bmca, announce_receipt_timeout);
+        let slave = SlavePort::new(
+            &local_clock,
+            DomainPort::new(0, &port),
+            bmca,
+            announce_receipt_timeout,
+        );
 
         port.take_system_messages();
 
@@ -858,7 +856,12 @@ mod tests {
             Duration::from_secs(5),
         ));
 
-        let slave = SlavePort::new(&local_clock, &port, bmca, announce_receipt_timeout);
+        let slave = SlavePort::new(
+            &local_clock,
+            DomainPort::new(0, &port),
+            bmca,
+            announce_receipt_timeout,
+        );
 
         port.take_system_messages();
 
@@ -880,7 +883,7 @@ mod tests {
         );
         let slave = SlavePort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             bmca,
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
@@ -898,7 +901,7 @@ mod tests {
         let port = FakePort::new();
         let initializing = InitializingPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -918,7 +921,7 @@ mod tests {
         );
         let listening = ListeningPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
@@ -940,7 +943,7 @@ mod tests {
         );
         let listening = ListeningPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
@@ -966,7 +969,7 @@ mod tests {
         );
         let listening = ListeningPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
@@ -993,7 +996,7 @@ mod tests {
 
         let _ = ListeningPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(port.timeout(
                 SystemMessage::AnnounceReceiptTimeout,
@@ -1016,7 +1019,7 @@ mod tests {
         );
         let listening = ListeningPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
@@ -1043,7 +1046,7 @@ mod tests {
 
         let _ = PreMasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1058,7 +1061,7 @@ mod tests {
         let port = FakePort::new();
         let pre_master = PreMasterPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1084,7 +1087,7 @@ mod tests {
         );
         let uncalibrated = UncalibratedPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );
@@ -1108,7 +1111,7 @@ mod tests {
         );
         let uncalibrated = UncalibratedPort::new(
             &local_clock,
-            &port,
+            DomainPort::new(0, &port),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             DropTimeout::new(announce_receipt_timeout.clone()),
         );

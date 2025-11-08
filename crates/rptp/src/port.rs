@@ -65,6 +65,34 @@ impl<P: PhysicalPort> PhysicalPort for Box<P> {
     }
 }
 
+pub struct DomainPort<P: PhysicalPort> {
+    pub domain_number: u8,
+    pub physical_port: P,
+}
+
+impl<P: PhysicalPort> DomainPort<P> {
+    pub fn new(domain_number: u8, physical_port: P) -> Self {
+        Self {
+            domain_number,
+            physical_port,
+        }
+    }
+
+    pub fn send_event(&self, msg: EventMessage) {
+        // TODO: attach domain_number to msg
+        self.physical_port.send_event(msg);
+    }
+
+    pub fn send_general(&self, msg: GeneralMessage) {
+        // TODO: attach domain_number to msg
+        self.physical_port.send_general(msg);
+    }
+
+    pub fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> P::Timeout {
+        self.physical_port.timeout(msg, delay)
+    }
+}
+
 pub trait PortMap {
     fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn Port>;
 }
