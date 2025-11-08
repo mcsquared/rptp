@@ -9,8 +9,8 @@ use rptp::{
     clock::{FakeClock, LocalClock},
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{DomainMessage, EventMessage, GeneralMessage, SystemMessage},
-    node::PortState,
     port::{DomainZeroOnlyPortMap, PhysicalPort, Timeout},
+    portstate::PortState,
 };
 
 use crate::net::NetPort;
@@ -315,7 +315,7 @@ mod tests {
 
     use rptp::bmca::LocalClockDS;
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
-    use rptp::node::PortState;
+    use rptp::portstate::PortState;
 
     use crate::net::FakeNetPort;
 

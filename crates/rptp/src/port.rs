@@ -1,7 +1,7 @@
 use crate::bmca::Bmca;
 use crate::clock::SynchronizableClock;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-use crate::node::PortState;
+use crate::portstate::PortState;
 use crate::result::{ProtocolError, Result};
 use crate::time::TimeStamp;
 
