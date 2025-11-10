@@ -646,8 +646,6 @@ mod tests {
             0,
         ));
 
-        timer_host.take_system_messages();
-
         master.process_system_message(SystemMessage::AnnounceSendTimeout);
 
         let messages = port.take_general_messages();
@@ -795,8 +793,6 @@ mod tests {
         ));
 
         let slave = SlavePort::new(domain_port, announce_receipt_timeout);
-
-        timer_host.take_system_messages();
 
         slave.process_system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())));
 
