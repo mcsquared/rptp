@@ -139,14 +139,6 @@ impl TryFrom<&[u8]> for GeneralMessage {
     }
 }
 
-impl SystemMessage {
-    pub fn dispatch(self, ports: &mut impl PortMap) -> Result<()> {
-        let port = ports.port_by_domain(0)?; // System messages are domain-independent
-        port.process_system_message(self);
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SequenceId {
     id: u16,

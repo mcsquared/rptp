@@ -46,7 +46,6 @@ pub trait PhysicalPort {
 
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
-    fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
 }
 
 impl<P: PhysicalPort> PhysicalPort for Box<P> {
@@ -59,10 +58,12 @@ impl<P: PhysicalPort> PhysicalPort for Box<P> {
     fn send_general(&self, msg: GeneralMessage) {
         self.as_ref().send_general(msg)
     }
+}
 
-    fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout {
-        self.as_ref().timeout(msg, delay)
-    }
+pub trait TimerHost {
+    type Timeout: Timeout;
+
+    fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
 }
 
 pub trait Port {
@@ -78,34 +79,41 @@ pub trait Port {
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
 }
 
-pub struct DomainPort<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort> {
+pub struct DomainPort<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost> {
     local_clock: &'a LocalClock<C>,
     bmca: B,
     physical_port: P,
+    timer_host: T,
     _domain_number: u8,
 }
 
-impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort> DomainPort<'a, C, B, P> {
+impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost>
+    DomainPort<'a, C, B, P, T>
+{
     pub fn new(
         local_clock: &'a LocalClock<C>,
         bmca: B,
         physical_port: P,
+        timer_host: T,
         _domain_number: u8,
     ) -> Self {
         Self {
             local_clock,
             bmca,
             physical_port,
+            timer_host,
             _domain_number,
         }
     }
 }
 
-impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort> Port for DomainPort<'a, C, B, P> {
+impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost> Port
+    for DomainPort<'a, C, B, P, T>
+{
     type Clock = C;
     type PhysicalPort = P;
     type Bmca = B;
-    type Timeout = P::Timeout;
+    type Timeout = T::Timeout;
 
     fn local_clock(&self) -> &LocalClock<Self::Clock> {
         &self.local_clock
@@ -126,7 +134,7 @@ impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort> Port for DomainPort<'
     }
 
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout {
-        self.physical_port.timeout(msg, delay)
+        self.timer_host.timeout(msg, delay)
     }
 }
 
@@ -211,10 +219,14 @@ pub mod test_support {
             }
         }
 
-        pub fn from_system_message(msg: SystemMessage) -> Self {
+        pub fn from_system_message(
+            system_messages: Rc<RefCell<Vec<SystemMessage>>>,
+            msg: SystemMessage,
+        ) -> Self {
+            system_messages.borrow_mut().push(msg);
             Self {
                 msg: RefCell::new(msg),
-                system_messages: Rc::new(RefCell::new(Vec::new())),
+                system_messages,
                 is_active: Cell::new(true),
             }
         }
@@ -261,10 +273,47 @@ pub mod test_support {
         }
     }
 
+    pub struct FakeTimerHost {
+        system_messages: Rc<RefCell<Vec<SystemMessage>>>,
+    }
+
+    impl FakeTimerHost {
+        pub fn new() -> Self {
+            Self {
+                system_messages: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+
+        pub fn take_system_messages(&self) -> Vec<SystemMessage> {
+            self.system_messages.borrow_mut().drain(..).collect()
+        }
+    }
+
+    impl TimerHost for FakeTimerHost {
+        type Timeout = Rc<FakeTimeout>;
+
+        fn timeout(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
+            Rc::new(FakeTimeout::from_system_message(
+                self.system_messages.clone(),
+                msg,
+            ))
+        }
+    }
+
+    impl TimerHost for &FakeTimerHost {
+        type Timeout = Rc<FakeTimeout>;
+
+        fn timeout(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
+            Rc::new(FakeTimeout::from_system_message(
+                self.system_messages.clone(),
+                msg,
+            ))
+        }
+    }
+
     pub struct FakePort {
         event_messages: Rc<RefCell<Vec<EventMessage>>>,
         general_messages: Rc<RefCell<Vec<GeneralMessage>>>,
-        system_messages: Rc<RefCell<Vec<SystemMessage>>>,
     }
 
     impl FakePort {
@@ -272,7 +321,6 @@ pub mod test_support {
             Self {
                 event_messages: Rc::new(RefCell::new(Vec::new())),
                 general_messages: Rc::new(RefCell::new(Vec::new())),
-                system_messages: Rc::new(RefCell::new(Vec::new())),
             }
         }
 
@@ -282,10 +330,6 @@ pub mod test_support {
 
         pub fn take_general_messages(&self) -> Vec<GeneralMessage> {
             self.general_messages.borrow_mut().drain(..).collect()
-        }
-
-        pub fn take_system_messages(&self) -> Vec<SystemMessage> {
-            self.system_messages.borrow_mut().drain(..).collect()
         }
     }
 
@@ -299,11 +343,6 @@ pub mod test_support {
         fn send_general(&self, msg: GeneralMessage) {
             self.general_messages.borrow_mut().push(msg);
         }
-
-        fn timeout(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
-            self.system_messages.borrow_mut().push(msg);
-            Rc::new(FakeTimeout::new(msg, Rc::clone(&self.system_messages)))
-        }
     }
 
     impl PhysicalPort for &FakePort {
@@ -315,11 +354,6 @@ pub mod test_support {
 
         fn send_general(&self, msg: GeneralMessage) {
             self.general_messages.borrow_mut().push(msg);
-        }
-
-        fn timeout(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
-            self.system_messages.borrow_mut().push(msg);
-            Rc::new(FakeTimeout::new(msg, Rc::clone(&self.system_messages)))
         }
     }
 }
