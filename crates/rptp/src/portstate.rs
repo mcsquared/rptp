@@ -6,7 +6,7 @@ use crate::message::{
     AnnounceMessage, DelayCycleMessage, EventMessage, GeneralMessage, SequenceId, SyncCycleMessage,
     SystemMessage,
 };
-use crate::port::{DropTimeout, Port, Timeout};
+use crate::port::{Port, Timeout};
 use crate::sync::MasterEstimate;
 use crate::time::TimeStamp;
 
@@ -29,10 +29,7 @@ impl<P: Port> PortState<P> {
     }
 
     pub fn slave(port: P, announce_receipt_timeout: P::Timeout) -> Self {
-        PortState::Slave(SlavePort::new(
-            port,
-            DropTimeout::new(announce_receipt_timeout),
-        ))
+        PortState::Slave(SlavePort::new(port, announce_receipt_timeout))
     }
 
     pub fn process_event_message(self, msg: EventMessage, timestamp: TimeStamp) -> Self {
@@ -81,10 +78,10 @@ impl<P: Port> InitializingPort<P> {
     fn process_system_message(self, msg: SystemMessage) -> PortState<P> {
         match msg {
             SystemMessage::Initialized => {
-                let announce_receipt_timeout = DropTimeout::new(self.port.timeout(
+                let announce_receipt_timeout = self.port.timeout(
                     SystemMessage::AnnounceReceiptTimeout,
                     Duration::from_secs(5),
-                ));
+                );
 
                 PortState::Listening(ListeningPort::new(self.port, announce_receipt_timeout))
             }
@@ -95,11 +92,11 @@ impl<P: Port> InitializingPort<P> {
 
 pub struct ListeningPort<P: Port> {
     port: P,
-    announce_receipt_timeout: DropTimeout<P::Timeout>,
+    announce_receipt_timeout: P::Timeout,
 }
 
 impl<P: Port> ListeningPort<P> {
-    pub fn new(port: P, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
+    pub fn new(port: P, announce_receipt_timeout: P::Timeout) -> Self {
         Self {
             port,
             announce_receipt_timeout,
@@ -138,17 +135,17 @@ impl<P: Port> ListeningPort<P> {
 
 pub struct SlavePort<P: Port> {
     port: P,
-    announce_receipt_timeout: DropTimeout<P::Timeout>,
-    delay_cycle_timeout: DropTimeout<P::Timeout>,
+    announce_receipt_timeout: P::Timeout,
+    delay_cycle_timeout: P::Timeout,
     master_estimate: MasterEstimate,
 }
 
 impl<P: Port> SlavePort<P> {
-    pub fn new(port: P, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
-        let delay_cycle_timeout = DropTimeout::new(port.timeout(
+    pub fn new(port: P, announce_receipt_timeout: P::Timeout) -> Self {
+        let delay_cycle_timeout = port.timeout(
             SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
             Duration::ZERO,
-        ));
+        );
 
         Self {
             port,
@@ -226,19 +223,19 @@ impl<P: Port> SlavePort<P> {
 
 pub struct MasterPort<P: Port> {
     port: P,
-    announce_send_timeout: DropTimeout<P::Timeout>,
-    sync_cycle_timeout: DropTimeout<P::Timeout>,
+    announce_send_timeout: P::Timeout,
+    sync_cycle_timeout: P::Timeout,
     announce_cycle: AnnounceCycle,
 }
 
 impl<P: Port> MasterPort<P> {
     pub fn new(port: P) -> Self {
         let announce_send_timeout =
-            DropTimeout::new(port.timeout(SystemMessage::AnnounceSendTimeout, Duration::ZERO));
-        let sync_cycle_timeout = DropTimeout::new(port.timeout(
+            port.timeout(SystemMessage::AnnounceSendTimeout, Duration::ZERO);
+        let sync_cycle_timeout = port.timeout(
             SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
             Duration::ZERO,
-        ));
+        );
 
         Self {
             port,
@@ -267,10 +264,10 @@ impl<P: Port> MasterPort<P> {
                 match self.port.bmca().recommendation(self.port.local_clock()) {
                     BmcaRecommendation::Undecided => PortState::Master(self),
                     BmcaRecommendation::Slave => {
-                        let announce_receipt_timeout = DropTimeout::new(self.port.timeout(
+                        let announce_receipt_timeout = self.port.timeout(
                             SystemMessage::AnnounceReceiptTimeout,
                             Duration::from_secs(5),
-                        ));
+                        );
                         PortState::Uncalibrated(UncalibratedPort::new(
                             self.port,
                             announce_receipt_timeout,
@@ -316,14 +313,13 @@ impl<P: Port> MasterPort<P> {
 
 pub struct PreMasterPort<P: Port> {
     port: P,
-    _qualification_timeout: DropTimeout<P::Timeout>,
+    _qualification_timeout: P::Timeout,
 }
 
 impl<P: Port> PreMasterPort<P> {
     pub fn new(port: P) -> Self {
-        let _qualification_timeout = DropTimeout::new(
-            port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5)),
-        );
+        let _qualification_timeout =
+            port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
         Self {
             port,
             _qualification_timeout,
@@ -340,11 +336,11 @@ impl<P: Port> PreMasterPort<P> {
 
 pub struct UncalibratedPort<P: Port> {
     port: P,
-    announce_receipt_timeout: DropTimeout<P::Timeout>,
+    announce_receipt_timeout: P::Timeout,
 }
 
 impl<P: Port> UncalibratedPort<P> {
-    pub fn new(port: P, announce_receipt_timeout: DropTimeout<P::Timeout>) -> Self {
+    pub fn new(port: P, announce_receipt_timeout: P::Timeout) -> Self {
         Self {
             port,
             announce_receipt_timeout,
@@ -361,10 +357,10 @@ impl<P: Port> UncalibratedPort<P> {
 
                 match self.port.bmca().recommendation(self.port.local_clock()) {
                     BmcaRecommendation::Undecided => {
-                        let announce_receipt_timeout = DropTimeout::new(self.port.timeout(
+                        let announce_receipt_timeout = self.port.timeout(
                             SystemMessage::AnnounceReceiptTimeout,
                             Duration::from_secs(5),
-                        ));
+                        );
 
                         return PortState::Listening(ListeningPort::new(
                             self.port,
@@ -438,10 +434,10 @@ mod tests {
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(&local_clock, bmca, &port, timer_host, 0);
-        let announce_receipt_timeout = DropTimeout::new(domain_port.timeout(
+        let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
-        ));
+        );
 
         let mut slave = PortState::Slave(SlavePort::new(domain_port, announce_receipt_timeout));
 
@@ -745,10 +741,10 @@ mod tests {
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(&local_clock, bmca, &port, &timer_host, 0);
-        let announce_receipt_timeout = DropTimeout::new(domain_port.timeout(
+        let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
-        ));
+        );
 
         let _ = SlavePort::new(domain_port, announce_receipt_timeout);
 
@@ -764,10 +760,10 @@ mod tests {
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(&local_clock, bmca, &port, &timer_host, 0);
-        let announce_receipt_timeout = DropTimeout::new(domain_port.timeout(
+        let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
-        ));
+        );
 
         let slave = SlavePort::new(domain_port, announce_receipt_timeout);
 
@@ -787,10 +783,10 @@ mod tests {
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(&local_clock, bmca, &port, &timer_host, 0);
-        let announce_receipt_timeout = DropTimeout::new(domain_port.timeout(
+        let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
-        ));
+        );
 
         let slave = SlavePort::new(domain_port, announce_receipt_timeout);
 
@@ -812,15 +808,11 @@ mod tests {
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
-        let slave = SlavePort::new(
-            domain_port,
-            DropTimeout::new(announce_receipt_timeout.clone()),
-        );
+        let slave = SlavePort::new(domain_port, announce_receipt_timeout);
 
         let state = slave.process_system_message(SystemMessage::AnnounceReceiptTimeout);
 
         assert!(matches!(state, PortState::Master(_)));
-        assert!(!announce_receipt_timeout.is_active());
     }
 
     #[test]
@@ -858,15 +850,11 @@ mod tests {
             Duration::from_secs(5),
         );
 
-        let listening = ListeningPort::new(
-            domain_port,
-            DropTimeout::new(announce_receipt_timeout.clone()),
-        );
+        let listening = ListeningPort::new(domain_port, announce_receipt_timeout);
 
         let state = listening.process_system_message(SystemMessage::AnnounceReceiptTimeout);
 
         assert!(matches!(state, PortState::Master(_)));
-        assert!(!announce_receipt_timeout.is_active());
     }
 
     #[test]
@@ -886,10 +874,7 @@ mod tests {
             Duration::from_secs(5),
         );
 
-        let listening = ListeningPort::new(
-            domain_port,
-            DropTimeout::new(announce_receipt_timeout.clone()),
-        );
+        let listening = ListeningPort::new(domain_port, announce_receipt_timeout);
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
@@ -898,7 +883,6 @@ mod tests {
         ));
 
         assert!(matches!(state, PortState::Listening(_)));
-        assert!(announce_receipt_timeout.is_active());
     }
 
     #[test]
@@ -917,10 +901,7 @@ mod tests {
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
-        let listening = ListeningPort::new(
-            domain_port,
-            DropTimeout::new(announce_receipt_timeout.clone()),
-        );
+        let listening = ListeningPort::new(domain_port, announce_receipt_timeout);
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
@@ -933,7 +914,6 @@ mod tests {
         )));
 
         assert!(matches!(state, PortState::PreMaster(_)));
-        assert!(!announce_receipt_timeout.is_active());
     }
 
     #[test]
@@ -954,10 +934,7 @@ mod tests {
             Duration::from_secs(5),
         );
 
-        let _ = ListeningPort::new(
-            domain_port,
-            DropTimeout::new(announce_receipt_timeout.clone()),
-        );
+        let _ = ListeningPort::new(domain_port, announce_receipt_timeout);
 
         let messages = timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::AnnounceReceiptTimeout));
@@ -988,7 +965,7 @@ mod tests {
                 FakeTimerHost::new(),
                 0,
             ),
-            DropTimeout::new(announce_receipt_timeout.clone()),
+            announce_receipt_timeout,
         );
 
         let foreign_clock = ForeignClockDS::high_grade_test_clock();
@@ -1002,7 +979,6 @@ mod tests {
         )));
 
         assert!(matches!(state, PortState::Uncalibrated(_)));
-        assert!(announce_receipt_timeout.is_active());
     }
 
     #[test]
@@ -1065,17 +1041,13 @@ mod tests {
             Duration::from_secs(5),
         );
 
-        let uncalibrated = UncalibratedPort::new(
-            domain_port,
-            DropTimeout::new(announce_receipt_timeout.clone()),
-        );
+        let uncalibrated = UncalibratedPort::new(domain_port, announce_receipt_timeout);
 
         let state = uncalibrated.process_general_message(GeneralMessage::Announce(
             AnnounceMessage::new(42.into(), foreign_clock_ds),
         ));
 
         assert!(matches!(state, PortState::Slave(_)));
-        assert!(announce_receipt_timeout.is_active());
     }
 
     #[test]
@@ -1095,15 +1067,11 @@ mod tests {
             Duration::from_secs(5),
         );
 
-        let uncalibrated = UncalibratedPort::new(
-            domain_port,
-            DropTimeout::new(announce_receipt_timeout.clone()),
-        );
+        let uncalibrated = UncalibratedPort::new(domain_port, announce_receipt_timeout);
 
         let state = uncalibrated.process_system_message(SystemMessage::AnnounceReceiptTimeout);
 
         assert!(matches!(state, PortState::Master(_)));
-        assert!(!announce_receipt_timeout.is_active());
     }
 
     #[test]

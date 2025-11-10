@@ -8,49 +8,14 @@ use crate::time::TimeStamp;
 pub trait Timeout {
     fn restart(&self, timeout: std::time::Duration);
     fn restart_with(&self, msg: SystemMessage, timeout: std::time::Duration);
-    fn cancel(&self);
-}
-
-pub struct DropTimeout<T: Timeout> {
-    inner: T,
-}
-
-impl<T: Timeout> DropTimeout<T> {
-    pub fn new(inner: T) -> Self {
-        Self { inner }
-    }
-}
-
-impl<T: Timeout> Timeout for DropTimeout<T> {
-    fn restart(&self, timeout: std::time::Duration) {
-        self.inner.restart(timeout);
-    }
-
-    fn restart_with(&self, msg: SystemMessage, timeout: std::time::Duration) {
-        self.inner.restart_with(msg, timeout);
-    }
-
-    fn cancel(&self) {
-        self.inner.cancel();
-    }
-}
-
-impl<T: Timeout> Drop for DropTimeout<T> {
-    fn drop(&mut self) {
-        self.cancel();
-    }
 }
 
 pub trait PhysicalPort {
-    type Timeout: Timeout;
-
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
 }
 
 impl<P: PhysicalPort> PhysicalPort for Box<P> {
-    type Timeout = P::Timeout;
-
     fn send_event(&self, msg: EventMessage) {
         self.as_ref().send_event(msg)
     }
@@ -61,7 +26,7 @@ impl<P: PhysicalPort> PhysicalPort for Box<P> {
 }
 
 pub trait TimerHost {
-    type Timeout: Timeout;
+    type Timeout: Timeout + Drop;
 
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
 }
@@ -196,7 +161,7 @@ impl<P: Port> PortIngress for Option<PortState<P>> {
 pub mod test_support {
     use super::*;
 
-    use std::cell::{Cell, RefCell};
+    use std::cell::RefCell;
     use std::rc::Rc;
     use std::time::Duration;
 
@@ -207,7 +172,6 @@ pub mod test_support {
     pub struct FakeTimeout {
         msg: RefCell<SystemMessage>,
         system_messages: Rc<RefCell<Vec<SystemMessage>>>,
-        is_active: Cell<bool>,
     }
 
     impl FakeTimeout {
@@ -215,7 +179,6 @@ pub mod test_support {
             Self {
                 msg: RefCell::new(msg),
                 system_messages,
-                is_active: Cell::new(true),
             }
         }
 
@@ -227,7 +190,6 @@ pub mod test_support {
             Self {
                 msg: RefCell::new(msg),
                 system_messages,
-                is_active: Cell::new(true),
             }
         }
 
@@ -235,41 +197,17 @@ pub mod test_support {
         pub fn fire(&self) -> SystemMessage {
             *self.msg.borrow()
         }
-
-        pub fn is_active(&self) -> bool {
-            self.is_active.get()
-        }
     }
 
     impl Timeout for FakeTimeout {
         fn restart(&self, _timeout: Duration) {
             let msg = *self.msg.borrow();
             self.system_messages.borrow_mut().push(msg);
-            self.is_active.set(true);
         }
 
         fn restart_with(&self, msg: SystemMessage, _timeout: Duration) {
             self.system_messages.borrow_mut().push(msg);
             self.msg.replace(msg);
-            self.is_active.set(true);
-        }
-
-        fn cancel(&self) {
-            self.is_active.set(false);
-        }
-    }
-
-    impl Timeout for Rc<FakeTimeout> {
-        fn restart(&self, timeout: Duration) {
-            self.as_ref().restart(timeout);
-        }
-
-        fn restart_with(&self, msg: SystemMessage, _timeout: Duration) {
-            self.as_ref().restart_with(msg, _timeout);
-        }
-
-        fn cancel(&self) {
-            self.as_ref().cancel();
         }
     }
 
@@ -290,24 +228,24 @@ pub mod test_support {
     }
 
     impl TimerHost for FakeTimerHost {
-        type Timeout = Rc<FakeTimeout>;
+        type Timeout = FakeTimeout;
 
         fn timeout(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
-            Rc::new(FakeTimeout::from_system_message(
-                self.system_messages.clone(),
-                msg,
-            ))
+            FakeTimeout::from_system_message(self.system_messages.clone(), msg)
         }
     }
 
     impl TimerHost for &FakeTimerHost {
-        type Timeout = Rc<FakeTimeout>;
+        type Timeout = FakeTimeout;
 
         fn timeout(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
-            Rc::new(FakeTimeout::from_system_message(
-                self.system_messages.clone(),
-                msg,
-            ))
+            FakeTimeout::from_system_message(self.system_messages.clone(), msg)
+        }
+    }
+
+    impl Drop for FakeTimeout {
+        fn drop(&mut self) {
+            // When the timeout is dropped, we consider it cancelled, so do nothing.
         }
     }
 
@@ -334,8 +272,6 @@ pub mod test_support {
     }
 
     impl PhysicalPort for FakePort {
-        type Timeout = Rc<FakeTimeout>;
-
         fn send_event(&self, msg: EventMessage) {
             self.event_messages.borrow_mut().push(msg);
         }
@@ -346,8 +282,6 @@ pub mod test_support {
     }
 
     impl PhysicalPort for &FakePort {
-        type Timeout = Rc<FakeTimeout>;
-
         fn send_event(&self, msg: EventMessage) {
             self.event_messages.borrow_mut().push(msg);
         }

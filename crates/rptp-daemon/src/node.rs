@@ -82,12 +82,6 @@ impl Timeout for TokioTimeout {
         *self.inner.msg.lock().unwrap() = msg;
         self.reset(delay);
     }
-
-    fn cancel(&self) {
-        if let Some(handle) = self.inner.handle.lock().unwrap().take() {
-            handle.abort();
-        }
-    }
 }
 
 impl Drop for TokioTimeout {
@@ -136,8 +130,6 @@ impl TokioPhysicalPort {
 }
 
 impl PhysicalPort for TokioPhysicalPort {
-    type Timeout = TokioTimeout;
-
     fn send_event(&self, msg: EventMessage) {
         eprintln!("[event] send {:?}", msg);
         let _ = self.event_tx.send((self.domain_number, msg));
