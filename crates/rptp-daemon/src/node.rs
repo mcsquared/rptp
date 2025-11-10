@@ -285,7 +285,8 @@ mod tests {
 
     use rptp::bmca::LocalClockDS;
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
-    use rptp::port::DomainPort;
+    use rptp::message::{DelayCycleMessage, SyncCycleMessage};
+    use rptp::port::{DomainPort, Port};
     use rptp::portstate::PortState;
 
     use crate::net::FakeNetworkSocket;
@@ -327,13 +328,20 @@ mod tests {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let physical_port = TokioPhysicalPort::new(domain_number, event_tx, general_tx);
-        let port_state = PortState::master(DomainPort::new(
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             0,
-        ));
+        );
+        let announce_send_timeout =
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(1));
+        let sync_cycle_timeout = domain_port.timeout(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+        let port_state = PortState::master(domain_port, announce_send_timeout, sync_cycle_timeout);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let net = TokioNetwork::new(
             &local_clock,
@@ -403,21 +411,23 @@ mod tests {
         let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let physical_port = TokioPhysicalPort::new(domain_number, event_tx, general_tx);
-        let port_state = PortState::slave(
-            DomainPort::new(
-                &local_clock,
-                FullBmca::new(SortedForeignClockRecordsVec::new()),
-                physical_port,
-                TokioTimerHost::new(domain_number, system_tx.clone()),
-                0,
-            ),
-            TokioTimeout::new(
-                domain_number,
-                system_tx,
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(10),
-            ),
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            physical_port,
+            TokioTimerHost::new(domain_number, system_tx.clone()),
+            0,
         );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(10),
+        );
+        let delay_cycle_timeout = domain_port.timeout(
+            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
+            Duration::from_secs(1),
+        );
+        let port_state =
+            PortState::slave(domain_port, announce_receipt_timeout, delay_cycle_timeout);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let net = TokioNetwork::new(
             &local_clock,

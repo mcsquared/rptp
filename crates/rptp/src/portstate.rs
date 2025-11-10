@@ -24,12 +24,28 @@ impl<P: Port> PortState<P> {
         PortState::Initializing(InitializingPort::new(port))
     }
 
-    pub fn master(port: P) -> Self {
-        PortState::Master(MasterPort::new(port))
+    pub fn master(
+        port: P,
+        announce_send_timeout: P::Timeout,
+        sync_cycle_timeout: P::Timeout,
+    ) -> Self {
+        PortState::Master(MasterPort::new(
+            port,
+            announce_send_timeout,
+            sync_cycle_timeout,
+        ))
     }
 
-    pub fn slave(port: P, announce_receipt_timeout: P::Timeout) -> Self {
-        PortState::Slave(SlavePort::new(port, announce_receipt_timeout))
+    pub fn slave(
+        port: P,
+        announce_receipt_timeout: P::Timeout,
+        delay_cycle_timeout: P::Timeout,
+    ) -> Self {
+        PortState::Slave(SlavePort::new(
+            port,
+            announce_receipt_timeout,
+            delay_cycle_timeout,
+        ))
     }
 
     pub fn process_event_message(self, msg: EventMessage, timestamp: TimeStamp) -> Self {
@@ -113,7 +129,11 @@ impl<P: Port> ListeningPort<P> {
                 match self.port.bmca().recommendation(self.port.local_clock()) {
                     BmcaRecommendation::Undecided => PortState::Listening(self),
                     BmcaRecommendation::Master => {
-                        PortState::PreMaster(PreMasterPort::new(self.port))
+                        let qualification_timeout = self
+                            .port
+                            .timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+
+                        PortState::PreMaster(PreMasterPort::new(self.port, qualification_timeout))
                     }
                     BmcaRecommendation::Slave => PortState::Uncalibrated(UncalibratedPort::new(
                         self.port,
@@ -127,7 +147,21 @@ impl<P: Port> ListeningPort<P> {
 
     fn process_system_message(self, msg: SystemMessage) -> PortState<P> {
         match msg {
-            SystemMessage::AnnounceReceiptTimeout => PortState::Master(MasterPort::new(self.port)),
+            SystemMessage::AnnounceReceiptTimeout => {
+                let announce_send_timeout = self
+                    .port
+                    .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+                let sync_cycle_timeout = self.port.timeout(
+                    SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+                    Duration::from_secs(0),
+                );
+
+                PortState::Master(MasterPort::new(
+                    self.port,
+                    announce_send_timeout,
+                    sync_cycle_timeout,
+                ))
+            }
             _ => PortState::Listening(self),
         }
     }
@@ -141,12 +175,11 @@ pub struct SlavePort<P: Port> {
 }
 
 impl<P: Port> SlavePort<P> {
-    pub fn new(port: P, announce_receipt_timeout: P::Timeout) -> Self {
-        let delay_cycle_timeout = port.timeout(
-            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
-            Duration::ZERO,
-        );
-
+    pub fn new(
+        port: P,
+        announce_receipt_timeout: P::Timeout,
+        delay_cycle_timeout: P::Timeout,
+    ) -> Self {
         Self {
             port,
             announce_receipt_timeout,
@@ -191,7 +224,21 @@ impl<P: Port> SlavePort<P> {
 
     fn process_system_message(mut self, msg: SystemMessage) -> PortState<P> {
         match msg {
-            SystemMessage::AnnounceReceiptTimeout => PortState::Master(MasterPort::new(self.port)),
+            SystemMessage::AnnounceReceiptTimeout => {
+                let announce_send_timeout = self
+                    .port
+                    .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+                let sync_cycle_timeout = self.port.timeout(
+                    SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+                    Duration::from_secs(0),
+                );
+
+                PortState::Master(MasterPort::new(
+                    self.port,
+                    announce_send_timeout,
+                    sync_cycle_timeout,
+                ))
+            }
             SystemMessage::DelayCycle(delay_cycle) => {
                 let delay_request = delay_cycle.delay_request();
                 let next_cycle = delay_cycle.next();
@@ -229,14 +276,7 @@ pub struct MasterPort<P: Port> {
 }
 
 impl<P: Port> MasterPort<P> {
-    pub fn new(port: P) -> Self {
-        let announce_send_timeout =
-            port.timeout(SystemMessage::AnnounceSendTimeout, Duration::ZERO);
-        let sync_cycle_timeout = port.timeout(
-            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
-            Duration::ZERO,
-        );
-
+    pub fn new(port: P, announce_send_timeout: P::Timeout, sync_cycle_timeout: P::Timeout) -> Self {
         Self {
             port,
             announce_send_timeout,
@@ -317,9 +357,7 @@ pub struct PreMasterPort<P: Port> {
 }
 
 impl<P: Port> PreMasterPort<P> {
-    pub fn new(port: P) -> Self {
-        let _qualification_timeout =
-            port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+    pub fn new(port: P, _qualification_timeout: P::Timeout) -> Self {
         Self {
             port,
             _qualification_timeout,
@@ -328,7 +366,21 @@ impl<P: Port> PreMasterPort<P> {
 
     fn process_system_message(self, msg: SystemMessage) -> PortState<P> {
         match msg {
-            SystemMessage::QualificationTimeout => PortState::Master(MasterPort::new(self.port)),
+            SystemMessage::QualificationTimeout => {
+                let announce_send_timeout = self
+                    .port
+                    .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+                let sync_cycle_timeout = self.port.timeout(
+                    SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+                    Duration::from_secs(0),
+                );
+
+                PortState::Master(MasterPort::new(
+                    self.port,
+                    announce_send_timeout,
+                    sync_cycle_timeout,
+                ))
+            }
             _ => PortState::PreMaster(self),
         }
     }
@@ -368,13 +420,25 @@ impl<P: Port> UncalibratedPort<P> {
                         ));
                     }
                     BmcaRecommendation::Slave => {
+                        let delay_cycle_timeout = self.port.timeout(
+                            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
+                            Duration::from_secs(1),
+                        );
+
                         return PortState::Slave(SlavePort::new(
                             self.port,
                             self.announce_receipt_timeout,
+                            delay_cycle_timeout,
                         ));
                     }
                     BmcaRecommendation::Master => {
-                        return PortState::PreMaster(PreMasterPort::new(self.port));
+                        let qualification_timeout = self
+                            .port
+                            .timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+                        return PortState::PreMaster(PreMasterPort::new(
+                            self.port,
+                            qualification_timeout,
+                        ));
                     }
                 }
             }
@@ -384,7 +448,21 @@ impl<P: Port> UncalibratedPort<P> {
 
     fn process_system_message(self, msg: SystemMessage) -> PortState<P> {
         match msg {
-            SystemMessage::AnnounceReceiptTimeout => PortState::Master(MasterPort::new(self.port)),
+            SystemMessage::AnnounceReceiptTimeout => {
+                let announce_send_timeout = self
+                    .port
+                    .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+                let sync_cycle_timeout = self.port.timeout(
+                    SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+                    Duration::from_secs(0),
+                );
+
+                PortState::Master(MasterPort::new(
+                    self.port,
+                    announce_send_timeout,
+                    sync_cycle_timeout,
+                ))
+            }
             _ => PortState::Uncalibrated(self),
         }
     }
@@ -438,8 +516,16 @@ mod tests {
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
+        let delay_cycle_timeout = domain_port.timeout(
+            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
 
-        let mut slave = PortState::Slave(SlavePort::new(domain_port, announce_receipt_timeout));
+        let mut slave = PortState::Slave(SlavePort::new(
+            domain_port,
+            announce_receipt_timeout,
+            delay_cycle_timeout,
+        ));
 
         slave = slave.process_event_message(
             EventMessage::TwoStepSync(TwoStepSyncMessage::new(0.into())),
@@ -467,14 +553,24 @@ mod tests {
             LocalClockDS::high_grade_test_clock(),
         );
         let port = FakePort::new();
-
-        let master = MasterPort::new(DomainPort::new(
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
-        ));
+        );
+        let announce_send_timeout =
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let sync_cycle_timeout = domain_port.timeout(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        let master = MasterPort::new(domain_port, announce_send_timeout, sync_cycle_timeout);
+
+        timer_host.take_system_messages();
 
         master.process_event_message(
             EventMessage::DelayReq(DelayRequestMessage::new(0.into())),
@@ -488,25 +584,8 @@ mod tests {
                 TimeStamp::new(0, 0)
             )))
         );
-    }
 
-    #[test]
-    fn master_port_schedules_initial_sync() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
-
-        let _ = MasterPort::new(DomainPort::new(
-            &local_clock,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
-            &port,
-            &timer_host,
-            0,
-        ));
-
-        let messages = timer_host.take_system_messages();
-        assert!(messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0.into()))));
+        assert!(timer_host.take_system_messages().is_empty());
     }
 
     #[test]
@@ -515,14 +594,21 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-
-        let master = MasterPort::new(DomainPort::new(
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
             &timer_host,
             0,
-        ));
+        );
+        let announce_send_timeout =
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let sync_cycle_timeout = domain_port.timeout(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        let master = MasterPort::new(domain_port, announce_send_timeout, sync_cycle_timeout);
 
         master.process_system_message(SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())));
 
@@ -540,13 +626,21 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-        let master = MasterPort::new(DomainPort::new(
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
             &timer_host,
             0,
-        ));
+        );
+        let announce_send_timeout =
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let sync_cycle_timeout = domain_port.timeout(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        let master = MasterPort::new(domain_port, announce_send_timeout, sync_cycle_timeout);
 
         // Drain messages that could have been sent during initialization.
         timer_host.take_system_messages();
@@ -562,14 +656,24 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
-
-        let master = MasterPort::new(DomainPort::new(
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
-        ));
+        );
+        let announce_send_timeout =
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let sync_cycle_timeout = domain_port.timeout(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        let master = MasterPort::new(domain_port, announce_send_timeout, sync_cycle_timeout);
+
+        timer_host.take_system_messages();
 
         master.process_system_message(SystemMessage::Timestamp {
             msg: EventMessage::TwoStepSync(TwoStepSyncMessage::new(0.into())),
@@ -583,25 +687,8 @@ mod tests {
                 TimeStamp::new(0, 0)
             )))
         );
-    }
 
-    #[test]
-    fn master_port_schedules_initial_announce() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
-
-        let _ = MasterPort::new(DomainPort::new(
-            &local_clock,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
-            &port,
-            &timer_host,
-            0,
-        ));
-
-        let messages = timer_host.take_system_messages();
-        assert!(messages.contains(&SystemMessage::AnnounceSendTimeout));
+        assert!(timer_host.take_system_messages().is_empty());
     }
 
     #[test]
@@ -610,14 +697,21 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-
-        let master = MasterPort::new(DomainPort::new(
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
             &timer_host,
             0,
-        ));
+        );
+        let announce_send_timeout =
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let sync_cycle_timeout = domain_port.timeout(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        let master = MasterPort::new(domain_port, announce_send_timeout, sync_cycle_timeout);
 
         timer_host.take_system_messages();
 
@@ -633,14 +727,21 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-
-        let master = MasterPort::new(DomainPort::new(
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
             &timer_host,
             0,
-        ));
+        );
+        let announce_send_timeout =
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let sync_cycle_timeout = domain_port.timeout(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        let master = MasterPort::new(domain_port, announce_send_timeout, sync_cycle_timeout);
 
         master.process_system_message(SystemMessage::AnnounceSendTimeout);
 
@@ -664,14 +765,22 @@ mod tests {
                     .with_resolved_clock(foreign_clock_ds),
             ];
         let port = FakePort::new();
-
-        let master = MasterPort::new(DomainPort::new(
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
-        ));
+        );
+        let announce_send_timeout =
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let sync_cycle_timeout = domain_port.timeout(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        let master = MasterPort::new(domain_port, announce_send_timeout, sync_cycle_timeout);
 
         let state = master.process_general_message(GeneralMessage::Announce(AnnounceMessage::new(
             42.into(),
@@ -679,6 +788,9 @@ mod tests {
         )));
 
         assert!(matches!(state, PortState::Uncalibrated(_)));
+
+        let system_messages = timer_host.take_system_messages();
+        assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
@@ -692,14 +804,25 @@ mod tests {
                     .with_resolved_clock(foreign_clock_ds),
             ];
         let port = FakePort::new();
-
-        let master = MasterPort::new(DomainPort::new(
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
-        ));
+        );
+        let announce_send_timeout =
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let sync_cycle_timeout = domain_port.timeout(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        let master = MasterPort::new(domain_port, announce_send_timeout, sync_cycle_timeout);
+
+        // Drain any setup timers
+        timer_host.take_system_messages();
 
         let state = master.process_general_message(GeneralMessage::Announce(AnnounceMessage::new(
             42.into(),
@@ -707,6 +830,7 @@ mod tests {
         )));
 
         assert!(matches!(state, PortState::Master(_)));
+        assert!(timer_host.take_system_messages().is_empty());
     }
 
     #[test]
@@ -715,15 +839,25 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
         let port = FakePort::new();
-
-        // start with an empty BMCA so that a single first announce makes it undecided
-        let master = MasterPort::new(DomainPort::new(
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
-        ));
+        );
+        let announce_send_timeout =
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let sync_cycle_timeout = domain_port.timeout(
+            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        let master = MasterPort::new(domain_port, announce_send_timeout, sync_cycle_timeout);
+
+        // Drain any setup timers
+        timer_host.take_system_messages();
 
         let state = master.process_general_message(GeneralMessage::Announce(AnnounceMessage::new(
             42.into(),
@@ -731,25 +865,8 @@ mod tests {
         )));
 
         assert!(matches!(state, PortState::Master(_)));
-    }
 
-    #[test]
-    fn slave_port_schedules_initial_delay_cycle() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let port = FakePort::new();
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(&local_clock, bmca, &port, &timer_host, 0);
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
-            Duration::from_secs(5),
-        );
-
-        let _ = SlavePort::new(domain_port, announce_receipt_timeout);
-
-        let messages = timer_host.take_system_messages();
-        assert!(messages.contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(0.into()))));
+        assert!(timer_host.take_system_messages().is_empty());
     }
 
     #[test]
@@ -764,8 +881,12 @@ mod tests {
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
+        let delay_cycle_timeout = domain_port.timeout(
+            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
 
-        let slave = SlavePort::new(domain_port, announce_receipt_timeout);
+        let slave = SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle_timeout);
 
         timer_host.take_system_messages();
 
@@ -787,8 +908,12 @@ mod tests {
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
+        let delay_cycle_timeout = domain_port.timeout(
+            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
 
-        let slave = SlavePort::new(domain_port, announce_receipt_timeout);
+        let slave = SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle_timeout);
 
         slave.process_system_message(SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())));
 
@@ -803,16 +928,27 @@ mod tests {
         let port = FakePort::new();
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(&local_clock, bmca, &port, timer_host, 0);
+        let domain_port = DomainPort::new(&local_clock, bmca, &port, &timer_host, 0);
         let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
-        let slave = SlavePort::new(domain_port, announce_receipt_timeout);
+        let delay_cycle_timeout = domain_port.timeout(
+            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        let slave = SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle_timeout);
 
         let state = slave.process_system_message(SystemMessage::AnnounceReceiptTimeout);
 
         assert!(matches!(state, PortState::Master(_)));
+
+        let system_messages = timer_host.take_system_messages();
+        assert!(system_messages.contains(&SystemMessage::AnnounceSendTimeout));
+        assert!(
+            system_messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())))
+        );
     }
 
     #[test]
@@ -820,17 +956,21 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
         let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
         let initializing = InitializingPort::new(DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
         ));
 
         let state = initializing.process_system_message(SystemMessage::Initialized);
 
         assert!(matches!(state, PortState::Listening(_)));
+
+        let system_messages = timer_host.take_system_messages();
+        assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
@@ -838,11 +978,12 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -855,6 +996,12 @@ mod tests {
         let state = listening.process_system_message(SystemMessage::AnnounceReceiptTimeout);
 
         assert!(matches!(state, PortState::Master(_)));
+
+        let system_messages = timer_host.take_system_messages();
+        assert!(system_messages.contains(&SystemMessage::AnnounceSendTimeout));
+        assert!(
+            system_messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())))
+        );
     }
 
     #[test]
@@ -862,11 +1009,12 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
         let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -878,11 +1026,17 @@ mod tests {
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
+        // Drain any initial schedules
+        timer_host.take_system_messages();
+
         let state = listening.process_general_message(GeneralMessage::Announce(
             AnnounceMessage::new(0.into(), foreign_clock),
         ));
 
         assert!(matches!(state, PortState::Listening(_)));
+
+        let system_messages = timer_host.take_system_messages();
+        assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
@@ -890,11 +1044,12 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -914,10 +1069,13 @@ mod tests {
         )));
 
         assert!(matches!(state, PortState::PreMaster(_)));
+
+        let system_messages = timer_host.take_system_messages();
+        assert!(system_messages.contains(&SystemMessage::QualificationTimeout));
     }
 
     #[test]
-    fn listening_port_schedules_announce_receipt_timeout() {
+    fn listening_port_to_uncalibrated_transition_() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
         let port = FakePort::new();
@@ -934,41 +1092,12 @@ mod tests {
             Duration::from_secs(5),
         );
 
-        let _ = ListeningPort::new(domain_port, announce_receipt_timeout);
-
-        let messages = timer_host.take_system_messages();
-        assert!(messages.contains(&SystemMessage::AnnounceReceiptTimeout));
-    }
-
-    #[test]
-    fn listening_port_to_uncalibrated_transition_() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let port = FakePort::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
-            &port,
-            FakeTimerHost::new(),
-            0,
-        );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
-            Duration::from_secs(5),
-        );
-
-        let listening = ListeningPort::new(
-            DomainPort::new(
-                &local_clock,
-                FullBmca::new(SortedForeignClockRecordsVec::new()),
-                &port,
-                FakeTimerHost::new(),
-                0,
-            ),
-            announce_receipt_timeout,
-        );
+        let listening = ListeningPort::new(domain_port, announce_receipt_timeout);
 
         let foreign_clock = ForeignClockDS::high_grade_test_clock();
+
+        // Drain any setup timers
+        timer_host.take_system_messages();
 
         let state = listening.process_general_message(GeneralMessage::Announce(
             AnnounceMessage::new(0.into(), foreign_clock),
@@ -979,6 +1108,9 @@ mod tests {
         )));
 
         assert!(matches!(state, PortState::Uncalibrated(_)));
+
+        let system_messages = timer_host.take_system_messages();
+        assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
@@ -987,14 +1119,17 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-
-        let _ = PreMasterPort::new(DomainPort::new(
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
             &timer_host,
             0,
-        ));
+        );
+        let qualification_timeout =
+            domain_port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+
+        let _ = PreMasterPort::new(domain_port, qualification_timeout);
 
         let messages = timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::QualificationTimeout));
@@ -1005,17 +1140,28 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
-        let pre_master = PreMasterPort::new(DomainPort::new(
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
-        ));
+        );
+        let qualification_timeout =
+            domain_port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+
+        let pre_master = PreMasterPort::new(domain_port, qualification_timeout);
 
         let state = pre_master.process_system_message(SystemMessage::QualificationTimeout);
 
         assert!(matches!(state, PortState::Master(_)));
+
+        let system_messages = timer_host.take_system_messages();
+        assert!(system_messages.contains(&SystemMessage::AnnounceSendTimeout));
+        assert!(
+            system_messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())))
+        );
     }
 
     #[test]
@@ -1029,11 +1175,12 @@ mod tests {
                     .with_resolved_clock(foreign_clock_ds),
             ];
         let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -1048,6 +1195,11 @@ mod tests {
         ));
 
         assert!(matches!(state, PortState::Slave(_)));
+
+        let system_messages = timer_host.take_system_messages();
+        assert!(
+            system_messages.contains(&SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())))
+        );
     }
 
     #[test]
@@ -1055,11 +1207,12 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             &port,
-            FakeTimerHost::new(),
+            &timer_host,
             0,
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -1072,6 +1225,12 @@ mod tests {
         let state = uncalibrated.process_system_message(SystemMessage::AnnounceReceiptTimeout);
 
         assert!(matches!(state, PortState::Master(_)));
+
+        let system_messages = timer_host.take_system_messages();
+        assert!(system_messages.contains(&SystemMessage::AnnounceSendTimeout));
+        assert!(
+            system_messages.contains(&SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())))
+        );
     }
 
     #[test]
