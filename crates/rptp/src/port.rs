@@ -11,17 +11,17 @@ pub trait Timeout {
 }
 
 pub trait PhysicalPort {
-    fn send_event(&self, msg: EventMessage);
-    fn send_general(&self, msg: GeneralMessage);
+    fn send_event(&self, buf: &[u8]);
+    fn send_general(&self, buf: &[u8]);
 }
 
 impl<P: PhysicalPort> PhysicalPort for Box<P> {
-    fn send_event(&self, msg: EventMessage) {
-        self.as_ref().send_event(msg)
+    fn send_event(&self, buf: &[u8]) {
+        self.as_ref().send_event(buf)
     }
 
-    fn send_general(&self, msg: GeneralMessage) {
-        self.as_ref().send_general(msg)
+    fn send_general(&self, buf: &[u8]) {
+        self.as_ref().send_general(buf)
     }
 }
 
@@ -49,7 +49,7 @@ pub struct DomainPort<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: T
     bmca: B,
     physical_port: P,
     timer_host: T,
-    _domain_number: u8,
+    domain_number: u8,
 }
 
 impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost>
@@ -60,14 +60,14 @@ impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost>
         bmca: B,
         physical_port: P,
         timer_host: T,
-        _domain_number: u8,
+        domain_number: u8,
     ) -> Self {
         Self {
             local_clock,
             bmca,
             physical_port,
             timer_host,
-            _domain_number,
+            domain_number,
         }
     }
 }
@@ -89,13 +89,15 @@ impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost> Port
     }
 
     fn send_event(&self, msg: EventMessage) {
-        // TODO: attach domain_number to msg
-        self.physical_port.send_event(msg);
+        let mut buf = msg.to_wire();
+        buf[4] = self.domain_number;
+        self.physical_port.send_event(&buf);
     }
 
     fn send_general(&self, msg: GeneralMessage) {
-        // TODO: attach domain_number to msg
-        self.physical_port.send_general(msg);
+        let mut buf = msg.to_wire();
+        buf[4] = self.domain_number;
+        self.physical_port.send_general(&buf);
     }
 
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout {
@@ -272,22 +274,30 @@ pub mod test_support {
     }
 
     impl PhysicalPort for FakePort {
-        fn send_event(&self, msg: EventMessage) {
-            self.event_messages.borrow_mut().push(msg);
+        fn send_event(&self, buf: &[u8]) {
+            self.event_messages
+                .borrow_mut()
+                .push(EventMessage::try_from(buf).unwrap());
         }
 
-        fn send_general(&self, msg: GeneralMessage) {
-            self.general_messages.borrow_mut().push(msg);
+        fn send_general(&self, buf: &[u8]) {
+            self.general_messages
+                .borrow_mut()
+                .push(GeneralMessage::try_from(buf).unwrap());
         }
     }
 
     impl PhysicalPort for &FakePort {
-        fn send_event(&self, msg: EventMessage) {
-            self.event_messages.borrow_mut().push(msg);
+        fn send_event(&self, buf: &[u8]) {
+            self.event_messages
+                .borrow_mut()
+                .push(EventMessage::try_from(buf).unwrap());
         }
 
-        fn send_general(&self, msg: GeneralMessage) {
-            self.general_messages.borrow_mut().push(msg);
+        fn send_general(&self, buf: &[u8]) {
+            self.general_messages
+                .borrow_mut()
+                .push(GeneralMessage::try_from(buf).unwrap());
         }
     }
 }

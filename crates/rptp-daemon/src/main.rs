@@ -26,13 +26,17 @@ async fn main() -> std::io::Result<()> {
         ),
     );
 
-    let event_socket = MulticastSocket::event().await?;
-    let general_socket = MulticastSocket::general().await?;
+    let event_socket = Rc::new(MulticastSocket::event().await?);
+    let general_socket = Rc::new(MulticastSocket::general().await?);
 
-    let (event_tx, event_rx) = mpsc::unbounded_channel();
-    let (general_tx, general_rx) = mpsc::unbounded_channel();
     let (system_tx, system_rx) = mpsc::unbounded_channel();
-    let physical_port = TokioPhysicalPort::new(domain, event_tx, general_tx);
+    let physical_port = TokioPhysicalPort::new(
+        &local_clock,
+        domain,
+        event_socket.clone(),
+        general_socket.clone(),
+        system_tx.clone(),
+    );
     let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
     let timer_host = TokioTimerHost::new(domain, system_tx.clone());
 
@@ -48,11 +52,9 @@ async fn main() -> std::io::Result<()> {
 
     let tokio_network = TokioNetwork::new(
         &local_clock,
+        portmap,
         event_socket,
         general_socket,
-        portmap,
-        event_rx,
-        general_rx,
         system_rx,
     )
     .await?;

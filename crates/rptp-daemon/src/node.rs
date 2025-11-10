@@ -3,13 +3,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rptp::bmca::FullBmca;
+use rptp::clock::SynchronizableClock;
 use rptp::port::TimerHost;
 use tokio::sync::mpsc;
 
 use rptp::{
     clock::{FakeClock, LocalClock},
     infra::infra_support::SortedForeignClockRecordsVec,
-    message::{DomainMessage, EventMessage, GeneralMessage, SystemMessage},
+    message::{DomainMessage, EventMessage, SystemMessage},
     port::{DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
 };
 
@@ -109,35 +110,50 @@ impl TimerHost for TokioTimerHost {
     }
 }
 
-pub struct TokioPhysicalPort {
+pub struct TokioPhysicalPort<'a, C: SynchronizableClock, N: NetworkSocket> {
+    clock: &'a LocalClock<C>,
     domain_number: u8,
-    event_tx: mpsc::UnboundedSender<(u8, EventMessage)>,
-    general_tx: mpsc::UnboundedSender<GeneralMessage>,
+    event_socket: Rc<N>,
+    general_socket: Rc<N>,
+    system_tx: mpsc::UnboundedSender<(u8, SystemMessage)>,
 }
 
-impl TokioPhysicalPort {
+impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPhysicalPort<'a, C, N> {
     pub fn new(
+        clock: &'a LocalClock<C>,
         domain_number: u8,
-        event_tx: mpsc::UnboundedSender<(u8, EventMessage)>,
-        general_tx: mpsc::UnboundedSender<GeneralMessage>,
+        event_socket: Rc<N>,
+        general_socket: Rc<N>,
+        system_tx: mpsc::UnboundedSender<(u8, SystemMessage)>,
     ) -> Self {
         Self {
+            clock,
             domain_number,
-            event_tx,
-            general_tx,
+            event_socket,
+            general_socket,
+            system_tx,
         }
     }
 }
 
-impl PhysicalPort for TokioPhysicalPort {
-    fn send_event(&self, msg: EventMessage) {
-        eprintln!("[event] send {:?}", msg);
-        let _ = self.event_tx.send((self.domain_number, msg));
+impl<'a, C: SynchronizableClock, N: NetworkSocket> PhysicalPort for TokioPhysicalPort<'a, C, N> {
+    fn send_event(&self, buf: &[u8]) {
+        // eprintln!("[event] send {:?}", msg);
+        let _ = self.event_socket.try_send(buf);
+
+        let timestamp_msg = SystemMessage::Timestamp {
+            msg: EventMessage::try_from(buf).unwrap(),
+            timestamp: self.clock.now(),
+        };
+
+        self.system_tx
+            .send((self.domain_number, timestamp_msg))
+            .ok();
     }
 
-    fn send_general(&self, msg: GeneralMessage) {
-        eprintln!("[general] send {:?}", msg);
-        let _ = self.general_tx.send(msg);
+    fn send_general(&self, buf: &[u8]) {
+        // eprintln!("[general] send {:?}", msg);
+        let _ = self.general_socket.try_send(buf);
     }
 }
 
@@ -148,33 +164,29 @@ pub struct TokioNetwork<'a, N: NetworkSocket> {
             'a,
             Rc<FakeClock>,
             FullBmca<SortedForeignClockRecordsVec>,
-            TokioPhysicalPort,
+            TokioPhysicalPort<'a, Rc<FakeClock>, N>,
             TokioTimerHost,
         >,
     >,
-    event_socket: N,
-    general_socket: N,
-    event_rx: mpsc::UnboundedReceiver<(u8, EventMessage)>,
-    general_rx: mpsc::UnboundedReceiver<GeneralMessage>,
+    event_socket: Rc<N>,
+    general_socket: Rc<N>,
     system_rx: mpsc::UnboundedReceiver<(u8, SystemMessage)>,
 }
 
 impl<'a, N: NetworkSocket> TokioNetwork<'a, N> {
     pub async fn new(
         local_clock: &'a LocalClock<Rc<FakeClock>>,
-        event_socket: N,
-        general_socket: N,
         portmap: SingleDomainPortMap<
             DomainPort<
                 'a,
                 Rc<FakeClock>,
                 FullBmca<SortedForeignClockRecordsVec>,
-                TokioPhysicalPort,
+                TokioPhysicalPort<'a, Rc<FakeClock>, N>,
                 TokioTimerHost,
             >,
         >,
-        event_rx: mpsc::UnboundedReceiver<(u8, EventMessage)>,
-        general_rx: mpsc::UnboundedReceiver<GeneralMessage>,
+        event_socket: Rc<N>,
+        general_socket: Rc<N>,
         system_rx: mpsc::UnboundedReceiver<(u8, SystemMessage)>,
     ) -> std::io::Result<Self> {
         Ok(Self {
@@ -182,8 +194,6 @@ impl<'a, N: NetworkSocket> TokioNetwork<'a, N> {
             portmap,
             event_socket,
             general_socket,
-            event_rx,
-            general_rx,
             system_rx,
         })
     }
@@ -219,27 +229,6 @@ impl<'a, N: NetworkSocket> TokioNetwork<'a, N> {
                     if let Ok((size, _peer)) = recv {
                         let domain_msg = DomainMessage::new(&general_buf[..size]);
                         let _ = domain_msg.dispatch_general(&mut self.portmap);
-                    }
-                }
-                msg = self.event_rx.recv() => {
-                    if let Some((domain_number, msg)) = msg {
-                        eprintln!("[event] send {:?}", msg);
-                        let _ = self.event_socket.send(msg.to_wire().as_ref()).await;
-
-                        let timestamp_msg = SystemMessage::Timestamp {
-                            msg,
-                            timestamp: self.local_clock.now(),
-                        };
-                        self.portmap.port_by_domain(domain_number).and_then(|port| {
-                            port.process_system_message(timestamp_msg);
-                            Ok(())
-                        }).ok();
-                    }
-                }
-                msg = self.general_rx.recv() => {
-                    if let Some(msg) = msg {
-                        eprintln!("[general] send {:?}", msg);
-                        let _ = self.general_socket.send(msg.to_wire().as_ref()).await;
                     }
                 }
                 msg = self.system_rx.recv() => {
@@ -285,11 +274,11 @@ mod tests {
 
     use rptp::bmca::LocalClockDS;
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
-    use rptp::message::{DelayCycleMessage, SyncCycleMessage};
+    use rptp::message::{DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage};
     use rptp::port::{DomainPort, Port};
     use rptp::portstate::PortState;
 
-    use crate::net::FakeNetworkSocket;
+    use crate::net::{FakeNetworkSocket, MulticastSocket};
 
     #[test]
     fn tokio_node_state_size() {
@@ -300,7 +289,7 @@ mod tests {
                     '_,
                     Rc<FakeClock>,
                     FullBmca<SortedForeignClockRecordsVec>,
-                    Box<TokioPhysicalPort>,
+                    Box<TokioPhysicalPort<'_, Rc<FakeClock>, MulticastSocket>>,
                     TokioTimerHost,
                 >,
             >,
@@ -313,6 +302,8 @@ mod tests {
     async fn master_node_sends_periodic_sync_follow_up() -> std::io::Result<()> {
         let (event_socket, mut event_socket_rx) = FakeNetworkSocket::new();
         let (general_socket, mut general_socket_rx) = FakeNetworkSocket::new();
+        let event_socket = Rc::new(event_socket);
+        let general_socket = Rc::new(general_socket);
 
         let domain_number = 0;
 
@@ -324,10 +315,14 @@ mod tests {
             ),
         );
 
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
-        let physical_port = TokioPhysicalPort::new(domain_number, event_tx, general_tx);
+        let physical_port = TokioPhysicalPort::new(
+            &local_clock,
+            domain_number,
+            event_socket.clone(),
+            general_socket.clone(),
+            system_tx.clone(),
+        );
         let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -345,11 +340,9 @@ mod tests {
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let net = TokioNetwork::new(
             &local_clock,
+            portmap,
             event_socket,
             general_socket,
-            portmap,
-            event_rx,
-            general_rx,
             system_rx,
         )
         .await?;
@@ -396,6 +389,8 @@ mod tests {
     async fn slave_node_sends_periodic_delay_requests() -> std::io::Result<()> {
         let (event_socket, mut event_socket_rx) = FakeNetworkSocket::new();
         let (general_socket, _) = FakeNetworkSocket::new();
+        let event_socket = Rc::new(event_socket);
+        let general_socket = Rc::new(general_socket);
 
         let domain_number = 0;
 
@@ -407,10 +402,14 @@ mod tests {
             ),
         );
 
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let (general_tx, general_rx) = mpsc::unbounded_channel();
         let (system_tx, system_rx) = mpsc::unbounded_channel();
-        let physical_port = TokioPhysicalPort::new(domain_number, event_tx, general_tx);
+        let physical_port = TokioPhysicalPort::new(
+            &local_clock,
+            domain_number,
+            event_socket.clone(),
+            general_socket.clone(),
+            system_tx.clone(),
+        );
         let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -431,11 +430,9 @@ mod tests {
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let net = TokioNetwork::new(
             &local_clock,
+            portmap,
             event_socket,
             general_socket,
-            portmap,
-            event_rx,
-            general_rx,
             system_rx,
         )
         .await?;

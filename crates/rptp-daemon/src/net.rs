@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::io::Result;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::rc::Rc;
 
 use tokio::net::UdpSocket;
 
@@ -103,5 +104,22 @@ impl NetworkSocket for FakeNetworkSocket {
             .send(bytes.to_vec())
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "send failed"))?;
         Ok(len)
+    }
+}
+
+impl NetworkSocket for Rc<FakeNetworkSocket> {
+    fn recv<'a>(
+        &'a self,
+        buf: &'a mut [u8],
+    ) -> impl Future<Output = Result<(usize, SocketAddr)>> + 'a {
+        self.as_ref().recv(buf)
+    }
+
+    fn send<'a>(&'a self, bytes: &'a [u8]) -> impl Future<Output = Result<usize>> + 'a {
+        self.as_ref().send(bytes)
+    }
+
+    fn try_send(&self, bytes: &[u8]) -> Result<usize> {
+        self.as_ref().try_send(bytes)
     }
 }
