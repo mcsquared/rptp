@@ -91,6 +91,10 @@ impl<C: SynchronizableClock> LocalClock<C> {
         Self { clock, localds }
     }
 
+    pub fn identity(&self) -> &ClockIdentity {
+        self.localds.identity()
+    }
+
     pub fn now(&self) -> TimeStamp {
         self.clock.now()
     }

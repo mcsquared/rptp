@@ -275,7 +275,7 @@ mod tests {
     use rptp::bmca::LocalClockDS;
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
     use rptp::message::{DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage};
-    use rptp::port::{DomainPort, Port};
+    use rptp::port::{DomainPort, Port, PortNumber};
     use rptp::portstate::PortState;
 
     use crate::net::{FakeNetworkSocket, MulticastSocket};
@@ -328,7 +328,8 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
-            0,
+            domain_number,
+            PortNumber::new(1),
         );
         let announce_send_timeout =
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(1));
@@ -415,7 +416,8 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
-            0,
+            domain_number,
+            PortNumber::new(1),
         );
         let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,

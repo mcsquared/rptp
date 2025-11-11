@@ -7,7 +7,7 @@ use tokio::time::{Duration, timeout};
 use rptp::bmca::{FullBmca, LocalClockDS};
 use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
 use rptp::infra::infra_support::SortedForeignClockRecordsVec;
-use rptp::port::{DomainPort, SingleDomainPortMap};
+use rptp::port::{DomainPort, PortNumber, SingleDomainPortMap};
 use rptp::portstate::PortState;
 use rptp::time::TimeStamp;
 use rptp_daemon::net::MulticastSocket;
@@ -44,6 +44,7 @@ async fn main() -> std::io::Result<()> {
         physical_port,
         timer_host,
         domain,
+        PortNumber::new(1),
     ));
 
     let portmap = SingleDomainPortMap::new(domain, port_state);

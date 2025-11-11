@@ -96,6 +96,10 @@ impl LocalClockDS {
         }
     }
 
+    pub fn identity(&self) -> &ClockIdentity {
+        &self.ds.identity
+    }
+
     pub fn outranks_foreign(&self, foreign: &ForeignClockDS) -> bool {
         self.ds.outranks_other(foreign)
     }

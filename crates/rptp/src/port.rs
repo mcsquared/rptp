@@ -1,5 +1,7 @@
+use std::ops::Range;
+
 use crate::bmca::Bmca;
-use crate::clock::{LocalClock, SynchronizableClock};
+use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::PortState;
 use crate::result::{ProtocolError, Result};
@@ -44,12 +46,86 @@ pub trait Port {
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PortNumber(u16);
+
+impl PortNumber {
+    pub const fn new(n: u16) -> Self {
+        Self(n)
+    }
+
+    pub fn to_be_bytes(self) -> [u8; 2] {
+        self.0.to_be_bytes()
+    }
+
+    pub fn from_be_bytes(bytes: [u8; 2]) -> Self {
+        Self(u16::from_be_bytes(bytes))
+    }
+}
+
+impl From<u16> for PortNumber {
+    fn from(value: u16) -> Self {
+        PortNumber::new(value)
+    }
+}
+
+impl From<PortNumber> for u16 {
+    fn from(value: PortNumber) -> Self {
+        value.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PortIdentity {
+    clock_identity: ClockIdentity,
+    port_number: PortNumber,
+}
+
+impl PortIdentity {
+    const CLOCK_IDENTITY_RANGE: Range<usize> = 0..8;
+    const PORT_NUMBER_RANGE: Range<usize> = 8..10;
+
+    pub fn new(clock_identity: ClockIdentity, port_number: PortNumber) -> Self {
+        Self {
+            clock_identity,
+            port_number,
+        }
+    }
+
+    pub fn from_slice(buf: &[u8; 10]) -> Self {
+        Self {
+            clock_identity: ClockIdentity::new(&[
+                buf[Self::CLOCK_IDENTITY_RANGE.start],
+                buf[Self::CLOCK_IDENTITY_RANGE.start + 1],
+                buf[Self::CLOCK_IDENTITY_RANGE.start + 2],
+                buf[Self::CLOCK_IDENTITY_RANGE.start + 3],
+                buf[Self::CLOCK_IDENTITY_RANGE.start + 4],
+                buf[Self::CLOCK_IDENTITY_RANGE.start + 5],
+                buf[Self::CLOCK_IDENTITY_RANGE.start + 6],
+                buf[Self::CLOCK_IDENTITY_RANGE.start + 7],
+            ]),
+            port_number: PortNumber::from_be_bytes([
+                buf[Self::PORT_NUMBER_RANGE.start],
+                buf[Self::PORT_NUMBER_RANGE.start + 1],
+            ]),
+        }
+    }
+
+    pub fn to_bytes(&self) -> [u8; 10] {
+        let mut bytes = [0u8; 10];
+        bytes[Self::CLOCK_IDENTITY_RANGE].copy_from_slice(self.clock_identity.as_bytes());
+        bytes[Self::PORT_NUMBER_RANGE].copy_from_slice(&self.port_number.to_be_bytes());
+        bytes
+    }
+}
+
 pub struct DomainPort<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost> {
     local_clock: &'a LocalClock<C>,
     bmca: B,
     physical_port: P,
     timer_host: T,
     domain_number: u8,
+    port_number: PortNumber,
 }
 
 impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost>
@@ -61,6 +137,7 @@ impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost>
         physical_port: P,
         timer_host: T,
         domain_number: u8,
+        port_number: PortNumber,
     ) -> Self {
         Self {
             local_clock,
@@ -68,6 +145,7 @@ impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost>
             physical_port,
             timer_host,
             domain_number,
+            port_number,
         }
     }
 }
@@ -91,12 +169,18 @@ impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost> Port
     fn send_event(&self, msg: EventMessage) {
         let mut buf = msg.to_wire();
         buf[4] = self.domain_number;
+        buf[20..30].copy_from_slice(
+            &PortIdentity::new(*self.local_clock().identity(), self.port_number).to_bytes(),
+        );
         self.physical_port.send_event(&buf);
     }
 
     fn send_general(&self, msg: GeneralMessage) {
         let mut buf = msg.to_wire();
         buf[4] = self.domain_number;
+        buf[20..30].copy_from_slice(
+            &PortIdentity::new(*self.local_clock().identity(), self.port_number).to_bytes(),
+        );
         self.physical_port.send_general(&buf);
     }
 
@@ -134,22 +218,32 @@ impl<P: Port> PortMap for SingleDomainPortMap<P> {
 }
 
 pub trait PortIngress {
-    fn process_event_message(&mut self, msg: EventMessage, timestamp: TimeStamp);
-    fn process_general_message(&mut self, msg: GeneralMessage);
+    fn process_event_message(
+        &mut self,
+        source_port_identity: PortIdentity,
+        msg: EventMessage,
+        timestamp: TimeStamp,
+    );
+    fn process_general_message(&mut self, source_port_identity: PortIdentity, msg: GeneralMessage);
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
 impl<P: Port> PortIngress for Option<PortState<P>> {
-    fn process_event_message(&mut self, msg: EventMessage, timestamp: TimeStamp) {
-        *self = self
-            .take()
-            .and_then(|state| Some(state.process_event_message(msg, timestamp)));
+    fn process_event_message(
+        &mut self,
+        source_port_identity: PortIdentity,
+        msg: EventMessage,
+        timestamp: TimeStamp,
+    ) {
+        *self = self.take().and_then(|state| {
+            Some(state.process_event_message(source_port_identity, msg, timestamp))
+        });
     }
 
-    fn process_general_message(&mut self, msg: GeneralMessage) {
+    fn process_general_message(&mut self, source_port_identity: PortIdentity, msg: GeneralMessage) {
         *self = self
             .take()
-            .and_then(|state| Some(state.process_general_message(msg)));
+            .and_then(|state| Some(state.process_general_message(source_port_identity, msg)));
     }
 
     fn process_system_message(&mut self, msg: SystemMessage) {

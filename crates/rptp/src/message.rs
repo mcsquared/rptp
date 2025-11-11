@@ -1,6 +1,6 @@
 use crate::{
     bmca::ForeignClockDS,
-    port::PortMap,
+    port::{PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Duration, TimeStamp},
 };
@@ -17,9 +17,10 @@ impl<'a> DomainMessage<'a> {
     pub fn dispatch_event(self, ports: &mut impl PortMap, timestamp: TimeStamp) -> Result<()> {
         let domain_number = self.domain_number()?;
         let port = ports.port_by_domain(domain_number)?;
+        let source_port_identity = self.source_port_identity()?;
         let msg = EventMessage::try_from(self.buf).map_err(|_| ProtocolError::DomainNotFound)?;
         eprintln!("[event] recv {:?}", msg);
-        port.process_event_message(msg, timestamp);
+        port.process_event_message(source_port_identity, msg, timestamp);
 
         Ok(())
     }
@@ -27,9 +28,10 @@ impl<'a> DomainMessage<'a> {
     pub fn dispatch_general(self, ports: &mut impl PortMap) -> Result<()> {
         let domain_number = self.domain_number()?;
         let port = ports.port_by_domain(domain_number)?;
+        let source_port_identity = self.source_port_identity()?;
         let msg = GeneralMessage::try_from(self.buf).map_err(|_| ProtocolError::DomainNotFound)?;
         eprintln!("[general] recv {:?}", msg);
-        port.process_general_message(msg);
+        port.process_general_message(source_port_identity, msg);
 
         Ok(())
     }
@@ -39,6 +41,16 @@ impl<'a> DomainMessage<'a> {
             .get(4)
             .copied()
             .ok_or(ProtocolError::DomainNotFound.into())
+    }
+
+    fn source_port_identity(&self) -> Result<PortIdentity> {
+        Ok(PortIdentity::from_slice(
+            self.buf
+                .get(20..30)
+                .ok_or(ParseError::BadLength)?
+                .try_into()
+                .map_err(|_| ParseError::BadLength)?,
+        ))
     }
 }
 
