@@ -46,7 +46,7 @@ pub trait Port {
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PortNumber(u16);
 
 impl PortNumber {
@@ -75,7 +75,7 @@ impl From<PortNumber> for u16 {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PortIdentity {
     clock_identity: ClockIdentity,
     port_number: PortNumber,
@@ -342,6 +342,15 @@ pub mod test_support {
     impl Drop for FakeTimeout {
         fn drop(&mut self) {
             // When the timeout is dropped, we consider it cancelled, so do nothing.
+        }
+    }
+
+    impl PortIdentity {
+        pub fn fake() -> Self {
+            PortIdentity::new(
+                ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+                PortNumber::new(1),
+            )
         }
     }
 

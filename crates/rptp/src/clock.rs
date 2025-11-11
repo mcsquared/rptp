@@ -7,7 +7,7 @@ use crate::{
     time::TimeStamp,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClockIdentity {
     id: [u8; 8],
 }

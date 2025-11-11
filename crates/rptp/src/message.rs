@@ -18,7 +18,7 @@ impl<'a> DomainMessage<'a> {
         let domain_number = self.domain_number()?;
         let port = ports.port_by_domain(domain_number)?;
         let source_port_identity = self.source_port_identity()?;
-        let msg = EventMessage::try_from(self.buf).map_err(|_| ProtocolError::DomainNotFound)?;
+        let msg = EventMessage::try_from(self.buf)?;
         eprintln!("[event] recv {:?}", msg);
         port.process_event_message(source_port_identity, msg, timestamp);
 
@@ -29,7 +29,7 @@ impl<'a> DomainMessage<'a> {
         let domain_number = self.domain_number()?;
         let port = ports.port_by_domain(domain_number)?;
         let source_port_identity = self.source_port_identity()?;
-        let msg = GeneralMessage::try_from(self.buf).map_err(|_| ProtocolError::DomainNotFound)?;
+        let msg = GeneralMessage::try_from(self.buf)?;
         eprintln!("[general] recv {:?}", msg);
         port.process_general_message(source_port_identity, msg);
 
@@ -225,9 +225,9 @@ impl AnnounceMessage {
         }
     }
 
-    pub fn foreign_clock(&self) -> &ForeignClockDS {
-        &self.foreign_clock
-    }
+    // pub fn foreign_clock(&self) -> &ForeignClockDS {
+    //     &self.foreign_clock
+    // }
 
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];

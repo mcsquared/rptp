@@ -3,10 +3,11 @@ use std::ops::Range;
 
 use crate::clock::{ClockIdentity, ClockQuality, LocalClock, SynchronizableClock};
 use crate::message::{AnnounceMessage, SequenceId};
+use crate::port::PortIdentity;
 
 pub trait SortedForeignClockRecords {
     fn insert(&mut self, record: ForeignClockRecord);
-    fn update_record<F>(&mut self, foreign: &ForeignClockDS, update: F) -> bool
+    fn update_record<F>(&mut self, source_port_identity: &PortIdentity, update: F) -> bool
     where
         F: FnOnce(&mut ForeignClockRecord);
     fn first(&self) -> Option<&ForeignClockRecord>;
@@ -63,10 +64,6 @@ impl ForeignClockDS {
         }
     }
 
-    pub fn same_source_as(&self, other: &ForeignClockDS) -> bool {
-        self.identity == other.identity
-    }
-
     pub fn outranks_other(&self, other: &ForeignClockDS) -> bool {
         if self.identity == other.identity {
             return false;
@@ -111,20 +108,22 @@ impl LocalClockDS {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ForeignClockRecord {
+    source_port_identity: PortIdentity,
     last_announce: AnnounceMessage,
     foreign_clock: Option<ForeignClockDS>,
 }
 
 impl ForeignClockRecord {
-    pub fn new(announce: AnnounceMessage) -> Self {
+    pub fn new(source_port_identity: PortIdentity, announce: AnnounceMessage) -> Self {
         Self {
+            source_port_identity,
             last_announce: announce,
             foreign_clock: None,
         }
     }
 
-    pub fn same_source_as(&self, other: &ForeignClockDS) -> bool {
-        self.last_announce.foreign_clock().same_source_as(other)
+    pub fn same_source_as(&self, source_port_identity: &PortIdentity) -> bool {
+        self.source_port_identity == *source_port_identity
     }
 
     pub fn consider(&mut self, announce: AnnounceMessage) -> Option<&ForeignClockDS> {
@@ -141,13 +140,17 @@ impl ForeignClockRecord {
     pub fn clock(&self) -> Option<&ForeignClockDS> {
         self.foreign_clock.as_ref()
     }
+
+    pub fn source_port_identity(&self) -> PortIdentity {
+        self.source_port_identity
+    }
 }
 
 impl Ord for ForeignClockRecord {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering::*;
 
-        match (self.clock(), other.clock()) {
+        let ord = match (self.clock(), other.clock()) {
             (Some(&clock1), Some(&clock2)) => {
                 if clock1.outranks_other(&clock2) {
                     Less
@@ -160,6 +163,12 @@ impl Ord for ForeignClockRecord {
             (Some(_), None) => Less,
             (None, Some(_)) => Greater,
             (None, None) => Equal,
+        };
+
+        if ord == Equal {
+            self.source_port_identity.cmp(&other.source_port_identity)
+        } else {
+            ord
         }
     }
 }
@@ -174,12 +183,12 @@ impl PartialOrd for ForeignClockRecord {
 pub enum BmcaRecommendation {
     Undecided,
     Master,
-    Slave,
+    Slave(PortIdentity),
     // TODO: Passive,
 }
 
 pub trait Bmca {
-    fn consider(&self, announce: AnnounceMessage);
+    fn consider(&self, source_port_identity: PortIdentity, announce: AnnounceMessage);
     fn recommendation<C: SynchronizableClock>(
         &self,
         local_clock: &LocalClock<C>,
@@ -199,20 +208,18 @@ impl<S: SortedForeignClockRecords> FullBmca<S> {
 }
 
 impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
-    fn consider(&self, announce: AnnounceMessage) {
-        let foreign = announce.foreign_clock();
-
-        let updated = self
-            .sorted_clock_records
-            .borrow_mut()
-            .update_record(foreign, |record| {
-                record.consider(announce);
-            });
+    fn consider(&self, source_port_identity: PortIdentity, announce: AnnounceMessage) {
+        let updated =
+            self.sorted_clock_records
+                .borrow_mut()
+                .update_record(&source_port_identity, |record| {
+                    record.consider(announce);
+                });
 
         if !updated {
             self.sorted_clock_records
                 .borrow_mut()
-                .insert(ForeignClockRecord::new(announce));
+                .insert(ForeignClockRecord::new(source_port_identity, announce));
         }
     }
 
@@ -229,7 +236,7 @@ impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
                     if local_clock.outranks_foreign(foreign_clock) {
                         BmcaRecommendation::Master
                     } else {
-                        BmcaRecommendation::Slave
+                        BmcaRecommendation::Slave(foreign_record.source_port_identity())
                     }
                 } else {
                     BmcaRecommendation::Undecided
@@ -247,6 +254,7 @@ pub(crate) mod tests {
 
     use crate::clock::FakeClock;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
+    use crate::port::PortNumber;
 
     const CLK_ID_HIGH: ClockIdentity =
         ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]);
@@ -289,9 +297,8 @@ pub(crate) mod tests {
 
     impl ForeignClockRecord {
         pub(crate) fn with_resolved_clock(self, foreign_clock: ForeignClockDS) -> Self {
-            assert!(self.same_source_as(&foreign_clock));
-
             Self {
+                source_port_identity: self.source_port_identity,
                 last_announce: self.last_announce,
                 foreign_clock: Some(foreign_clock),
             }
@@ -333,12 +340,23 @@ pub(crate) mod tests {
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
-        bmca.consider(AnnounceMessage::new(0.into(), foreign_mid));
-        bmca.consider(AnnounceMessage::new(1.into(), foreign_high));
-        bmca.consider(AnnounceMessage::new(1.into(), foreign_mid));
+        let port_id_high = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            PortNumber::new(1),
+        );
+        let port_id_mid = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
+            PortNumber::new(1),
+        );
 
-        assert_eq!(bmca.recommendation(&local_clock), BmcaRecommendation::Slave);
+        bmca.consider(port_id_high, AnnounceMessage::new(0.into(), foreign_high));
+        bmca.consider(port_id_mid, AnnounceMessage::new(0.into(), foreign_mid));
+        bmca.consider(port_id_high, AnnounceMessage::new(1.into(), foreign_high));
+        bmca.consider(port_id_mid, AnnounceMessage::new(1.into(), foreign_mid));
+
+        let recommendation = bmca.recommendation(&local_clock);
+
+        assert_eq!(recommendation, BmcaRecommendation::Slave(port_id_high));
     }
 
     #[test]
@@ -350,12 +368,23 @@ pub(crate) mod tests {
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
-        bmca.consider(AnnounceMessage::new(1.into(), foreign_high));
-        bmca.consider(AnnounceMessage::new(0.into(), foreign_mid));
-        bmca.consider(AnnounceMessage::new(1.into(), foreign_mid));
+        let port_id_high = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            PortNumber::new(1),
+        );
+        let port_id_mid = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
+            PortNumber::new(1),
+        );
 
-        assert_eq!(bmca.recommendation(&local_clock), BmcaRecommendation::Slave);
+        bmca.consider(port_id_high, AnnounceMessage::new(0.into(), foreign_high));
+        bmca.consider(port_id_high, AnnounceMessage::new(1.into(), foreign_high));
+        bmca.consider(port_id_mid, AnnounceMessage::new(0.into(), foreign_mid));
+        bmca.consider(port_id_mid, AnnounceMessage::new(1.into(), foreign_mid));
+
+        let recommendation = bmca.recommendation(&local_clock);
+
+        assert_eq!(recommendation, BmcaRecommendation::Slave(port_id_high));
     }
 
     #[test]
@@ -378,7 +407,10 @@ pub(crate) mod tests {
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
+        bmca.consider(
+            PortIdentity::fake(),
+            AnnounceMessage::new(0.into(), foreign_high),
+        );
 
         assert_eq!(
             bmca.recommendation(&local_clock),
@@ -396,9 +428,18 @@ pub(crate) mod tests {
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
         let foreign_low = ForeignClockDS::low_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
-        bmca.consider(AnnounceMessage::new(5.into(), foreign_mid));
-        bmca.consider(AnnounceMessage::new(10.into(), foreign_low));
+        bmca.consider(
+            PortIdentity::fake(),
+            AnnounceMessage::new(0.into(), foreign_high),
+        );
+        bmca.consider(
+            PortIdentity::fake(),
+            AnnounceMessage::new(5.into(), foreign_mid),
+        );
+        bmca.consider(
+            PortIdentity::fake(),
+            AnnounceMessage::new(10.into(), foreign_low),
+        );
 
         assert_eq!(
             bmca.recommendation(&local_clock),
@@ -414,8 +455,14 @@ pub(crate) mod tests {
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
-        bmca.consider(AnnounceMessage::new(2.into(), foreign_high));
+        bmca.consider(
+            PortIdentity::fake(),
+            AnnounceMessage::new(0.into(), foreign_high),
+        );
+        bmca.consider(
+            PortIdentity::fake(),
+            AnnounceMessage::new(2.into(), foreign_high),
+        );
 
         assert_eq!(
             bmca.recommendation(&local_clock),
@@ -430,12 +477,24 @@ pub(crate) mod tests {
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        bmca.consider(AnnounceMessage::new(0.into(), foreign_high));
-        bmca.consider(AnnounceMessage::new(1.into(), foreign_high));
+        bmca.consider(
+            PortIdentity::fake(),
+            AnnounceMessage::new(0.into(), foreign_high),
+        );
+        bmca.consider(
+            PortIdentity::fake(),
+            AnnounceMessage::new(1.into(), foreign_high),
+        );
 
-        assert_eq!(bmca.recommendation(&local_clock), BmcaRecommendation::Slave);
+        assert!(matches!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Slave(_)
+        ));
 
-        bmca.consider(AnnounceMessage::new(3.into(), foreign_high));
+        bmca.consider(
+            PortIdentity::fake(),
+            AnnounceMessage::new(3.into(), foreign_high),
+        );
 
         assert_eq!(
             bmca.recommendation(&local_clock),

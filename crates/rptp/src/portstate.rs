@@ -136,14 +136,14 @@ impl<P: Port> ListeningPort<P> {
 
     fn process_general_message(
         self,
-        _source_port_identity: PortIdentity,
+        source_port_identity: PortIdentity,
         msg: GeneralMessage,
     ) -> PortState<P> {
         match msg {
             GeneralMessage::Announce(msg) => {
                 self.announce_receipt_timeout
                     .restart(Duration::from_secs(5));
-                self.port.bmca().consider(msg);
+                self.port.bmca().consider(source_port_identity, msg);
 
                 match self.port.bmca().recommendation(self.port.local_clock()) {
                     BmcaRecommendation::Undecided => PortState::Listening(self),
@@ -154,7 +154,7 @@ impl<P: Port> ListeningPort<P> {
 
                         PortState::PreMaster(PreMasterPort::new(self.port, qualification_timeout))
                     }
-                    BmcaRecommendation::Slave => PortState::Uncalibrated(UncalibratedPort::new(
+                    BmcaRecommendation::Slave(_) => PortState::Uncalibrated(UncalibratedPort::new(
                         self.port,
                         self.announce_receipt_timeout,
                     )),
@@ -191,6 +191,7 @@ pub struct SlavePort<P: Port> {
     announce_receipt_timeout: P::Timeout,
     delay_cycle_timeout: P::Timeout,
     master_estimate: MasterEstimate,
+    parent_port_identity: Option<PortIdentity>,
 }
 
 impl<P: Port> SlavePort<P> {
@@ -204,15 +205,29 @@ impl<P: Port> SlavePort<P> {
             announce_receipt_timeout,
             delay_cycle_timeout,
             master_estimate: MasterEstimate::new(),
+            parent_port_identity: None,
+        }
+    }
+
+    fn with_parent(self, parent_port_identity: PortIdentity) -> Self {
+        Self {
+            parent_port_identity: Some(parent_port_identity),
+            ..self
         }
     }
 
     fn process_event_message(
         mut self,
-        _source_port_identity: PortIdentity,
+        source_port_identity: PortIdentity,
         msg: EventMessage,
         timestamp: TimeStamp,
     ) -> PortState<P> {
+        if let Some(parent) = &self.parent_port_identity {
+            if source_port_identity != *parent {
+                return PortState::Slave(self);
+            }
+        }
+
         match msg {
             EventMessage::TwoStepSync(sync) => {
                 if let Some(estimate) = self.master_estimate.ingest_two_step_sync(sync, timestamp) {
@@ -227,20 +242,39 @@ impl<P: Port> SlavePort<P> {
 
     fn process_general_message(
         mut self,
-        _source_port_identity: PortIdentity,
+        source_port_identity: PortIdentity,
         msg: GeneralMessage,
     ) -> PortState<P> {
         match msg {
-            GeneralMessage::Announce(_) => {
+            GeneralMessage::Announce(announce) => {
                 self.announce_receipt_timeout
                     .restart(Duration::from_secs(5));
+
+                self.port.bmca().consider(source_port_identity, announce);
+
+                match self.port.bmca().recommendation(self.port.local_clock()) {
+                    BmcaRecommendation::Slave(parent) => {
+                        return PortState::Slave(self.with_parent(parent));
+                    }
+                    _ => {} // TODO: handle undecided and master recommendations
+                }
             }
             GeneralMessage::FollowUp(follow_up) => {
+                if let Some(parent) = &self.parent_port_identity {
+                    if source_port_identity != *parent {
+                        return PortState::Slave(self);
+                    }
+                }
                 if let Some(estimate) = self.master_estimate.ingest_follow_up(follow_up) {
                     self.port.local_clock().discipline(estimate);
                 }
             }
             GeneralMessage::DelayResp(resp) => {
+                if let Some(parent) = &self.parent_port_identity {
+                    if source_port_identity != *parent {
+                        return PortState::Slave(self);
+                    }
+                }
                 if let Some(estimate) = self.master_estimate.ingest_delay_response(resp) {
                     self.port.local_clock().discipline(estimate);
                 }
@@ -331,16 +365,16 @@ impl<P: Port> MasterPort<P> {
 
     fn process_general_message(
         self,
-        _source_port_identity: PortIdentity,
+        source_port_identity: PortIdentity,
         msg: GeneralMessage,
     ) -> PortState<P> {
         match msg {
             GeneralMessage::Announce(msg) => {
-                self.port.bmca().consider(msg);
+                self.port.bmca().consider(source_port_identity, msg);
 
                 match self.port.bmca().recommendation(self.port.local_clock()) {
                     BmcaRecommendation::Undecided => PortState::Master(self),
-                    BmcaRecommendation::Slave => {
+                    BmcaRecommendation::Slave(_) => {
                         let announce_receipt_timeout = self.port.timeout(
                             SystemMessage::AnnounceReceiptTimeout,
                             Duration::from_secs(5),
@@ -438,7 +472,7 @@ impl<P: Port> UncalibratedPort<P> {
 
     fn process_general_message(
         self,
-        _source_port_identity: PortIdentity,
+        source_port_identity: PortIdentity,
         msg: GeneralMessage,
     ) -> PortState<P> {
         match msg {
@@ -446,7 +480,7 @@ impl<P: Port> UncalibratedPort<P> {
                 self.announce_receipt_timeout
                     .restart(Duration::from_secs(5));
 
-                self.port.bmca().consider(msg);
+                self.port.bmca().consider(source_port_identity, msg);
 
                 match self.port.bmca().recommendation(self.port.local_clock()) {
                     BmcaRecommendation::Undecided => {
@@ -460,17 +494,20 @@ impl<P: Port> UncalibratedPort<P> {
                             announce_receipt_timeout,
                         ));
                     }
-                    BmcaRecommendation::Slave => {
+                    BmcaRecommendation::Slave(parent) => {
                         let delay_cycle_timeout = self.port.timeout(
                             SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
                             Duration::from_secs(1),
                         );
 
-                        return PortState::Slave(SlavePort::new(
-                            self.port,
-                            self.announce_receipt_timeout,
-                            delay_cycle_timeout,
-                        ));
+                        return PortState::Slave(
+                            SlavePort::new(
+                                self.port,
+                                self.announce_receipt_timeout,
+                                delay_cycle_timeout,
+                            )
+                            .with_parent(parent),
+                        );
                     }
                     BmcaRecommendation::Master => {
                         let qualification_timeout = self
@@ -542,15 +579,6 @@ mod tests {
     };
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainPort, PortNumber};
-
-    impl PortIdentity {
-        fn fake() -> Self {
-            PortIdentity::new(
-                ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
-                PortNumber::new(1),
-            )
-        }
-    }
 
     #[test]
     fn slave_port_synchronizes_clock() {
@@ -819,11 +847,11 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
-        let prior_records =
-            [
-                ForeignClockRecord::new(AnnounceMessage::new(41.into(), foreign_clock_ds))
-                    .with_resolved_clock(foreign_clock_ds),
-            ];
+        let prior_records = [ForeignClockRecord::new(
+            PortIdentity::fake(),
+            AnnounceMessage::new(41.into(), foreign_clock_ds),
+        )
+        .with_resolved_clock(foreign_clock_ds)];
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
@@ -859,11 +887,11 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
-        let prior_records =
-            [
-                ForeignClockRecord::new(AnnounceMessage::new(41.into(), foreign_clock_ds))
-                    .with_resolved_clock(foreign_clock_ds),
-            ];
+        let prior_records = [ForeignClockRecord::new(
+            PortIdentity::fake(),
+            AnnounceMessage::new(41.into(), foreign_clock_ds),
+        )
+        .with_resolved_clock(foreign_clock_ds)];
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
@@ -1263,11 +1291,11 @@ mod tests {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
-        let prior_records =
-            [
-                ForeignClockRecord::new(AnnounceMessage::new(41.into(), foreign_clock_ds))
-                    .with_resolved_clock(foreign_clock_ds),
-            ];
+        let prior_records = [ForeignClockRecord::new(
+            PortIdentity::fake(),
+            AnnounceMessage::new(41.into(), foreign_clock_ds),
+        )
+        .with_resolved_clock(foreign_clock_ds)];
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
@@ -1347,5 +1375,74 @@ mod tests {
             msg2,
             AnnounceMessage::new(1.into(), ForeignClockDS::high_grade_test_clock())
         );
+    }
+
+    #[test]
+    fn slave_port_ignores_general_messages_from_non_parent() {
+        let local_clock = LocalClock::new(
+            FakeClock::new(TimeStamp::new(0, 0)),
+            LocalClockDS::mid_grade_test_clock(),
+        );
+        let port = FakePort::new();
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            bmca,
+            &port,
+            &timer_host,
+            0,
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+        let delay_cycle_timeout = domain_port.timeout(
+            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        // Define a parent and a different non-parent identity
+        let parent = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0xAA, 0xAA, 0xAA]),
+            PortNumber::new(1),
+        );
+        let non_parent = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0xBB, 0xBB, 0xBB]),
+            PortNumber::new(1),
+        );
+
+        // Create slave with a chosen parent
+        let mut slave = PortState::Slave(
+            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle_timeout)
+                .with_parent(parent),
+        );
+
+        // Ingest a TwoStepSync from the parent so a matching FollowUp could produce ms_offset
+        slave = slave.process_event_message(
+            parent,
+            EventMessage::TwoStepSync(TwoStepSyncMessage::new(1.into())),
+            TimeStamp::new(2, 0),
+        );
+
+        // Record a delay request timestamp to allow sm_offset calculation
+        slave = slave.process_system_message(SystemMessage::Timestamp {
+            msg: EventMessage::DelayReq(DelayRequestMessage::new(2.into())),
+            timestamp: TimeStamp::new(0, 0),
+        });
+
+        // Send FollowUp and DelayResp from a non-parent; these should be ignored
+        slave = slave.process_general_message(
+            non_parent,
+            GeneralMessage::FollowUp(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0))),
+        );
+        let _ = slave.process_general_message(
+            non_parent,
+            GeneralMessage::DelayResp(DelayResponseMessage::new(2.into(), TimeStamp::new(2, 0))),
+        );
+
+        // With correct filtering, the local clock should remain unchanged
+        assert_eq!(local_clock.now(), TimeStamp::new(0, 0));
     }
 }
