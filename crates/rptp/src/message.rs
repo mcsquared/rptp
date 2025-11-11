@@ -1,6 +1,5 @@
 use crate::{
     bmca::ForeignClockDS,
-    clock::{ClockIdentity, ClockQuality},
     port::PortMap,
     result::{ParseError, ProtocolError, Result},
     time::{Duration, TimeStamp},
@@ -119,13 +118,9 @@ impl TryFrom<&[u8]> for GeneralMessage {
         );
 
         match msgtype {
-            0x0B => Ok(Self::Announce(AnnounceMessage::new(
-                sequence_id,
-                ForeignClockDS::new(
-                    ClockIdentity::new([0; 8]),
-                    ClockQuality::new(248, 0xFE, 0xFFFF),
-                ),
-            ))),
+            0x0B => Ok(Self::Announce(AnnounceMessage::from_slice(
+                buf.try_into().map_err(|_| ParseError::BadLength)?,
+            )?)),
             0x08 => Ok(Self::FollowUp(FollowUpMessage::new(
                 sequence_id,
                 wire_timestamp.timestamp()?,
@@ -191,11 +186,28 @@ pub struct AnnounceMessage {
 }
 
 impl AnnounceMessage {
+    const SEQUENCE_ID_RANGE: std::ops::Range<usize> = 30..32;
+    const FOREIGN_CLOCK_RANGE: std::ops::Range<usize> = 47..61;
+
     pub fn new(sequence_id: SequenceId, foreign_clock: ForeignClockDS) -> Self {
         Self {
             sequence_id,
             foreign_clock,
         }
+    }
+
+    pub fn from_slice(buf: &[u8; 64]) -> Result<Self> {
+        let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
+        let foreign_clock = ForeignClockDS::from_slice(
+            &buf[Self::FOREIGN_CLOCK_RANGE]
+                .try_into()
+                .map_err(|_| ParseError::BadLength)?,
+        );
+
+        Ok(Self {
+            sequence_id,
+            foreign_clock,
+        })
     }
 
     pub fn follows(&self, previous: AnnounceMessage) -> Option<ForeignClockDS> {
@@ -215,7 +227,8 @@ impl AnnounceMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x0B & 0x0F;
-        buf[30..32].copy_from_slice(&self.sequence_id.to_wire());
+        buf[Self::SEQUENCE_ID_RANGE].copy_from_slice(&self.sequence_id.to_wire());
+        buf[Self::FOREIGN_CLOCK_RANGE].copy_from_slice(&self.foreign_clock.to_bytes());
 
         buf
     }
@@ -447,12 +460,16 @@ impl<M> MessageWindow<M> {
 mod tests {
     use super::*;
 
+    use crate::clock::{ClockIdentity, ClockQuality};
+
     #[test]
     fn announce_message_wire_roundtrip() {
         let announce = AnnounceMessage::new(
             42.into(),
             ForeignClockDS::new(
-                ClockIdentity::new([0; 8]),
+                ClockIdentity::new(&[0; 8]),
+                127,
+                127,
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
         );

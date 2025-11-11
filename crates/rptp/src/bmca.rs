@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::ops::Range;
 
 use crate::clock::{ClockIdentity, ClockQuality, LocalClock, SynchronizableClock};
 use crate::message::{AnnounceMessage, SequenceId};
@@ -14,12 +15,52 @@ pub trait SortedForeignClockRecords {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ForeignClockDS {
     identity: ClockIdentity,
+    priority1: u8,
+    priority2: u8,
     quality: ClockQuality,
 }
 
 impl ForeignClockDS {
-    pub fn new(identity: ClockIdentity, quality: ClockQuality) -> Self {
-        Self { identity, quality }
+    const PRIORITY1_OFFSET: usize = 0;
+    const QUALITY_RANGE: Range<usize> = 1..5;
+    const PRIORITY2_OFFSET: usize = 5;
+    const IDENTITY_RANGE: Range<usize> = 6..14;
+
+    pub fn new(
+        identity: ClockIdentity,
+        priority1: u8,
+        priority2: u8,
+        quality: ClockQuality,
+    ) -> Self {
+        Self {
+            identity,
+            priority1,
+            priority2,
+            quality,
+        }
+    }
+
+    pub fn from_slice(buf: &[u8; 14]) -> Self {
+        Self {
+            identity: ClockIdentity::new(&[
+                buf[Self::IDENTITY_RANGE.start],
+                buf[Self::IDENTITY_RANGE.start + 1],
+                buf[Self::IDENTITY_RANGE.start + 2],
+                buf[Self::IDENTITY_RANGE.start + 3],
+                buf[Self::IDENTITY_RANGE.start + 4],
+                buf[Self::IDENTITY_RANGE.start + 5],
+                buf[Self::IDENTITY_RANGE.start + 6],
+                buf[Self::IDENTITY_RANGE.start + 7],
+            ]),
+            priority1: buf[ForeignClockDS::PRIORITY1_OFFSET],
+            priority2: buf[ForeignClockDS::PRIORITY2_OFFSET],
+            quality: ClockQuality::from_slice(&[
+                buf[ForeignClockDS::QUALITY_RANGE.start],
+                buf[ForeignClockDS::QUALITY_RANGE.start + 1],
+                buf[ForeignClockDS::QUALITY_RANGE.start + 2],
+                buf[ForeignClockDS::QUALITY_RANGE.start + 3],
+            ]),
+        }
     }
 
     pub fn same_source_as(&self, other: &ForeignClockDS) -> bool {
@@ -33,6 +74,15 @@ impl ForeignClockDS {
 
         self.quality.outranks_other(&other.quality)
     }
+
+    pub fn to_bytes(&self) -> [u8; 14] {
+        let mut bytes = [0u8; 14];
+        bytes[Self::PRIORITY1_OFFSET] = self.priority1;
+        bytes[Self::QUALITY_RANGE].copy_from_slice(&self.quality.to_bytes());
+        bytes[Self::PRIORITY2_OFFSET] = self.priority2;
+        bytes[Self::IDENTITY_RANGE].copy_from_slice(self.identity.as_bytes());
+        bytes
+    }
 }
 
 pub struct LocalClockDS {
@@ -42,7 +92,7 @@ pub struct LocalClockDS {
 impl LocalClockDS {
     pub fn new(identity: ClockIdentity, quality: ClockQuality) -> Self {
         Self {
-            ds: ForeignClockDS::new(identity, quality),
+            ds: ForeignClockDS::new(identity, 127, 127, quality),
         }
     }
 
@@ -195,11 +245,11 @@ pub(crate) mod tests {
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
 
     const CLK_ID_HIGH: ClockIdentity =
-        ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]);
+        ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]);
     const CLK_ID_MID: ClockIdentity =
-        ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]);
+        ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]);
     const CLK_ID_LOW: ClockIdentity =
-        ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x03]);
+        ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x03]);
 
     const CLK_QUALITY_HIGH: ClockQuality = ClockQuality::new(248, 0xFE, 0xFFFF);
     const CLK_QUALITY_MID: ClockQuality = ClockQuality::new(250, 0xFE, 0xFFFF);
@@ -207,15 +257,15 @@ pub(crate) mod tests {
 
     impl ForeignClockDS {
         pub(crate) fn high_grade_test_clock() -> ForeignClockDS {
-            ForeignClockDS::new(CLK_ID_HIGH, CLK_QUALITY_HIGH)
+            ForeignClockDS::new(CLK_ID_HIGH, 127, 127, CLK_QUALITY_HIGH)
         }
 
         pub(crate) fn mid_grade_test_clock() -> ForeignClockDS {
-            ForeignClockDS::new(CLK_ID_MID, CLK_QUALITY_MID)
+            ForeignClockDS::new(CLK_ID_MID, 127, 127, CLK_QUALITY_MID)
         }
 
         pub(crate) fn low_grade_test_clock() -> ForeignClockDS {
-            ForeignClockDS::new(CLK_ID_LOW, CLK_QUALITY_LOW)
+            ForeignClockDS::new(CLK_ID_LOW, 127, 127, CLK_QUALITY_LOW)
         }
     }
 

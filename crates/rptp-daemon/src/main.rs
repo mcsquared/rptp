@@ -21,7 +21,7 @@ async fn main() -> std::io::Result<()> {
     let local_clock = LocalClock::new(
         Rc::new(FakeClock::default()),
         LocalClockDS::new(
-            ClockIdentity::new([0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             ClockQuality::new(248, 0xFE, 0xFFFF),
         ),
     );
