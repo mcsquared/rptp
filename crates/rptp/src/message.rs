@@ -81,13 +81,16 @@ impl EventMessage {
 impl TryFrom<&[u8]> for EventMessage {
     type Error = crate::result::Error;
 
-    fn try_from(b: &[u8]) -> Result<Self> {
-        let msg_type = b.get(0).ok_or(ParseError::BadLength)? & 0x0F;
-        let sequence_id = SequenceId::try_from(b.get(30..32).ok_or(ParseError::BadLength)?)?;
+    fn try_from(buf: &[u8]) -> Result<Self> {
+        let msg_type = buf.get(0).ok_or(ParseError::BadLength)? & 0x0F;
 
         match msg_type {
-            0x00 => Ok(Self::TwoStepSync(TwoStepSyncMessage::new(sequence_id))),
-            0x01 => Ok(Self::DelayReq(DelayRequestMessage::new(sequence_id))),
+            0x00 => Ok(Self::TwoStepSync(TwoStepSyncMessage::from_slice(
+                buf.try_into().map_err(|_| ParseError::BadLength)?,
+            )?)),
+            0x01 => Ok(Self::DelayReq(DelayRequestMessage::from_slice(
+                buf.try_into().map_err(|_| ParseError::BadLength)?,
+            )?)),
             _ => Err(ParseError::BadMessageType.into()),
         }
     }
@@ -108,27 +111,17 @@ impl TryFrom<&[u8]> for GeneralMessage {
 
     fn try_from(buf: &[u8]) -> Result<Self> {
         let msgtype = buf.get(0).ok_or(ParseError::BadLength)? & 0x0F;
-        let sequence_id = SequenceId::try_from(buf.get(30..32).ok_or(ParseError::BadLength)?)?;
-
-        let wire_timestamp = WireTimeStamp::new(
-            buf.get(34..44)
-                .ok_or(ParseError::BadLength)?
-                .try_into()
-                .map_err(|_| ParseError::BadLength)?,
-        );
 
         match msgtype {
             0x0B => Ok(Self::Announce(AnnounceMessage::from_slice(
                 buf.try_into().map_err(|_| ParseError::BadLength)?,
             )?)),
-            0x08 => Ok(Self::FollowUp(FollowUpMessage::new(
-                sequence_id,
-                wire_timestamp.timestamp()?,
-            ))),
-            0x09 => Ok(Self::DelayResp(DelayResponseMessage::new(
-                sequence_id,
-                wire_timestamp.timestamp()?,
-            ))),
+            0x08 => Ok(Self::FollowUp(FollowUpMessage::from_slice(
+                buf.try_into().map_err(|_| ParseError::BadLength)?,
+            )?)),
+            0x09 => Ok(Self::DelayResp(DelayResponseMessage::from_slice(
+                buf.try_into().map_err(|_| ParseError::BadLength)?,
+            )?)),
             _ => Err(ParseError::BadMessageType.into()),
         }
     }
@@ -196,7 +189,7 @@ impl AnnounceMessage {
         }
     }
 
-    pub fn from_slice(buf: &[u8; 64]) -> Result<Self> {
+    pub fn from_slice(buf: &[u8]) -> Result<Self> {
         let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
         let foreign_clock = ForeignClockDS::from_slice(
             &buf[Self::FOREIGN_CLOCK_RANGE]
@@ -240,8 +233,16 @@ pub struct TwoStepSyncMessage {
 }
 
 impl TwoStepSyncMessage {
+    const SEQUENCE_ID_RANGE: std::ops::Range<usize> = 30..32;
+
     pub fn new(sequence_id: SequenceId) -> Self {
         Self { sequence_id }
+    }
+
+    pub fn from_slice(buf: &[u8]) -> Result<Self> {
+        let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
+
+        Ok(Self { sequence_id })
     }
 
     pub fn follow_up(self, precise_origin_timestamp: TimeStamp) -> FollowUpMessage {
@@ -251,7 +252,7 @@ impl TwoStepSyncMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x00;
-        buf[30..32].copy_from_slice(&self.sequence_id.to_wire());
+        buf[Self::SEQUENCE_ID_RANGE].copy_from_slice(&self.sequence_id.to_wire());
 
         buf
     }
@@ -264,11 +265,30 @@ pub struct FollowUpMessage {
 }
 
 impl FollowUpMessage {
+    const SEQUENCE_ID_RANGE: std::ops::Range<usize> = 30..32;
+    const PRECISE_ORIGIN_TIMESTAMP_RANGE: std::ops::Range<usize> = 34..44;
+
     pub fn new(sequence_id: SequenceId, precise_origin_timestamp: TimeStamp) -> Self {
         Self {
             sequence_id,
             precise_origin_timestamp,
         }
+    }
+
+    pub fn from_slice(buf: &[u8]) -> Result<Self> {
+        let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
+        let wire_timestamp = WireTimeStamp::new(
+            buf.get(Self::PRECISE_ORIGIN_TIMESTAMP_RANGE)
+                .ok_or(ParseError::BadLength)?
+                .try_into()
+                .map_err(|_| ParseError::BadLength)?,
+        );
+        let precise_origin_timestamp = wire_timestamp.timestamp()?;
+
+        Ok(Self {
+            sequence_id,
+            precise_origin_timestamp,
+        })
     }
 
     pub fn master_slave_offset(
@@ -286,8 +306,9 @@ impl FollowUpMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x08 & 0x0F;
-        buf[30..32].copy_from_slice(&self.sequence_id.to_wire());
-        buf[34..44].copy_from_slice(&self.precise_origin_timestamp.to_wire());
+        buf[Self::SEQUENCE_ID_RANGE].copy_from_slice(&self.sequence_id.to_wire());
+        buf[Self::PRECISE_ORIGIN_TIMESTAMP_RANGE]
+            .copy_from_slice(&self.precise_origin_timestamp.to_wire());
         buf
     }
 }
@@ -298,8 +319,16 @@ pub struct DelayRequestMessage {
 }
 
 impl DelayRequestMessage {
+    const SEQUENCE_ID_RANGE: std::ops::Range<usize> = 30..32;
+
     pub fn new(sequence_id: SequenceId) -> Self {
         Self { sequence_id }
+    }
+
+    pub fn from_slice(buf: &[u8]) -> Result<Self> {
+        let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
+
+        Ok(Self { sequence_id })
     }
 
     pub fn response(self, receive_timestamp: TimeStamp) -> DelayResponseMessage {
@@ -309,7 +338,7 @@ impl DelayRequestMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x01 & 0x0F;
-        buf[30..32].copy_from_slice(&self.sequence_id.to_wire());
+        buf[Self::SEQUENCE_ID_RANGE].copy_from_slice(&self.sequence_id.to_wire());
 
         buf
     }
@@ -322,11 +351,30 @@ pub struct DelayResponseMessage {
 }
 
 impl DelayResponseMessage {
+    const SEQUENCE_ID_RANGE: std::ops::Range<usize> = 30..32;
+    const RECEIVE_TIMESTAMP_RANGE: std::ops::Range<usize> = 34..44;
+
     pub fn new(sequence_id: SequenceId, receive_timestamp: TimeStamp) -> Self {
         Self {
             sequence_id,
             receive_timestamp,
         }
+    }
+
+    pub fn from_slice(buf: &[u8]) -> Result<Self> {
+        let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
+        let wire_timestamp = WireTimeStamp::new(
+            buf.get(Self::RECEIVE_TIMESTAMP_RANGE)
+                .ok_or(ParseError::BadLength)?
+                .try_into()
+                .map_err(|_| ParseError::BadLength)?,
+        );
+        let receive_timestamp = wire_timestamp.timestamp()?;
+
+        Ok(Self {
+            sequence_id,
+            receive_timestamp,
+        })
     }
 
     pub fn slave_master_offset(
@@ -344,8 +392,8 @@ impl DelayResponseMessage {
     pub fn to_wire(&self) -> [u8; 64] {
         let mut buf = [0; 64];
         buf[0] = 0x09 & 0x0F;
-        buf[30..32].copy_from_slice(&self.sequence_id.to_wire());
-        buf[34..44].copy_from_slice(&self.receive_timestamp.to_wire());
+        buf[Self::SEQUENCE_ID_RANGE].copy_from_slice(&self.sequence_id.to_wire());
+        buf[Self::RECEIVE_TIMESTAMP_RANGE].copy_from_slice(&self.receive_timestamp.to_wire());
 
         buf
     }
