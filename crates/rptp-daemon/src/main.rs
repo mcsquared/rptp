@@ -1,18 +1,18 @@
 pub mod net;
 pub mod node;
+pub mod ordinary;
 
 use std::rc::Rc;
 
 use tokio::sync::mpsc;
 
-use rptp::bmca::{FullBmca, LocalClockDS};
+use rptp::bmca::LocalClockDS;
 use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
-use rptp::infra::infra_support::SortedForeignClockRecordsVec;
-use rptp::port::{DomainPort, PortNumber, SingleDomainPortMap};
-use rptp::portstate::PortState;
+use rptp::port::{PortNumber, SingleDomainPortMap};
 
 use crate::net::MulticastSocket;
-use crate::node::{TokioNetwork, TokioPhysicalPort, TokioTimerHost};
+use crate::node::TokioNetwork;
+use crate::ordinary::ordinary_clock_port;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::io::Result<()> {
@@ -32,26 +32,15 @@ async fn main() -> std::io::Result<()> {
     let general_socket = Rc::new(MulticastSocket::general().await?);
 
     let (system_tx, system_rx) = mpsc::unbounded_channel();
-    let physical_port = TokioPhysicalPort::new(
+    let port = ordinary_clock_port(
         &local_clock,
         domain,
         event_socket.clone(),
         general_socket.clone(),
         system_tx.clone(),
-    );
-    let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
-    let timer_host = TokioTimerHost::new(domain, system_tx.clone());
-
-    let port_state = PortState::initializing(DomainPort::new(
-        &local_clock,
-        bmca,
-        physical_port,
-        timer_host,
-        domain,
         PortNumber::new(1),
-    ));
-
-    let portmap = SingleDomainPortMap::new(domain, port_state);
+    );
+    let portmap = SingleDomainPortMap::new(domain, port);
 
     let tokio_network = TokioNetwork::new(
         &local_clock,
