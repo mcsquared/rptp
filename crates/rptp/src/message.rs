@@ -784,6 +784,86 @@ mod tests {
     }
 
     #[test]
+    fn message_window_out_of_order_then_recover_follow_up_arrives() {
+        // Start with a sync, then a non-matching follow-up, then a matching follow-up.
+        let mut sync_window = MessageWindow::new();
+        let mut follow_up_window = MessageWindow::new();
+
+        sync_window.record((TwoStepSyncMessage::new(1.into()), TimeStamp::new(2, 0)));
+        follow_up_window.record(FollowUpMessage::new(2.into(), TimeStamp::new(1, 0)));
+
+        let no_match = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
+            follow.master_slave_offset(sync, ts)
+        });
+        assert_eq!(no_match, None);
+
+        follow_up_window.record(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0)));
+        let matched = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
+            follow.master_slave_offset(sync, ts)
+        });
+        assert_eq!(matched, Some(Duration::new(1, 0)));
+    }
+
+    #[test]
+    fn message_window_out_of_order_then_recover_sync_arrives() {
+        // Start with a follow-up, then a non-matching sync, then a matching sync.
+        let mut sync_window = MessageWindow::new();
+        let mut follow_up_window = MessageWindow::new();
+
+        follow_up_window.record(FollowUpMessage::new(3.into(), TimeStamp::new(1, 0)));
+        sync_window.record((TwoStepSyncMessage::new(4.into()), TimeStamp::new(2, 0)));
+
+        let no_match = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
+            follow.master_slave_offset(sync, ts)
+        });
+        assert_eq!(no_match, None);
+
+        sync_window.record((TwoStepSyncMessage::new(3.into()), TimeStamp::new(2, 0)));
+        let matched = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
+            follow.master_slave_offset(sync, ts)
+        });
+        assert_eq!(matched, Some(Duration::new(1, 0)));
+    }
+
+    #[test]
+    fn message_window_in_order_follow_up_then_sync() {
+        // FollowUp for seq=5 arrives first, then matching Sync for seq=5.
+        let mut sync_window = MessageWindow::new();
+        let mut follow_up_window = MessageWindow::new();
+
+        follow_up_window.record(FollowUpMessage::new(5.into(), TimeStamp::new(10, 0)));
+        sync_window.record((TwoStepSyncMessage::new(5.into()), TimeStamp::new(11, 0)));
+
+        let matched = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
+            follow.master_slave_offset(sync, ts)
+        });
+        assert_eq!(matched, Some(Duration::new(1, 0)));
+    }
+
+    #[test]
+    fn message_window_in_order_updates_to_newer_pair() {
+        // Two successive matching pairs; combine_latest should reflect the latest pair.
+        let mut sync_window = MessageWindow::new();
+        let mut follow_up_window = MessageWindow::new();
+
+        // First pair -> 2s offset
+        sync_window.record((TwoStepSyncMessage::new(1.into()), TimeStamp::new(5, 0)));
+        follow_up_window.record(FollowUpMessage::new(1.into(), TimeStamp::new(3, 0)));
+        let first = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
+            follow.master_slave_offset(sync, ts)
+        });
+        assert_eq!(first, Some(Duration::new(2, 0)));
+
+        // Second pair -> 3s offset overwrites windows
+        sync_window.record((TwoStepSyncMessage::new(2.into()), TimeStamp::new(9, 0)));
+        follow_up_window.record(FollowUpMessage::new(2.into(), TimeStamp::new(6, 0)));
+        let second = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
+            follow.master_slave_offset(sync, ts)
+        });
+        assert_eq!(second, Some(Duration::new(3, 0)));
+    }
+
+    #[test]
     fn sequence_id_follows_next_for_all_values() {
         for id in 0u16..=u16::MAX {
             let a: SequenceId = id.into();
