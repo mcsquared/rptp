@@ -230,7 +230,7 @@ impl<P: Port> SlavePort<P> {
 
         match msg {
             EventMessage::TwoStepSync(sync) => {
-                if let Some(estimate) = self.master_estimate.ingest_two_step_sync(sync, timestamp) {
+                if let Some(estimate) = self.master_estimate.record_two_step_sync(sync, timestamp) {
                     self.port.local_clock().discipline(estimate);
                 }
             }
@@ -265,7 +265,7 @@ impl<P: Port> SlavePort<P> {
                         return PortState::Slave(self);
                     }
                 }
-                if let Some(estimate) = self.master_estimate.ingest_follow_up(follow_up) {
+                if let Some(estimate) = self.master_estimate.record_follow_up(follow_up) {
                     self.port.local_clock().discipline(estimate);
                 }
             }
@@ -275,7 +275,7 @@ impl<P: Port> SlavePort<P> {
                         return PortState::Slave(self);
                     }
                 }
-                if let Some(estimate) = self.master_estimate.ingest_delay_response(resp) {
+                if let Some(estimate) = self.master_estimate.record_delay_response(resp) {
                     self.port.local_clock().discipline(estimate);
                 }
             }
@@ -316,7 +316,7 @@ impl<P: Port> SlavePort<P> {
             SystemMessage::Timestamp { msg, timestamp } => match msg {
                 EventMessage::DelayReq(req) => {
                     if let Some(estimate) =
-                        self.master_estimate.ingest_delay_request(req, timestamp)
+                        self.master_estimate.record_delay_request(req, timestamp)
                     {
                         self.port.local_clock().discipline(estimate);
                     }
@@ -1419,7 +1419,7 @@ mod tests {
                 .with_parent(parent),
         );
 
-        // Ingest a TwoStepSync from the parent so a matching FollowUp could produce ms_offset
+        // Record a TwoStepSync from the parent so a matching FollowUp could produce ms_offset
         slave = slave.process_event_message(
             parent,
             EventMessage::TwoStepSync(TwoStepSyncMessage::new(1.into())),
