@@ -157,7 +157,7 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> PhysicalPort for TokioPhysica
     }
 }
 
-pub struct TokioNetwork<'a, N: NetworkSocket> {
+pub struct TokioPortsLoop<'a, N: NetworkSocket> {
     local_clock: &'a LocalClock<Rc<FakeClock>>,
     portmap: SingleDomainPortMap<
         DomainPort<
@@ -173,7 +173,7 @@ pub struct TokioNetwork<'a, N: NetworkSocket> {
     system_rx: mpsc::UnboundedReceiver<(u8, SystemMessage)>,
 }
 
-impl<'a, N: NetworkSocket> TokioNetwork<'a, N> {
+impl<'a, N: NetworkSocket> TokioPortsLoop<'a, N> {
     pub async fn new(
         local_clock: &'a LocalClock<Rc<FakeClock>>,
         portmap: SingleDomainPortMap<
@@ -341,7 +341,7 @@ mod tests {
         );
         let port_state = PortState::master(domain_port, announce_send_timeout, sync_cycle_timeout);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
-        let net = TokioNetwork::new(
+        let portsloop = TokioPortsLoop::new(
             &local_clock,
             portmap,
             event_socket,
@@ -381,7 +381,7 @@ mod tests {
         })
         .map(|_| {});
 
-        net.run_until(cond).await?;
+        portsloop.run_until(cond).await?;
 
         assert_eq!(sync_count, follow_up_count);
         assert_eq!(sync_count, 5);
@@ -434,7 +434,7 @@ mod tests {
         let port_state =
             PortState::slave(domain_port, announce_receipt_timeout, delay_cycle_timeout);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
-        let net = TokioNetwork::new(
+        let portsloop = TokioPortsLoop::new(
             &local_clock,
             portmap,
             event_socket,
@@ -465,7 +465,7 @@ mod tests {
         })
         .map(|_result| {});
 
-        net.run_until(cond).await?;
+        portsloop.run_until(cond).await?;
 
         assert!(delay_request_count >= 5);
         Ok(())

@@ -11,7 +11,7 @@ use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
 use rptp::port::{PortNumber, SingleDomainPortMap};
 
 use crate::net::MulticastSocket;
-use crate::node::TokioNetwork;
+use crate::node::TokioPortsLoop;
 use crate::ordinary::ordinary_clock_port;
 
 #[tokio::main(flavor = "current_thread")]
@@ -42,7 +42,7 @@ async fn main() -> std::io::Result<()> {
     );
     let portmap = SingleDomainPortMap::new(domain, port);
 
-    let tokio_network = TokioNetwork::new(
+    let ports_loop = TokioPortsLoop::new(
         &local_clock,
         portmap,
         event_socket,
@@ -51,7 +51,7 @@ async fn main() -> std::io::Result<()> {
     )
     .await?;
 
-    tokio_network.run().await?;
+    ports_loop.run().await?;
 
     Ok(())
 }

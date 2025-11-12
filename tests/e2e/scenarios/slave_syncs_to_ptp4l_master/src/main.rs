@@ -9,7 +9,7 @@ use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
 use rptp::port::{PortNumber, SingleDomainPortMap};
 use rptp::time::TimeStamp;
 use rptp_daemon::net::MulticastSocket;
-use rptp_daemon::node::TokioNetwork;
+use rptp_daemon::node::TokioPortsLoop;
 use rptp_daemon::ordinary::ordinary_clock_port;
 
 #[tokio::main(flavor = "current_thread")]
@@ -39,7 +39,7 @@ async fn main() -> std::io::Result<()> {
     );
     let portmap = SingleDomainPortMap::new(domain, port);
 
-    let tokio_network = TokioNetwork::new(
+    let ports_loop = TokioPortsLoop::new(
         &local_clock,
         portmap,
         event_socket,
@@ -64,7 +64,7 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
-    let result = timeout(Duration::from_secs(30), tokio_network.run_until(clock_sync))
+    let result = timeout(Duration::from_secs(30), ports_loop.run_until(clock_sync))
         .await
         .map_err(|_| {
             std::io::Error::new(
