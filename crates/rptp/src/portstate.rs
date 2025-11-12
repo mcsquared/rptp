@@ -209,6 +209,13 @@ impl<P: Port> SlavePort<P> {
         }
     }
 
+    fn accepts_from(&self, source_port_identity: &PortIdentity) -> bool {
+        match &self.parent_port_identity {
+            Some(parent) => parent == source_port_identity,
+            None => true,
+        }
+    }
+
     fn with_parent(self, parent_port_identity: PortIdentity) -> Self {
         Self {
             parent_port_identity: Some(parent_port_identity),
@@ -222,10 +229,8 @@ impl<P: Port> SlavePort<P> {
         msg: EventMessage,
         timestamp: TimeStamp,
     ) -> PortState<P> {
-        if let Some(parent) = &self.parent_port_identity {
-            if source_port_identity != *parent {
-                return PortState::Slave(self);
-            }
+        if !self.accepts_from(&source_port_identity) {
+            return PortState::Slave(self);
         }
 
         match msg {
@@ -260,20 +265,16 @@ impl<P: Port> SlavePort<P> {
                 }
             }
             GeneralMessage::FollowUp(follow_up) => {
-                if let Some(parent) = &self.parent_port_identity {
-                    if source_port_identity != *parent {
-                        return PortState::Slave(self);
-                    }
+                if !self.accepts_from(&source_port_identity) {
+                    return PortState::Slave(self);
                 }
                 if let Some(estimate) = self.master_estimate.record_follow_up(follow_up) {
                     self.port.local_clock().discipline(estimate);
                 }
             }
             GeneralMessage::DelayResp(resp) => {
-                if let Some(parent) = &self.parent_port_identity {
-                    if source_port_identity != *parent {
-                        return PortState::Slave(self);
-                    }
+                if !self.accepts_from(&source_port_identity) {
+                    return PortState::Slave(self);
                 }
                 if let Some(estimate) = self.master_estimate.record_delay_response(resp) {
                     self.port.local_clock().discipline(estimate);
