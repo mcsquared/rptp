@@ -22,6 +22,8 @@ async fn main() -> std::io::Result<()> {
         Rc::new(FakeClock::default()),
         LocalClockDS::new(
             ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            127,
+            127,
             ClockQuality::new(248, 0xFE, 0xFFFF),
         ),
     );

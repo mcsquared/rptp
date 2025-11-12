@@ -42,16 +42,6 @@ impl ClockQuality {
         }
     }
 
-    pub fn outranks_other(&self, other: &ClockQuality) -> bool {
-        if self.clock_class != other.clock_class {
-            return self.clock_class < other.clock_class;
-        }
-        if self.clock_accuracy != other.clock_accuracy {
-            return self.clock_accuracy < other.clock_accuracy;
-        }
-        self.offset_scaled_log_variance < other.offset_scaled_log_variance
-    }
-
     pub fn from_slice(buf: &[u8; 4]) -> Self {
         Self {
             clock_class: buf[Self::CLOCK_CLASS_OFFSET],
@@ -70,6 +60,29 @@ impl ClockQuality {
         bytes[Self::OFFSET_SCALED_LOG_VARIANCE_OFFSET]
             .copy_from_slice(&self.offset_scaled_log_variance.to_be_bytes());
         bytes
+    }
+}
+
+impl Ord for ClockQuality {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let a = (
+            &self.clock_class,
+            &self.clock_accuracy,
+            &self.offset_scaled_log_variance,
+        );
+        let b = (
+            &other.clock_class,
+            &other.clock_accuracy,
+            &other.offset_scaled_log_variance,
+        );
+
+        a.cmp(&b)
+    }
+}
+
+impl PartialOrd for ClockQuality {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 

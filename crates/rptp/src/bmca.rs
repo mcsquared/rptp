@@ -69,7 +69,20 @@ impl ForeignClockDS {
             return false;
         }
 
-        self.quality.outranks_other(&other.quality)
+        let a = (
+            &self.priority1,
+            &self.quality,
+            &self.priority2,
+            &self.identity,
+        );
+        let b = (
+            &other.priority1,
+            &other.quality,
+            &other.priority2,
+            &other.identity,
+        );
+
+        a < b
     }
 
     pub fn to_bytes(&self) -> [u8; 14] {
@@ -87,9 +100,14 @@ pub struct LocalClockDS {
 }
 
 impl LocalClockDS {
-    pub fn new(identity: ClockIdentity, quality: ClockQuality) -> Self {
+    pub fn new(
+        identity: ClockIdentity,
+        priority1: u8,
+        priority2: u8,
+        quality: ClockQuality,
+    ) -> Self {
         Self {
-            ds: ForeignClockDS::new(identity, 127, 127, quality),
+            ds: ForeignClockDS::new(identity, priority1, priority2, quality),
         }
     }
 
@@ -300,15 +318,15 @@ pub(crate) mod tests {
 
     impl LocalClockDS {
         pub(crate) fn high_grade_test_clock() -> LocalClockDS {
-            LocalClockDS::new(CLK_ID_HIGH, CLK_QUALITY_HIGH)
+            LocalClockDS::new(CLK_ID_HIGH, 127, 127, CLK_QUALITY_HIGH)
         }
 
         pub(crate) fn mid_grade_test_clock() -> LocalClockDS {
-            LocalClockDS::new(CLK_ID_MID, CLK_QUALITY_MID)
+            LocalClockDS::new(CLK_ID_MID, 127, 127, CLK_QUALITY_MID)
         }
 
         pub(crate) fn low_grade_test_clock() -> LocalClockDS {
-            LocalClockDS::new(CLK_ID_LOW, CLK_QUALITY_LOW)
+            LocalClockDS::new(CLK_ID_LOW, 127, 127, CLK_QUALITY_LOW)
         }
     }
 
@@ -346,6 +364,36 @@ pub(crate) mod tests {
         assert!(!c1.outranks_other(&c2));
         assert!(!c2.outranks_other(&c1));
         assert_eq!(c1, c2);
+    }
+
+    #[test]
+    fn foreign_clock_ds_compares_priority1_before_quality() {
+        // a has lower priority1 but worse quality; still outranks b.
+        let a = ForeignClockDS::new(CLK_ID_LOW, 10, 127, CLK_QUALITY_LOW);
+        let b = ForeignClockDS::new(CLK_ID_HIGH, 100, 127, CLK_QUALITY_HIGH);
+
+        assert!(a.outranks_other(&b));
+        assert!(!b.outranks_other(&a));
+    }
+
+    #[test]
+    fn foreign_clock_ds_compares_priority2_after_quality() {
+        // Same p1 and quality; lower p2 wins.
+        let a = ForeignClockDS::new(CLK_ID_LOW, 127, 10, CLK_QUALITY_HIGH);
+        let b = ForeignClockDS::new(CLK_ID_HIGH, 127, 20, CLK_QUALITY_HIGH);
+
+        assert!(a.outranks_other(&b));
+        assert!(!b.outranks_other(&a));
+    }
+
+    #[test]
+    fn foreign_clock_ds_tiebreaks_on_identity_last() {
+        // All fields equal except identity; lower identity outranks higher.
+        let a = ForeignClockDS::new(CLK_ID_HIGH, 127, 127, CLK_QUALITY_HIGH);
+        let b = ForeignClockDS::new(CLK_ID_MID, 127, 127, CLK_QUALITY_HIGH);
+
+        assert!(a.outranks_other(&b));
+        assert!(!b.outranks_other(&a));
     }
 
     #[test]

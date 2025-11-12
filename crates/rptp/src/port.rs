@@ -298,7 +298,7 @@ mod tests {
         let identity = ClockIdentity::new(&[1, 2, 3, 4, 5, 6, 7, 8]);
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            LocalClockDS::new(identity, ClockQuality::new(248, 0xFE, 0xFFFF)),
+            LocalClockDS::new(identity, 127, 127, ClockQuality::new(248, 0xFE, 0xFFFF)),
         );
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();
@@ -330,7 +330,7 @@ mod tests {
         let identity = ClockIdentity::new(&[8, 7, 6, 5, 4, 3, 2, 1]);
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            LocalClockDS::new(identity, ClockQuality::new(248, 0xFE, 0xFFFF)),
+            LocalClockDS::new(identity, 127, 127, ClockQuality::new(248, 0xFE, 0xFFFF)),
         );
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();
