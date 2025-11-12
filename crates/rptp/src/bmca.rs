@@ -248,6 +248,23 @@ impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
     }
 }
 
+pub struct NoopBmca;
+
+impl Bmca for NoopBmca {
+    fn consider(
+        &self,
+        _source_port_identity: crate::port::PortIdentity,
+        _announce: crate::message::AnnounceMessage,
+    ) {
+    }
+    fn recommendation<C: crate::clock::SynchronizableClock>(
+        &self,
+        _local_clock: &LocalClock<C>,
+    ) -> BmcaRecommendation {
+        BmcaRecommendation::Undecided
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

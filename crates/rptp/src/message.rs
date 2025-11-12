@@ -1,5 +1,6 @@
 use crate::{
     bmca::ForeignClockDS,
+    buffer::{FinalizedBuffer, MessageBuffer},
     port::{PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Duration, TimeStamp},
@@ -82,10 +83,10 @@ pub enum SystemMessage {
 }
 
 impl EventMessage {
-    pub fn to_wire(&self) -> [u8; 64] {
+    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         match self {
-            EventMessage::DelayReq(msg) => msg.to_wire(),
-            EventMessage::TwoStepSync(msg) => msg.to_wire(),
+            EventMessage::DelayReq(msg) => msg.serialize(buf),
+            EventMessage::TwoStepSync(msg) => msg.serialize(buf),
         }
     }
 }
@@ -109,11 +110,11 @@ impl TryFrom<&[u8]> for EventMessage {
 }
 
 impl GeneralMessage {
-    pub fn to_wire(&self) -> [u8; 64] {
+    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         match self {
-            GeneralMessage::Announce(msg) => msg.to_wire(),
-            GeneralMessage::DelayResp(msg) => msg.to_wire(),
-            GeneralMessage::FollowUp(msg) => msg.to_wire(),
+            GeneralMessage::Announce(msg) => msg.serialize(buf),
+            GeneralMessage::DelayResp(msg) => msg.serialize(buf),
+            GeneralMessage::FollowUp(msg) => msg.serialize(buf),
         }
     }
 }
@@ -159,7 +160,7 @@ impl SequenceId {
         }
     }
 
-    pub fn to_wire(&self) -> [u8; 2] {
+    pub fn to_be_bytes(&self) -> [u8; 2] {
         self.id.to_be_bytes()
     }
 }
@@ -191,9 +192,6 @@ pub struct AnnounceMessage {
 }
 
 impl AnnounceMessage {
-    const SEQUENCE_ID_RANGE: std::ops::Range<usize> = 30..32;
-    const FOREIGN_CLOCK_RANGE: std::ops::Range<usize> = 47..61;
-
     pub fn new(sequence_id: SequenceId, foreign_clock: ForeignClockDS) -> Self {
         Self {
             sequence_id,
@@ -202,12 +200,9 @@ impl AnnounceMessage {
     }
 
     pub fn from_slice(buf: &[u8]) -> Result<Self> {
-        let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
-        let foreign_clock = ForeignClockDS::from_slice(
-            &buf[Self::FOREIGN_CLOCK_RANGE]
-                .try_into()
-                .map_err(|_| ParseError::BadLength)?,
-        );
+        let sequence_id = SequenceId::try_from(&buf[30..32])?;
+        let foreign_clock =
+            ForeignClockDS::from_slice(&buf[47..61].try_into().map_err(|_| ParseError::BadLength)?);
 
         Ok(Self {
             sequence_id,
@@ -225,17 +220,17 @@ impl AnnounceMessage {
         }
     }
 
-    // pub fn foreign_clock(&self) -> &ForeignClockDS {
-    //     &self.foreign_clock
-    // }
+    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+        let mut payload = buf
+            .typed(0x0B, 0x05)
+            .flagged(0)
+            .sequenced(self.sequence_id)
+            .payload();
 
-    pub fn to_wire(&self) -> [u8; 64] {
-        let mut buf = [0; 64];
-        buf[0] = 0x0B & 0x0F;
-        buf[Self::SEQUENCE_ID_RANGE].copy_from_slice(&self.sequence_id.to_wire());
-        buf[Self::FOREIGN_CLOCK_RANGE].copy_from_slice(&self.foreign_clock.to_bytes());
+        let payload_buf = payload.buf();
+        payload_buf[13..27].copy_from_slice(&self.foreign_clock.to_bytes());
 
-        buf
+        payload.finalize(30)
     }
 }
 
@@ -245,14 +240,12 @@ pub struct TwoStepSyncMessage {
 }
 
 impl TwoStepSyncMessage {
-    const SEQUENCE_ID_RANGE: std::ops::Range<usize> = 30..32;
-
     pub fn new(sequence_id: SequenceId) -> Self {
         Self { sequence_id }
     }
 
     pub fn from_slice(buf: &[u8]) -> Result<Self> {
-        let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
+        let sequence_id = SequenceId::try_from(&buf[30..32])?;
 
         Ok(Self { sequence_id })
     }
@@ -261,12 +254,14 @@ impl TwoStepSyncMessage {
         FollowUpMessage::new(self.sequence_id, precise_origin_timestamp)
     }
 
-    pub fn to_wire(&self) -> [u8; 64] {
-        let mut buf = [0; 64];
-        buf[0] = 0x00;
-        buf[Self::SEQUENCE_ID_RANGE].copy_from_slice(&self.sequence_id.to_wire());
+    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+        let payload = buf
+            .typed(0x00, 0x00)
+            .flagged(0x0002)
+            .sequenced(self.sequence_id)
+            .payload();
 
-        buf
+        payload.finalize(10)
     }
 }
 
@@ -277,9 +272,6 @@ pub struct FollowUpMessage {
 }
 
 impl FollowUpMessage {
-    const SEQUENCE_ID_RANGE: std::ops::Range<usize> = 30..32;
-    const PRECISE_ORIGIN_TIMESTAMP_RANGE: std::ops::Range<usize> = 34..44;
-
     pub fn new(sequence_id: SequenceId, precise_origin_timestamp: TimeStamp) -> Self {
         Self {
             sequence_id,
@@ -288,9 +280,9 @@ impl FollowUpMessage {
     }
 
     pub fn from_slice(buf: &[u8]) -> Result<Self> {
-        let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
+        let sequence_id = SequenceId::try_from(&buf[30..32])?;
         let wire_timestamp = WireTimeStamp::new(
-            buf.get(Self::PRECISE_ORIGIN_TIMESTAMP_RANGE)
+            buf.get(34..44)
                 .ok_or(ParseError::BadLength)?
                 .try_into()
                 .map_err(|_| ParseError::BadLength)?,
@@ -315,13 +307,17 @@ impl FollowUpMessage {
         }
     }
 
-    pub fn to_wire(&self) -> [u8; 64] {
-        let mut buf = [0; 64];
-        buf[0] = 0x08 & 0x0F;
-        buf[Self::SEQUENCE_ID_RANGE].copy_from_slice(&self.sequence_id.to_wire());
-        buf[Self::PRECISE_ORIGIN_TIMESTAMP_RANGE]
-            .copy_from_slice(&self.precise_origin_timestamp.to_wire());
-        buf
+    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+        let mut payload = buf
+            .typed(0x08, 0x02)
+            .flagged(0)
+            .sequenced(self.sequence_id)
+            .payload();
+
+        let payload_buf = payload.buf();
+        payload_buf[..10].copy_from_slice(&self.precise_origin_timestamp.to_wire());
+
+        payload.finalize(10)
     }
 }
 
@@ -331,14 +327,12 @@ pub struct DelayRequestMessage {
 }
 
 impl DelayRequestMessage {
-    const SEQUENCE_ID_RANGE: std::ops::Range<usize> = 30..32;
-
     pub fn new(sequence_id: SequenceId) -> Self {
         Self { sequence_id }
     }
 
     pub fn from_slice(buf: &[u8]) -> Result<Self> {
-        let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
+        let sequence_id = SequenceId::try_from(&buf[30..32])?;
 
         Ok(Self { sequence_id })
     }
@@ -347,12 +341,14 @@ impl DelayRequestMessage {
         DelayResponseMessage::new(self.sequence_id, receive_timestamp)
     }
 
-    pub fn to_wire(&self) -> [u8; 64] {
-        let mut buf = [0; 64];
-        buf[0] = 0x01 & 0x0F;
-        buf[Self::SEQUENCE_ID_RANGE].copy_from_slice(&self.sequence_id.to_wire());
+    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+        let payload = buf
+            .typed(0x01, 0x01)
+            .flagged(0)
+            .sequenced(self.sequence_id)
+            .payload();
 
-        buf
+        payload.finalize(10)
     }
 }
 
@@ -363,9 +359,6 @@ pub struct DelayResponseMessage {
 }
 
 impl DelayResponseMessage {
-    const SEQUENCE_ID_RANGE: std::ops::Range<usize> = 30..32;
-    const RECEIVE_TIMESTAMP_RANGE: std::ops::Range<usize> = 34..44;
-
     pub fn new(sequence_id: SequenceId, receive_timestamp: TimeStamp) -> Self {
         Self {
             sequence_id,
@@ -374,9 +367,9 @@ impl DelayResponseMessage {
     }
 
     pub fn from_slice(buf: &[u8]) -> Result<Self> {
-        let sequence_id = SequenceId::try_from(&buf[Self::SEQUENCE_ID_RANGE])?;
+        let sequence_id = SequenceId::try_from(&buf[30..32])?;
         let wire_timestamp = WireTimeStamp::new(
-            buf.get(Self::RECEIVE_TIMESTAMP_RANGE)
+            buf.get(34..44)
                 .ok_or(ParseError::BadLength)?
                 .try_into()
                 .map_err(|_| ParseError::BadLength)?,
@@ -401,13 +394,17 @@ impl DelayResponseMessage {
         }
     }
 
-    pub fn to_wire(&self) -> [u8; 64] {
-        let mut buf = [0; 64];
-        buf[0] = 0x09 & 0x0F;
-        buf[Self::SEQUENCE_ID_RANGE].copy_from_slice(&self.sequence_id.to_wire());
-        buf[Self::RECEIVE_TIMESTAMP_RANGE].copy_from_slice(&self.receive_timestamp.to_wire());
+    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+        let mut payload = buf
+            .typed(0x09, 0x03)
+            .flagged(0)
+            .sequenced(self.sequence_id)
+            .payload();
 
-        buf
+        let payload_buf = payload.buf();
+        payload_buf[..10].copy_from_slice(&self.receive_timestamp.to_wire());
+
+        payload.finalize(20)
     }
 }
 
@@ -521,6 +518,7 @@ mod tests {
     use super::*;
 
     use crate::clock::{ClockIdentity, ClockQuality};
+    use crate::port::PortNumber;
 
     #[test]
     fn announce_message_wire_roundtrip() {
@@ -533,7 +531,15 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
         );
-        let wire = announce.to_wire();
+
+        let mut buf = MessageBuffer::new(
+            0,
+            2,
+            0,
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
+            0x7F,
+        );
+        let wire = announce.serialize(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, GeneralMessage::Announce(announce));
@@ -542,7 +548,14 @@ mod tests {
     #[test]
     fn two_step_sync_message_wire_roundtrip() {
         let sync = TwoStepSyncMessage::new(42.into());
-        let wire = sync.to_wire();
+        let mut buf = MessageBuffer::new(
+            0,
+            2,
+            0,
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
+            0x7F,
+        );
+        let wire = sync.serialize(&mut buf);
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, EventMessage::TwoStepSync(sync));
@@ -551,7 +564,14 @@ mod tests {
     #[test]
     fn follow_up_message_wire_roundtrip() {
         let follow_up = FollowUpMessage::new(42.into(), TimeStamp::new(1, 2));
-        let wire = follow_up.to_wire();
+        let mut buf = MessageBuffer::new(
+            0,
+            2,
+            0,
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
+            0x7F,
+        );
+        let wire = follow_up.serialize(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, GeneralMessage::FollowUp(follow_up));
@@ -560,7 +580,14 @@ mod tests {
     #[test]
     fn delay_request_message_wire_roundtrip() {
         let delay_req = DelayRequestMessage::new(42.into());
-        let wire = delay_req.to_wire();
+        let mut buf = MessageBuffer::new(
+            0,
+            2,
+            0,
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
+            0x7F,
+        );
+        let wire = delay_req.serialize(&mut buf);
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, EventMessage::DelayReq(delay_req));
@@ -569,7 +596,14 @@ mod tests {
     #[test]
     fn delay_response_message_wire_roundtrip() {
         let delay_resp = DelayResponseMessage::new(42.into(), TimeStamp::new(1, 2));
-        let wire = delay_resp.to_wire();
+        let mut buf = MessageBuffer::new(
+            0,
+            2,
+            0,
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
+            0x7F,
+        );
+        let wire = delay_resp.serialize(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, GeneralMessage::DelayResp(delay_resp));

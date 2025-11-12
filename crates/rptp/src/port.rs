@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use crate::bmca::Bmca;
+use crate::buffer::MessageBuffer;
 use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::PortState;
@@ -167,21 +168,27 @@ impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost> Port
     }
 
     fn send_event(&self, msg: EventMessage) {
-        let mut buf = msg.to_wire();
-        buf[4] = self.domain_number;
-        buf[20..30].copy_from_slice(
-            &PortIdentity::new(*self.local_clock().identity(), self.port_number).to_bytes(),
+        let mut buf = MessageBuffer::new(
+            0,
+            2,
+            self.domain_number,
+            PortIdentity::new(*self.local_clock.identity(), self.port_number),
+            0x7F,
         );
-        self.physical_port.send_event(&buf);
+        let finalized = msg.serialize(&mut buf);
+        self.physical_port.send_event(finalized.as_ref());
     }
 
     fn send_general(&self, msg: GeneralMessage) {
-        let mut buf = msg.to_wire();
-        buf[4] = self.domain_number;
-        buf[20..30].copy_from_slice(
-            &PortIdentity::new(*self.local_clock().identity(), self.port_number).to_bytes(),
+        let mut buf = MessageBuffer::new(
+            0,
+            2,
+            self.domain_number,
+            PortIdentity::new(*self.local_clock.identity(), self.port_number),
+            0x7F,
         );
-        self.physical_port.send_general(&buf);
+        let finalized = msg.serialize(&mut buf);
+        self.physical_port.send_general(finalized.as_ref());
     }
 
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout {
@@ -250,6 +257,105 @@ impl<P: Port> PortIngress for Option<PortState<P>> {
         *self = self
             .take()
             .and_then(|state| Some(state.process_system_message(msg)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use self::test_support::FakeTimerHost;
+
+    use crate::bmca::{LocalClockDS, NoopBmca};
+    use crate::clock::{ClockQuality, FakeClock};
+    use crate::message::{DelayRequestMessage, FollowUpMessage};
+
+    struct CapturePort {
+        sent: Rc<RefCell<Vec<Vec<u8>>>>,
+    }
+
+    impl CapturePort {
+        fn new() -> (Self, Rc<RefCell<Vec<Vec<u8>>>>) {
+            let rc = Rc::new(RefCell::new(Vec::new()));
+            (Self { sent: rc.clone() }, rc)
+        }
+    }
+
+    impl PhysicalPort for CapturePort {
+        fn send_event(&self, buf: &[u8]) {
+            self.sent.borrow_mut().push(buf.to_vec());
+        }
+        fn send_general(&self, buf: &[u8]) {
+            self.sent.borrow_mut().push(buf.to_vec());
+        }
+    }
+
+    #[test]
+    fn port_sets_domain_and_identity_on_event() {
+        let identity = ClockIdentity::new(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            LocalClockDS::new(identity, ClockQuality::new(248, 0xFE, 0xFFFF)),
+        );
+        let (cap_port, sent) = CapturePort::new();
+        let timer_host = FakeTimerHost::new();
+        let domain_number = 3u8;
+        let port_number = PortNumber::new(5);
+
+        let port = DomainPort::new(
+            &local_clock,
+            NoopBmca,
+            cap_port,
+            &timer_host,
+            domain_number,
+            port_number,
+        );
+
+        port.send_event(EventMessage::DelayReq(DelayRequestMessage::new(42.into())));
+        let bufs = sent.borrow();
+        assert!(!bufs.is_empty());
+        let bytes = &bufs[0];
+        assert_eq!(bytes[4], domain_number);
+        assert_eq!(
+            &bytes[20..30],
+            &crate::port::PortIdentity::new(identity, port_number).to_bytes()
+        );
+    }
+
+    #[test]
+    fn port_sets_domain_and_identity_on_general() {
+        let identity = ClockIdentity::new(&[8, 7, 6, 5, 4, 3, 2, 1]);
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            LocalClockDS::new(identity, ClockQuality::new(248, 0xFE, 0xFFFF)),
+        );
+        let (cap_port, sent) = CapturePort::new();
+        let timer_host = FakeTimerHost::new();
+        let domain_number = 9u8;
+        let port_number = PortNumber::new(2);
+
+        let port = DomainPort::new(
+            &local_clock,
+            NoopBmca,
+            cap_port,
+            &timer_host,
+            domain_number,
+            port_number,
+        );
+
+        let follow = FollowUpMessage::new(7.into(), TimeStamp::new(1, 2));
+        port.send_general(GeneralMessage::FollowUp(follow));
+        let bufs = sent.borrow();
+        assert!(!bufs.is_empty());
+        let bytes = &bufs[0];
+        assert_eq!(bytes[4], domain_number);
+        assert_eq!(
+            &bytes[20..30],
+            &crate::port::PortIdentity::new(identity, port_number).to_bytes()
+        );
     }
 }
 

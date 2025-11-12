@@ -1,4 +1,5 @@
 pub mod bmca;
+pub mod buffer;
 pub mod clock;
 pub mod infra;
 pub mod message;
