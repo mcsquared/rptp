@@ -274,7 +274,7 @@ mod tests {
 
     use rptp::bmca::LocalClockDS;
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
-    use rptp::message::{DelayCycleMessage, EventMessage, GeneralMessage, SyncCycleMessage};
+    use rptp::message::{DelayCycleMessage, EventMessage, GeneralMessage};
     use rptp::port::{DomainPort, Port, PortNumber};
     use rptp::portstate::PortState;
 
@@ -333,13 +333,7 @@ mod tests {
             domain_number,
             PortNumber::new(1),
         );
-        let announce_send_timeout =
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(1));
-        let sync_cycle_timeout = domain_port.timeout(
-            SystemMessage::SyncCycle(SyncCycleMessage::new(0.into())),
-            Duration::from_secs(0),
-        );
-        let port_state = PortState::master(domain_port, announce_send_timeout, sync_cycle_timeout);
+        let port_state = PortState::master(domain_port);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(
             &local_clock,
