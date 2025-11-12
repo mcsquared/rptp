@@ -1445,4 +1445,141 @@ mod tests {
         // With correct filtering, the local clock should remain unchanged
         assert_eq!(local_clock.now(), TimeStamp::new(0, 0));
     }
+
+    #[test]
+    fn slave_port_ignores_event_messages_from_non_parent() {
+        use crate::message::{EventMessage, FollowUpMessage, GeneralMessage, TwoStepSyncMessage};
+
+        let local_clock = LocalClock::new(
+            FakeClock::new(TimeStamp::new(0, 0)),
+            LocalClockDS::mid_grade_test_clock(),
+        );
+        let port = FakePort::new();
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            bmca,
+            &port,
+            &timer_host,
+            0,
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+        let delay_cycle_timeout = domain_port.timeout(
+            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        // Define a parent and a different non-parent identity
+        let parent = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0xAA, 0xAA, 0xAA]),
+            PortNumber::new(1),
+        );
+        let non_parent = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0xBB, 0xBB, 0xBB]),
+            PortNumber::new(1),
+        );
+
+        // Create slave with chosen parent
+        let mut slave = PortState::Slave(
+            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle_timeout)
+                .with_parent(parent),
+        );
+
+        // Send a FollowUp from the parent first (ms offset incomplete without sync)
+        slave = slave.process_general_message(
+            parent,
+            GeneralMessage::FollowUp(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0))),
+        );
+
+        // Now send TwoStepSync from a non-parent; should be ignored
+        slave = slave.process_event_message(
+            non_parent,
+            EventMessage::TwoStepSync(TwoStepSyncMessage::new(1.into())),
+            TimeStamp::new(2, 0),
+        );
+
+        // Even if delay path completes, estimate should not trigger without accepted sync
+        slave = slave.process_system_message(SystemMessage::Timestamp {
+            msg: EventMessage::DelayReq(DelayRequestMessage::new(2.into())),
+            timestamp: TimeStamp::new(0, 0),
+        });
+        let _ = slave.process_general_message(
+            parent,
+            GeneralMessage::DelayResp(DelayResponseMessage::new(2.into(), TimeStamp::new(2, 0))),
+        );
+
+        // Local clock remains unchanged
+        assert_eq!(local_clock.now(), TimeStamp::new(0, 0));
+    }
+
+    #[test]
+    fn slave_port_disciplines_on_matching_conversation() {
+        use crate::message::{
+            DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage, GeneralMessage,
+            TwoStepSyncMessage,
+        };
+
+        let local_clock = LocalClock::new(
+            FakeClock::new(TimeStamp::new(0, 0)),
+            LocalClockDS::mid_grade_test_clock(),
+        );
+        let port = FakePort::new();
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            bmca,
+            &port,
+            &timer_host,
+            0,
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+        let delay_cycle_timeout = domain_port.timeout(
+            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
+            Duration::from_secs(0),
+        );
+
+        // Parent identity
+        let parent = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0xCC, 0xCC, 0xCC]),
+            PortNumber::new(1),
+        );
+
+        // Create slave with parent
+        let mut slave = PortState::Slave(
+            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle_timeout)
+                .with_parent(parent),
+        );
+
+        // Matching conversation from the parent (numbers chosen to yield estimate 2s)
+        slave = slave.process_event_message(
+            parent,
+            EventMessage::TwoStepSync(TwoStepSyncMessage::new(42.into())),
+            TimeStamp::new(1, 0),
+        );
+        slave = slave.process_general_message(
+            parent,
+            GeneralMessage::FollowUp(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0))),
+        );
+        slave = slave.process_system_message(SystemMessage::Timestamp {
+            msg: EventMessage::DelayReq(DelayRequestMessage::new(43.into())),
+            timestamp: TimeStamp::new(0, 0),
+        });
+        let _ = slave.process_general_message(
+            parent,
+            GeneralMessage::DelayResp(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0))),
+        );
+
+        // Local clock disciplined to the estimate
+        assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
+    }
 }
