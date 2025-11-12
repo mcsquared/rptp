@@ -782,4 +782,40 @@ mod tests {
 
         assert_eq!(offset, None);
     }
+
+    #[test]
+    fn sequence_id_follows_next_for_all_values() {
+        for id in 0u16..=u16::MAX {
+            let a: SequenceId = id.into();
+            let b = a.next();
+            assert!(b.follows(a), "next({id}) should follow {id}");
+            assert!(!a.follows(a));
+        }
+    }
+
+    #[test]
+    fn sequence_id_roundtrip_to_from_be_bytes() {
+        let samples = [0u16, 1, 2, 7, 42, 255, 256, 1024, 4096, 32767, 65534, 65535];
+        for &id in &samples {
+            let sid: SequenceId = id.into();
+            let bytes = sid.to_be_bytes();
+            let parsed = SequenceId::try_from(&bytes[..]).unwrap();
+            assert_eq!(parsed, sid);
+        }
+    }
+
+    #[test]
+    fn sequence_id_does_not_follow_on_gap() {
+        let a: SequenceId = 10u16.into();
+        let c: SequenceId = 12u16.into();
+        assert!(!c.follows(a));
+    }
+
+    #[test]
+    fn sequence_id_wraps() {
+        let a: SequenceId = u16::MAX.into();
+        let b: SequenceId = 0u16.into();
+        assert!(b.follows(a));
+        assert_eq!(a.next(), b);
+    }
 }
