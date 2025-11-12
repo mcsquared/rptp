@@ -410,7 +410,7 @@ impl DelayResponseMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SyncCycleMessage {
-    pub sequence_id: SequenceId,
+    sequence_id: SequenceId,
 }
 
 impl SyncCycleMessage {
@@ -431,7 +431,7 @@ impl SyncCycleMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayCycleMessage {
-    pub sequence_id: SequenceId,
+    sequence_id: SequenceId,
 }
 
 impl DelayCycleMessage {
