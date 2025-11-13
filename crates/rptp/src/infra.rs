@@ -2,8 +2,9 @@ pub mod infra_support {
     use std::rc::Rc;
 
     use crate::bmca::{ForeignClockRecord, SortedForeignClockRecords};
-    use crate::clock::{Clock, FakeClock, SynchronizableClock};
-    use crate::port::PortIdentity;
+    use crate::clock::{Clock, FakeClock, LocalClock, SynchronizableClock};
+    use crate::message::{EventMessage, GeneralMessage, SystemMessage};
+    use crate::port::{Port, PortIdentity};
     use crate::time::TimeStamp;
 
     impl Clock for Rc<dyn SynchronizableClock> {
@@ -21,6 +22,33 @@ pub mod infra_support {
     impl Clock for Rc<FakeClock> {
         fn now(&self) -> TimeStamp {
             self.as_ref().now()
+        }
+    }
+
+    impl<P: Port> Port for Box<P> {
+        type Clock = P::Clock;
+        type PhysicalPort = P::PhysicalPort;
+        type Bmca = P::Bmca;
+        type Timeout = P::Timeout;
+
+        fn local_clock(&self) -> &LocalClock<Self::Clock> {
+            self.as_ref().local_clock()
+        }
+
+        fn bmca(&self) -> &Self::Bmca {
+            self.as_ref().bmca()
+        }
+
+        fn send_event(&self, msg: EventMessage) {
+            self.as_ref().send_event(msg)
+        }
+
+        fn send_general(&self, msg: GeneralMessage) {
+            self.as_ref().send_general(msg)
+        }
+
+        fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout {
+            self.as_ref().timeout(msg, delay)
         }
     }
 

@@ -19,7 +19,7 @@ async fn main() -> std::io::Result<()> {
     let domain = 0;
 
     let local_clock = LocalClock::new(
-        Rc::new(FakeClock::default()),
+        FakeClock::default(),
         LocalClockDS::new(
             ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             127,

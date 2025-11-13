@@ -8,7 +8,7 @@ use rptp::port::TimerHost;
 use tokio::sync::mpsc;
 
 use rptp::{
-    clock::{FakeClock, LocalClock},
+    clock::LocalClock,
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{DomainMessage, EventMessage, SystemMessage},
     port::{DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
@@ -152,15 +152,17 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> PhysicalPort for TokioPhysica
     }
 }
 
-pub struct TokioPortsLoop<'a, N: NetworkSocket> {
-    local_clock: &'a LocalClock<Rc<FakeClock>>,
+pub struct TokioPortsLoop<'a, C: SynchronizableClock, N: NetworkSocket> {
+    local_clock: &'a LocalClock<C>,
     portmap: SingleDomainPortMap<
-        DomainPort<
-            'a,
-            Rc<FakeClock>,
-            FullBmca<SortedForeignClockRecordsVec>,
-            TokioPhysicalPort<'a, Rc<FakeClock>, N>,
-            TokioTimerHost,
+        Box<
+            DomainPort<
+                'a,
+                C,
+                FullBmca<SortedForeignClockRecordsVec>,
+                TokioPhysicalPort<'a, C, N>,
+                TokioTimerHost,
+            >,
         >,
     >,
     event_socket: Rc<N>,
@@ -168,16 +170,18 @@ pub struct TokioPortsLoop<'a, N: NetworkSocket> {
     system_rx: mpsc::UnboundedReceiver<(u8, SystemMessage)>,
 }
 
-impl<'a, N: NetworkSocket> TokioPortsLoop<'a, N> {
+impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
     pub async fn new(
-        local_clock: &'a LocalClock<Rc<FakeClock>>,
+        local_clock: &'a LocalClock<C>,
         portmap: SingleDomainPortMap<
-            DomainPort<
-                'a,
-                Rc<FakeClock>,
-                FullBmca<SortedForeignClockRecordsVec>,
-                TokioPhysicalPort<'a, Rc<FakeClock>, N>,
-                TokioTimerHost,
+            Box<
+                DomainPort<
+                    'a,
+                    C,
+                    FullBmca<SortedForeignClockRecordsVec>,
+                    TokioPhysicalPort<'a, C, N>,
+                    TokioTimerHost,
+                >,
             >,
         >,
         event_socket: Rc<N>,
@@ -280,17 +284,19 @@ mod tests {
         use std::mem::size_of;
         let s = size_of::<
             PortState<
-                DomainPort<
-                    '_,
-                    Rc<FakeClock>,
-                    FullBmca<SortedForeignClockRecordsVec>,
-                    Box<TokioPhysicalPort<'_, Rc<FakeClock>, MulticastSocket>>,
-                    TokioTimerHost,
+                Box<
+                    DomainPort<
+                        '_,
+                        FakeClock,
+                        FullBmca<SortedForeignClockRecordsVec>,
+                        TokioPhysicalPort<'_, FakeClock, MulticastSocket>,
+                        TokioTimerHost,
+                    >,
                 >,
             >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
-        assert!(s <= 512);
+        assert!(s <= 256);
     }
 
     #[tokio::test(start_paused = true)]
@@ -303,7 +309,7 @@ mod tests {
         let domain_number = 0;
 
         let local_clock = LocalClock::new(
-            Rc::new(FakeClock::default()),
+            FakeClock::default(),
             LocalClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
                 127,
@@ -320,14 +326,14 @@ mod tests {
             general_socket.clone(),
             system_tx.clone(),
         );
-        let domain_port = DomainPort::new(
+        let domain_port = Box::new(DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             domain_number,
             PortNumber::new(1),
-        );
+        ));
         let port_state = PortState::master(domain_port);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(
@@ -387,7 +393,7 @@ mod tests {
         let domain_number = 0;
 
         let local_clock = LocalClock::new(
-            Rc::new(FakeClock::default()),
+            FakeClock::default(),
             LocalClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
                 127,
@@ -404,14 +410,14 @@ mod tests {
             general_socket.clone(),
             system_tx.clone(),
         );
-        let domain_port = DomainPort::new(
+        let domain_port = Box::new(DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             domain_number,
             PortNumber::new(1),
-        );
+        ));
         let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(10),
