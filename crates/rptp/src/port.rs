@@ -10,7 +10,6 @@ use crate::time::TimeStamp;
 
 pub trait Timeout {
     fn restart(&self, timeout: std::time::Duration);
-    fn restart_with(&self, msg: SystemMessage, timeout: std::time::Duration);
 }
 
 pub trait PhysicalPort {
@@ -371,16 +370,17 @@ pub mod test_support {
 
     use super::Timeout;
 
+    #[derive(Debug)]
     pub struct FakeTimeout {
         msg: RefCell<SystemMessage>,
         system_messages: Rc<RefCell<Vec<SystemMessage>>>,
     }
 
     impl FakeTimeout {
-        pub fn new(msg: SystemMessage, system_messages: Rc<RefCell<Vec<SystemMessage>>>) -> Self {
+        pub fn new(msg: SystemMessage) -> Self {
             Self {
                 msg: RefCell::new(msg),
-                system_messages,
+                system_messages: Rc::new(RefCell::new(Vec::new())),
             }
         }
 
@@ -406,10 +406,11 @@ pub mod test_support {
             let msg = *self.msg.borrow();
             self.system_messages.borrow_mut().push(msg);
         }
+    }
 
-        fn restart_with(&self, msg: SystemMessage, _timeout: Duration) {
-            self.system_messages.borrow_mut().push(msg);
-            self.msg.replace(msg);
+    impl PartialEq for FakeTimeout {
+        fn eq(&self, other: &Self) -> bool {
+            *self.msg.borrow() == *other.msg.borrow()
         }
     }
 

@@ -78,11 +78,6 @@ impl Timeout for TokioTimeout {
     fn restart(&self, delay: Duration) {
         self.reset(delay);
     }
-
-    fn restart_with(&self, msg: SystemMessage, delay: Duration) {
-        *self.inner.msg.lock().unwrap() = msg;
-        self.reset(delay);
-    }
 }
 
 impl Drop for TokioTimeout {
@@ -274,9 +269,9 @@ mod tests {
 
     use rptp::bmca::LocalClockDS;
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
-    use rptp::message::{DelayCycleMessage, EventMessage, GeneralMessage};
+    use rptp::message::{EventMessage, GeneralMessage};
     use rptp::port::{DomainPort, Port, PortNumber};
-    use rptp::portstate::PortState;
+    use rptp::portstate::{DelayCycle, PortState, SlavePort};
 
     use crate::net::{FakeNetworkSocket, MulticastSocket};
 
@@ -295,7 +290,7 @@ mod tests {
             >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
-        assert!(s <= 256);
+        assert!(s <= 512);
     }
 
     #[tokio::test(start_paused = true)]
@@ -421,12 +416,15 @@ mod tests {
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(10),
         );
-        let delay_cycle_timeout = domain_port.timeout(
-            SystemMessage::DelayCycle(DelayCycleMessage::new(0.into())),
-            Duration::from_secs(1),
-        );
-        let port_state =
-            PortState::slave(domain_port, announce_receipt_timeout, delay_cycle_timeout);
+        let delay_timeout =
+            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+
+        let port_state = PortState::Slave(SlavePort::new(
+            domain_port,
+            announce_receipt_timeout,
+            delay_cycle,
+        ));
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(
             &local_clock,

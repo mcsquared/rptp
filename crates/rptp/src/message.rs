@@ -71,8 +71,8 @@ pub enum GeneralMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemMessage {
     AnnounceSendTimeout,
-    DelayCycle(DelayCycleMessage),
-    SyncCycle(SyncCycleMessage),
+    DelayRequestTimeout,
+    SyncTimeout,
     Timestamp {
         msg: EventMessage,
         timestamp: TimeStamp,
@@ -409,48 +409,6 @@ impl DelayResponseMessage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SyncCycleMessage {
-    sequence_id: SequenceId,
-}
-
-impl SyncCycleMessage {
-    pub fn new(start: SequenceId) -> Self {
-        Self { sequence_id: start }
-    }
-
-    pub fn next(self) -> Self {
-        Self {
-            sequence_id: self.sequence_id.next(),
-        }
-    }
-
-    pub fn two_step_sync(&self) -> TwoStepSyncMessage {
-        TwoStepSyncMessage::new(self.sequence_id)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DelayCycleMessage {
-    sequence_id: SequenceId,
-}
-
-impl DelayCycleMessage {
-    pub fn new(start: SequenceId) -> Self {
-        Self { sequence_id: start }
-    }
-
-    pub fn next(self) -> Self {
-        Self {
-            sequence_id: self.sequence_id.next(),
-        }
-    }
-
-    pub fn delay_request(&self) -> DelayRequestMessage {
-        DelayRequestMessage::new(self.sequence_id)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WireTimeStamp<'a> {
     buf: &'a [u8; 10],
 }
@@ -693,54 +651,6 @@ mod tests {
         let offset = delay_resp.slave_master_offset(delay_req, delay_req_egress_timestamp);
 
         assert_eq!(offset, None);
-    }
-
-    #[test]
-    fn sync_cycle_message_produces_two_step_sync_message() {
-        let sync_cycle = SyncCycleMessage::new(0.into());
-        let two_step_sync = sync_cycle.two_step_sync();
-
-        assert_eq!(two_step_sync, TwoStepSyncMessage::new(0.into()));
-    }
-
-    #[test]
-    fn sync_cycle_next() {
-        let sync_cycle = SyncCycleMessage::new(0.into());
-        let next = sync_cycle.next();
-
-        assert_eq!(next, SyncCycleMessage::new(1.into()));
-    }
-
-    #[test]
-    fn sync_cycle_next_wraps() {
-        let sync_cycle = SyncCycleMessage::new(u16::MAX.into());
-        let next = sync_cycle.next();
-
-        assert_eq!(next, SyncCycleMessage::new(0.into()));
-    }
-
-    #[test]
-    fn delay_cycle_message_produces_delay_request_message() {
-        let delay_cycle = DelayCycleMessage::new(0.into());
-        let delay_request = delay_cycle.delay_request();
-
-        assert_eq!(delay_request, DelayRequestMessage::new(0.into()));
-    }
-
-    #[test]
-    fn delay_cycle_next() {
-        let delay_cycle = DelayCycleMessage::new(0.into());
-        let next = delay_cycle.next();
-
-        assert_eq!(next, DelayCycleMessage::new(1.into()));
-    }
-
-    #[test]
-    fn delay_cycle_next_wraps() {
-        let delay_cycle = DelayCycleMessage::new(u16::MAX.into());
-        let next = delay_cycle.next();
-
-        assert_eq!(next, DelayCycleMessage::new(0.into()));
     }
 
     #[test]
