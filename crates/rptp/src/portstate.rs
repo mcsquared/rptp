@@ -3,12 +3,20 @@ use std::time::Duration;
 use crate::bmca::{Bmca, BmcaRecommendation};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::message::{
-    AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId, SystemMessage,
-    TwoStepSyncMessage,
+    AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
+    GeneralMessage, SequenceId, SystemMessage, TwoStepSyncMessage,
 };
 use crate::port::{Port, PortIdentity, Timeout};
 use crate::sync::MasterEstimate;
 use crate::time::TimeStamp;
+
+pub enum StateTransition {
+    ToMaster,
+    ToSlave,
+    ToUncalibrated,
+    ToPreMaster,
+    ToListening,
+}
 
 pub enum PortState<P: Port> {
     Initializing(InitializingPort<P>),
@@ -73,40 +81,63 @@ impl<P: Port> PortState<P> {
         PortState::Uncalibrated(UncalibratedPort::new(port, announce_receipt_timeout))
     }
 
-    pub fn process_event_message(
-        self,
-        source_port_identity: PortIdentity,
-        msg: EventMessage,
-        timestamp: TimeStamp,
-    ) -> Self {
-        match self {
-            PortState::Initializing(_) => self,
-            PortState::Listening(_) => self,
-            PortState::Slave(port) => {
-                port.process_event_message(source_port_identity, msg, timestamp)
-            }
-            PortState::Master(port) => {
-                port.process_event_message(source_port_identity, msg, timestamp)
-            }
-            PortState::PreMaster(_) => self,
-            PortState::Uncalibrated(_) => self,
-        }
-    }
-
-    pub fn process_general_message(
-        self,
-        source_port_identity: PortIdentity,
-        msg: GeneralMessage,
-    ) -> Self {
-        match self {
-            PortState::Initializing(_) => self,
-            PortState::Listening(port) => port.process_general_message(source_port_identity, msg),
-            PortState::Slave(port) => port.process_general_message(source_port_identity, msg),
-            PortState::Master(port) => port.process_general_message(source_port_identity, msg),
-            PortState::PreMaster(_) => self,
-            PortState::Uncalibrated(port) => {
-                port.process_general_message(source_port_identity, msg)
-            }
+    pub fn transit(self, transition: StateTransition) -> Self {
+        match transition {
+            StateTransition::ToMaster => match self {
+                PortState::Listening(port) => PortState::master(port.port),
+                PortState::Slave(port) => PortState::master(port.port),
+                PortState::PreMaster(port) => PortState::master(port.port),
+                PortState::Uncalibrated(port) => PortState::master(port.port),
+                _ => self,
+            },
+            StateTransition::ToSlave => match self {
+                PortState::Listening(listening) => {
+                    let delay_cycle = DelayCycle::new(
+                        0.into(),
+                        listening
+                            .port
+                            .timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0)),
+                    );
+                    PortState::Slave(SlavePort::new(
+                        listening.port,
+                        listening.announce_receipt_timeout,
+                        delay_cycle,
+                    ))
+                }
+                PortState::Uncalibrated(uncalibrated) => {
+                    let delay_cycle = DelayCycle::new(
+                        0.into(),
+                        uncalibrated
+                            .port
+                            .timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0)),
+                    );
+                    PortState::Slave(SlavePort::new(
+                        uncalibrated.port,
+                        uncalibrated.announce_receipt_timeout,
+                        delay_cycle,
+                    ))
+                }
+                _ => self,
+            },
+            StateTransition::ToUncalibrated => match self {
+                PortState::Listening(listening) => PortState::Uncalibrated(UncalibratedPort::new(
+                    listening.port,
+                    listening.announce_receipt_timeout,
+                )),
+                PortState::Master(master) => PortState::uncalibrated(master.port),
+                _ => self,
+            },
+            StateTransition::ToPreMaster => match self {
+                PortState::Listening(listening) => PortState::pre_master(listening.port),
+                _ => self,
+            },
+            StateTransition::ToListening => match self {
+                PortState::Uncalibrated(uncalibrated) => PortState::Listening(ListeningPort::new(
+                    uncalibrated.port,
+                    uncalibrated.announce_receipt_timeout,
+                )),
+                _ => self,
+            },
         }
     }
 
@@ -152,27 +183,19 @@ impl<P: Port> ListeningPort<P> {
         }
     }
 
-    fn process_general_message(
-        self,
+    pub fn process_announce(
+        &mut self,
+        msg: AnnounceMessage,
         source_port_identity: PortIdentity,
-        msg: GeneralMessage,
-    ) -> PortState<P> {
-        match msg {
-            GeneralMessage::Announce(msg) => {
-                self.announce_receipt_timeout
-                    .restart(Duration::from_secs(5));
-                self.port.bmca().consider(source_port_identity, msg);
+    ) -> Option<StateTransition> {
+        self.announce_receipt_timeout
+            .restart(Duration::from_secs(5));
+        self.port.bmca().consider(source_port_identity, msg);
 
-                match self.port.bmca().recommendation(self.port.local_clock()) {
-                    BmcaRecommendation::Undecided => PortState::Listening(self),
-                    BmcaRecommendation::Master => PortState::pre_master(self.port),
-                    BmcaRecommendation::Slave(_) => PortState::Uncalibrated(UncalibratedPort::new(
-                        self.port,
-                        self.announce_receipt_timeout,
-                    )),
-                }
-            }
-            _ => PortState::Listening(self),
+        match self.port.bmca().recommendation(self.port.local_clock()) {
+            BmcaRecommendation::Master => Some(StateTransition::ToPreMaster),
+            BmcaRecommendation::Slave(_) => Some(StateTransition::ToUncalibrated),
+            BmcaRecommendation::Undecided => None,
         }
     }
 
@@ -214,6 +237,7 @@ impl<P: Port> SlavePort<P> {
         }
     }
 
+    #[cfg(test)]
     fn with_parent(self, parent_port_identity: PortIdentity) -> Self {
         Self {
             parent_port_identity: Some(parent_port_identity),
@@ -221,66 +245,75 @@ impl<P: Port> SlavePort<P> {
         }
     }
 
-    fn process_event_message(
-        mut self,
+    pub fn process_announce(
+        &mut self,
+        msg: AnnounceMessage,
         source_port_identity: PortIdentity,
-        msg: EventMessage,
-        timestamp: TimeStamp,
-    ) -> PortState<P> {
-        if !self.accepts_from(&source_port_identity) {
-            return PortState::Slave(self);
-        }
+    ) -> Option<StateTransition> {
+        self.announce_receipt_timeout
+            .restart(Duration::from_secs(5));
+        self.port.bmca().consider(source_port_identity, msg);
 
-        match msg {
-            EventMessage::TwoStepSync(sync) => {
-                if let Some(estimate) = self.master_estimate.record_two_step_sync(sync, timestamp) {
-                    self.port.local_clock().discipline(estimate);
-                }
+        match self.port.bmca().recommendation(self.port.local_clock()) {
+            BmcaRecommendation::Master => Some(StateTransition::ToUncalibrated),
+            BmcaRecommendation::Slave(parent) => {
+                self.parent_port_identity = Some(parent);
+                None
             }
-            _ => {}
+            BmcaRecommendation::Undecided => None,
         }
-
-        PortState::Slave(self)
     }
 
-    fn process_general_message(
-        mut self,
+    pub fn process_two_step_sync(
+        &mut self,
+        sync: TwoStepSyncMessage,
         source_port_identity: PortIdentity,
-        msg: GeneralMessage,
-    ) -> PortState<P> {
-        match msg {
-            GeneralMessage::Announce(announce) => {
-                self.announce_receipt_timeout
-                    .restart(Duration::from_secs(5));
-
-                self.port.bmca().consider(source_port_identity, announce);
-
-                match self.port.bmca().recommendation(self.port.local_clock()) {
-                    BmcaRecommendation::Slave(parent) => {
-                        return PortState::Slave(self.with_parent(parent));
-                    }
-                    _ => {} // TODO: handle undecided and master recommendations
-                }
-            }
-            GeneralMessage::FollowUp(follow_up) => {
-                if !self.accepts_from(&source_port_identity) {
-                    return PortState::Slave(self);
-                }
-                if let Some(estimate) = self.master_estimate.record_follow_up(follow_up) {
-                    self.port.local_clock().discipline(estimate);
-                }
-            }
-            GeneralMessage::DelayResp(resp) => {
-                if !self.accepts_from(&source_port_identity) {
-                    return PortState::Slave(self);
-                }
-                if let Some(estimate) = self.master_estimate.record_delay_response(resp) {
-                    self.port.local_clock().discipline(estimate);
-                }
-            }
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateTransition> {
+        if !self.accepts_from(&source_port_identity) {
+            return None;
         }
 
-        PortState::Slave(self)
+        if let Some(estimate) = self
+            .master_estimate
+            .record_two_step_sync(sync, ingress_timestamp)
+        {
+            self.port.local_clock().discipline(estimate);
+        }
+
+        None
+    }
+
+    pub fn process_follow_up(
+        &mut self,
+        follow_up: FollowUpMessage,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateTransition> {
+        if !self.accepts_from(&source_port_identity) {
+            return None;
+        }
+
+        if let Some(estimate) = self.master_estimate.record_follow_up(follow_up) {
+            self.port.local_clock().discipline(estimate);
+        }
+
+        None
+    }
+
+    pub fn process_delay_response(
+        &mut self,
+        resp: DelayResponseMessage,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateTransition> {
+        if !self.accepts_from(&source_port_identity) {
+            return None;
+        }
+
+        if let Some(estimate) = self.master_estimate.record_delay_response(resp) {
+            self.port.local_clock().discipline(estimate);
+        }
+
+        None
     }
 
     fn process_system_message(mut self, msg: SystemMessage) -> PortState<P> {
@@ -332,39 +365,29 @@ impl<P: Port> MasterPort<P> {
         }
     }
 
-    fn process_event_message(
-        self,
-        _source_port_identity: PortIdentity,
-        msg: EventMessage,
-        timestamp: TimeStamp,
-    ) -> PortState<P> {
-        match msg {
-            EventMessage::DelayReq(req) => self
-                .port
-                .send_general(GeneralMessage::DelayResp(req.response(timestamp))),
-            _ => {}
-        }
+    pub fn process_announce(
+        &mut self,
+        msg: AnnounceMessage,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateTransition> {
+        self.port.bmca().consider(source_port_identity, msg);
 
-        PortState::Master(self)
+        match self.port.bmca().recommendation(self.port.local_clock()) {
+            BmcaRecommendation::Undecided => None,
+            BmcaRecommendation::Slave(_) => Some(StateTransition::ToUncalibrated),
+            BmcaRecommendation::Master => None,
+        }
     }
 
-    fn process_general_message(
-        self,
-        source_port_identity: PortIdentity,
-        msg: GeneralMessage,
-    ) -> PortState<P> {
-        match msg {
-            GeneralMessage::Announce(msg) => {
-                self.port.bmca().consider(source_port_identity, msg);
+    pub fn process_delay_request(
+        &mut self,
+        req: DelayRequestMessage,
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateTransition> {
+        self.port
+            .send_general(GeneralMessage::DelayResp(req.response(ingress_timestamp)));
 
-                match self.port.bmca().recommendation(self.port.local_clock()) {
-                    BmcaRecommendation::Undecided => PortState::Master(self),
-                    BmcaRecommendation::Slave(_) => PortState::uncalibrated(self.port),
-                    BmcaRecommendation::Master => PortState::Master(self),
-                }
-            }
-            _ => PortState::Master(self),
-        }
+        None
     }
 
     fn process_system_message(self, msg: SystemMessage) -> PortState<P> {
@@ -438,42 +461,19 @@ impl<P: Port> UncalibratedPort<P> {
         }
     }
 
-    fn process_general_message(
-        self,
+    pub fn process_announce(
+        &mut self,
+        msg: AnnounceMessage,
         source_port_identity: PortIdentity,
-        msg: GeneralMessage,
-    ) -> PortState<P> {
-        match msg {
-            GeneralMessage::Announce(msg) => {
-                self.announce_receipt_timeout
-                    .restart(Duration::from_secs(5));
+    ) -> Option<StateTransition> {
+        self.announce_receipt_timeout
+            .restart(Duration::from_secs(5));
+        self.port.bmca().consider(source_port_identity, msg);
 
-                self.port.bmca().consider(source_port_identity, msg);
-
-                match self.port.bmca().recommendation(self.port.local_clock()) {
-                    BmcaRecommendation::Undecided => {
-                        return PortState::listening(self.port);
-                    }
-                    BmcaRecommendation::Slave(parent) => {
-                        let delay_cycle = DelayCycle::new(
-                            0.into(),
-                            self.port.timeout(
-                                SystemMessage::DelayRequestTimeout,
-                                Duration::from_secs(1),
-                            ),
-                        );
-
-                        return PortState::Slave(
-                            SlavePort::new(self.port, self.announce_receipt_timeout, delay_cycle)
-                                .with_parent(parent),
-                        );
-                    }
-                    BmcaRecommendation::Master => {
-                        return PortState::pre_master(self.port);
-                    }
-                }
-            }
-            _ => PortState::Uncalibrated(self),
+        match self.port.bmca().recommendation(self.port.local_clock()) {
+            BmcaRecommendation::Master => Some(StateTransition::ToPreMaster),
+            BmcaRecommendation::Slave(_parent) => Some(StateTransition::ToSlave),
+            BmcaRecommendation::Undecided => Some(StateTransition::ToListening),
         }
     }
 
@@ -595,25 +595,35 @@ mod tests {
         let domain_port =
             DomainPort::new(&local_clock, bmca, &port, timer_host, 0, PortNumber::new(1));
 
-        let mut slave = PortState::slave(domain_port);
+        let mut slave = SlavePort::new(
+            domain_port,
+            FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
+            DelayCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+            ),
+        );
 
-        slave = slave.process_event_message(
+        slave.process_two_step_sync(
+            TwoStepSyncMessage::new(0.into()),
             PortIdentity::fake(),
-            EventMessage::TwoStepSync(TwoStepSyncMessage::new(0.into())),
             TimeStamp::new(1, 0),
         );
-        slave = slave.process_general_message(
+        slave.process_follow_up(
+            FollowUpMessage::new(0.into(), TimeStamp::new(1, 0)),
             PortIdentity::fake(),
-            GeneralMessage::FollowUp(FollowUpMessage::new(0.into(), TimeStamp::new(1, 0))),
         );
-        slave = slave.process_system_message(SystemMessage::Timestamp {
+        let slave = slave.process_system_message(SystemMessage::Timestamp {
             msg: EventMessage::DelayReq(DelayRequestMessage::new(0.into())),
             timestamp: TimeStamp::new(0, 0),
         });
-        let _ = slave.process_general_message(
-            PortIdentity::fake(),
-            GeneralMessage::DelayResp(DelayResponseMessage::new(0.into(), TimeStamp::new(2, 0))),
-        );
+
+        if let PortState::Slave(mut slave) = slave {
+            slave.process_delay_response(
+                DelayResponseMessage::new(0.into(), TimeStamp::new(2, 0)),
+                PortIdentity::fake(),
+            );
+        }
 
         assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
     }
@@ -634,16 +644,20 @@ mod tests {
             0,
             PortNumber::new(1),
         );
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+        );
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+        );
 
-        let master = PortState::master(domain_port);
+        let mut master = MasterPort::new(domain_port, announce_cycle, sync_cycle);
 
         timer_host.take_system_messages();
 
-        master.process_event_message(
-            PortIdentity::fake(),
-            EventMessage::DelayReq(DelayRequestMessage::new(0.into())),
-            TimeStamp::new(0, 0),
-        );
+        master.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
 
         let messages = port.take_general_messages();
         assert!(
@@ -807,28 +821,31 @@ mod tests {
             AnnounceMessage::new(41.into(), foreign_clock_ds),
         )
         .with_resolved_clock(foreign_clock_ds)];
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
-            &port,
-            &timer_host,
+            FakePort::new(),
+            FakeTimerHost::new(),
             0,
             PortNumber::new(1),
         );
-
-        let master = PortState::master(domain_port);
-
-        let state = master.process_general_message(
-            PortIdentity::fake(),
-            GeneralMessage::Announce(AnnounceMessage::new(42.into(), foreign_clock_ds)),
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+        );
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
         );
 
-        assert!(matches!(state, PortState::Uncalibrated(_)));
+        let mut master = MasterPort::new(domain_port, announce_cycle, sync_cycle);
 
-        let system_messages = timer_host.take_system_messages();
-        assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
+        let transition = master.process_announce(
+            AnnounceMessage::new(42.into(), foreign_clock_ds),
+            PortIdentity::fake(),
+        );
+
+        assert!(matches!(transition, Some(StateTransition::ToUncalibrated)));
     }
 
     #[test]
@@ -851,18 +868,26 @@ mod tests {
             0,
             PortNumber::new(1),
         );
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+        );
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+        );
 
-        let master = PortState::master(domain_port);
+        let mut master = MasterPort::new(domain_port, announce_cycle, sync_cycle);
 
         // Drain any setup timers
         timer_host.take_system_messages();
 
-        let state = master.process_general_message(
+        let transition = master.process_announce(
+            AnnounceMessage::new(42.into(), foreign_clock_ds),
             PortIdentity::fake(),
-            GeneralMessage::Announce(AnnounceMessage::new(42.into(), foreign_clock_ds)),
         );
 
-        assert!(matches!(state, PortState::Master(_)));
+        assert!(matches!(transition, None));
         assert!(timer_host.take_system_messages().is_empty());
     }
 
@@ -881,19 +906,26 @@ mod tests {
             0,
             PortNumber::new(1),
         );
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+        );
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+        );
 
-        let master = PortState::master(domain_port);
+        let mut master = MasterPort::new(domain_port, announce_cycle, sync_cycle);
 
         // Drain any setup timers
         timer_host.take_system_messages();
 
-        let state = master.process_general_message(
+        let transition = master.process_announce(
+            AnnounceMessage::new(42.into(), foreign_clock_ds),
             PortIdentity::fake(),
-            GeneralMessage::Announce(AnnounceMessage::new(42.into(), foreign_clock_ds)),
         );
 
-        assert!(matches!(state, PortState::Master(_)));
-
+        assert!(matches!(transition, None));
         assert!(timer_host.take_system_messages().is_empty());
     }
 
@@ -1046,19 +1078,19 @@ mod tests {
             Duration::from_secs(5),
         );
 
-        let listening = ListeningPort::new(domain_port, announce_receipt_timeout);
+        let mut listening = ListeningPort::new(domain_port, announce_receipt_timeout);
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
         // Drain any initial schedules
         timer_host.take_system_messages();
 
-        let state = listening.process_general_message(
+        let transition = listening.process_announce(
+            AnnounceMessage::new(0.into(), foreign_clock),
             PortIdentity::fake(),
-            GeneralMessage::Announce(AnnounceMessage::new(0.into(), foreign_clock)),
         );
 
-        assert!(matches!(state, PortState::Listening(_)));
+        assert!(matches!(transition, None));
 
         let system_messages = timer_host.take_system_messages();
         assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
@@ -1068,13 +1100,11 @@ mod tests {
     fn listening_port_to_pre_master_transition_on_two_announces() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
             &local_clock,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            &port,
-            &timer_host,
+            FakePort::new(),
+            FakeTimerHost::new(),
             0,
             PortNumber::new(1),
         );
@@ -1082,23 +1112,21 @@ mod tests {
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
         );
-        let listening = ListeningPort::new(domain_port, announce_receipt_timeout);
+        let mut listening = ListeningPort::new(domain_port, announce_receipt_timeout);
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
-        let state = listening.process_general_message(
+        let transition = listening.process_announce(
+            AnnounceMessage::new(0.into(), foreign_clock.clone()),
             PortIdentity::fake(),
-            GeneralMessage::Announce(AnnounceMessage::new(0.into(), foreign_clock.clone())),
         );
-        let state = state.process_general_message(
+        assert!(matches!(transition, None));
+
+        let transition = listening.process_announce(
+            AnnounceMessage::new(1.into(), foreign_clock.clone()),
             PortIdentity::fake(),
-            GeneralMessage::Announce(AnnounceMessage::new(1.into(), foreign_clock.clone())),
         );
-
-        assert!(matches!(state, PortState::PreMaster(_)));
-
-        let system_messages = timer_host.take_system_messages();
-        assert!(system_messages.contains(&SystemMessage::QualificationTimeout));
+        assert!(matches!(transition, Some(StateTransition::ToPreMaster)));
     }
 
     #[test]
@@ -1120,23 +1148,24 @@ mod tests {
             Duration::from_secs(5),
         );
 
-        let listening = ListeningPort::new(domain_port, announce_receipt_timeout);
+        let mut listening = ListeningPort::new(domain_port, announce_receipt_timeout);
 
         let foreign_clock = ForeignClockDS::high_grade_test_clock();
 
         // Drain any setup timers
         timer_host.take_system_messages();
 
-        let state = listening.process_general_message(
+        let transition = listening.process_announce(
+            AnnounceMessage::new(0.into(), foreign_clock),
             PortIdentity::fake(),
-            GeneralMessage::Announce(AnnounceMessage::new(0.into(), foreign_clock)),
         );
-        let state = state.process_general_message(
-            PortIdentity::fake(),
-            GeneralMessage::Announce(AnnounceMessage::new(1.into(), foreign_clock)),
-        );
+        assert!(matches!(transition, None));
 
-        assert!(matches!(state, PortState::Uncalibrated(_)));
+        let transition = listening.process_announce(
+            AnnounceMessage::new(1.into(), foreign_clock),
+            PortIdentity::fake(),
+        );
+        assert!(matches!(transition, Some(StateTransition::ToUncalibrated)));
 
         let system_messages = timer_host.take_system_messages();
         assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
@@ -1218,17 +1247,14 @@ mod tests {
             Duration::from_secs(5),
         );
 
-        let uncalibrated = UncalibratedPort::new(domain_port, announce_receipt_timeout);
+        let mut uncalibrated = UncalibratedPort::new(domain_port, announce_receipt_timeout);
 
-        let state = uncalibrated.process_general_message(
+        let transition = uncalibrated.process_announce(
+            AnnounceMessage::new(42.into(), foreign_clock_ds),
             PortIdentity::fake(),
-            GeneralMessage::Announce(AnnounceMessage::new(42.into(), foreign_clock_ds)),
         );
 
-        assert!(matches!(state, PortState::Slave(_)));
-
-        let system_messages = timer_host.take_system_messages();
-        assert!(system_messages.contains(&SystemMessage::DelayRequestTimeout));
+        assert!(matches!(transition, Some(StateTransition::ToSlave)));
     }
 
     #[test]
@@ -1320,32 +1346,37 @@ mod tests {
         );
 
         // Create slave with a chosen parent
-        let mut slave = PortState::Slave(
-            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle).with_parent(parent),
-        );
+        let mut slave =
+            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle).with_parent(parent);
 
         // Record a TwoStepSync from the parent so a matching FollowUp could produce ms_offset
-        slave = slave.process_event_message(
+        let transition = slave.process_two_step_sync(
+            TwoStepSyncMessage::new(1.into()),
             parent,
-            EventMessage::TwoStepSync(TwoStepSyncMessage::new(1.into())),
             TimeStamp::new(2, 0),
         );
+        assert!(matches!(transition, None));
 
         // Record a delay request timestamp to allow sm_offset calculation
-        slave = slave.process_system_message(SystemMessage::Timestamp {
+        let slave = slave.process_system_message(SystemMessage::Timestamp {
             msg: EventMessage::DelayReq(DelayRequestMessage::new(2.into())),
             timestamp: TimeStamp::new(0, 0),
         });
 
         // Send FollowUp and DelayResp from a non-parent; these should be ignored
-        slave = slave.process_general_message(
-            non_parent,
-            GeneralMessage::FollowUp(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0))),
-        );
-        let _ = slave.process_general_message(
-            non_parent,
-            GeneralMessage::DelayResp(DelayResponseMessage::new(2.into(), TimeStamp::new(2, 0))),
-        );
+        if let PortState::Slave(mut slave) = slave {
+            let transition = slave.process_follow_up(
+                FollowUpMessage::new(1.into(), TimeStamp::new(1, 0)),
+                non_parent,
+            );
+            assert!(matches!(transition, None));
+
+            let transition = slave.process_delay_response(
+                DelayResponseMessage::new(2.into(), TimeStamp::new(2, 0)),
+                non_parent,
+            );
+            assert!(matches!(transition, None));
+        }
 
         // With correct filtering, the local clock should remain unchanged
         assert_eq!(local_clock.now(), TimeStamp::new(0, 0));
@@ -1353,8 +1384,6 @@ mod tests {
 
     #[test]
     fn slave_port_ignores_event_messages_from_non_parent() {
-        use crate::message::{EventMessage, FollowUpMessage, GeneralMessage, TwoStepSyncMessage};
-
         let local_clock = LocalClock::new(
             FakeClock::new(TimeStamp::new(0, 0)),
             LocalClockDS::mid_grade_test_clock(),
@@ -1389,32 +1418,35 @@ mod tests {
         );
 
         // Create slave with chosen parent
-        let mut slave = PortState::Slave(
-            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle).with_parent(parent),
-        );
+        let mut slave =
+            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle).with_parent(parent);
 
         // Send a FollowUp from the parent first (ms offset incomplete without sync)
-        slave = slave.process_general_message(
-            parent,
-            GeneralMessage::FollowUp(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0))),
-        );
+        let transition =
+            slave.process_follow_up(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0)), parent);
+        assert!(matches!(transition, None));
 
         // Now send TwoStepSync from a non-parent; should be ignored
-        slave = slave.process_event_message(
+        let transition = slave.process_two_step_sync(
+            TwoStepSyncMessage::new(1.into()),
             non_parent,
-            EventMessage::TwoStepSync(TwoStepSyncMessage::new(1.into())),
             TimeStamp::new(2, 0),
         );
+        assert!(matches!(transition, None));
 
         // Even if delay path completes, estimate should not trigger without accepted sync
-        slave = slave.process_system_message(SystemMessage::Timestamp {
+        let slave = slave.process_system_message(SystemMessage::Timestamp {
             msg: EventMessage::DelayReq(DelayRequestMessage::new(2.into())),
             timestamp: TimeStamp::new(0, 0),
         });
-        let _ = slave.process_general_message(
-            parent,
-            GeneralMessage::DelayResp(DelayResponseMessage::new(2.into(), TimeStamp::new(2, 0))),
-        );
+
+        if let PortState::Slave(mut slave) = slave {
+            let transition = slave.process_delay_response(
+                DelayResponseMessage::new(2.into(), TimeStamp::new(2, 0)),
+                parent,
+            );
+            assert!(matches!(transition, None));
+        }
 
         // Local clock remains unchanged
         assert_eq!(local_clock.now(), TimeStamp::new(0, 0));
@@ -1422,11 +1454,6 @@ mod tests {
 
     #[test]
     fn slave_port_disciplines_on_matching_conversation() {
-        use crate::message::{
-            DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
-            GeneralMessage, TwoStepSyncMessage,
-        };
-
         let local_clock = LocalClock::new(
             FakeClock::new(TimeStamp::new(0, 0)),
             LocalClockDS::mid_grade_test_clock(),
@@ -1457,28 +1484,35 @@ mod tests {
         );
 
         // Create slave with parent
-        let mut slave = PortState::Slave(
-            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle).with_parent(parent),
-        );
+        let mut slave =
+            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle).with_parent(parent);
 
         // Matching conversation from the parent (numbers chosen to yield estimate 2s)
-        slave = slave.process_event_message(
+        let transition = slave.process_two_step_sync(
+            TwoStepSyncMessage::new(42.into()),
             parent,
-            EventMessage::TwoStepSync(TwoStepSyncMessage::new(42.into())),
             TimeStamp::new(1, 0),
         );
-        slave = slave.process_general_message(
+        assert!(matches!(transition, None));
+
+        let transition = slave.process_follow_up(
+            FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)),
             parent,
-            GeneralMessage::FollowUp(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0))),
         );
-        slave = slave.process_system_message(SystemMessage::Timestamp {
+        assert!(matches!(transition, None));
+
+        let slave = slave.process_system_message(SystemMessage::Timestamp {
             msg: EventMessage::DelayReq(DelayRequestMessage::new(43.into())),
             timestamp: TimeStamp::new(0, 0),
         });
-        let _ = slave.process_general_message(
-            parent,
-            GeneralMessage::DelayResp(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0))),
-        );
+
+        if let PortState::Slave(mut slave) = slave {
+            let transition = slave.process_delay_response(
+                DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)),
+                parent,
+            );
+            assert!(matches!(transition, None));
+        }
 
         // Local clock disciplined to the estimate
         assert_eq!(local_clock.now(), TimeStamp::new(2, 0));

@@ -1,10 +1,28 @@
 use crate::{
     bmca::ForeignClockDS,
     buffer::{FinalizedBuffer, MessageBuffer},
-    port::{PortIdentity, PortMap},
+    port::{Port, PortIdentity, PortMap},
+    portstate::{PortState, StateTransition},
     result::{ParseError, ProtocolError, Result},
     time::{Duration, TimeStamp},
 };
+
+pub trait EventInterface<P: Port> {
+    fn dispatch(
+        &self,
+        port: &mut PortState<P>,
+        source_port_identity: PortIdentity,
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateTransition>;
+}
+
+pub trait GeneralInterface<P: Port> {
+    fn dispatch(
+        &self,
+        port: &mut PortState<P>,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateTransition>;
+}
 
 pub struct DomainMessage<'a> {
     buf: &'a [u8],
@@ -61,11 +79,43 @@ pub enum EventMessage {
     TwoStepSync(TwoStepSyncMessage),
 }
 
+impl EventMessage {
+    pub fn dispatch<P: Port>(
+        &self,
+        portstate: &mut PortState<P>,
+        source_port_identity: PortIdentity,
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateTransition> {
+        match self {
+            EventMessage::DelayReq(msg) => {
+                msg.dispatch(portstate, source_port_identity, ingress_timestamp)
+            }
+            EventMessage::TwoStepSync(msg) => {
+                msg.dispatch(portstate, source_port_identity, ingress_timestamp)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneralMessage {
     Announce(AnnounceMessage),
     DelayResp(DelayResponseMessage),
     FollowUp(FollowUpMessage),
+}
+
+impl GeneralMessage {
+    pub fn dispatch<P: Port>(
+        &self,
+        portstate: &mut PortState<P>,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateTransition> {
+        match self {
+            GeneralMessage::Announce(msg) => msg.dispatch(portstate, source_port_identity),
+            GeneralMessage::DelayResp(msg) => msg.dispatch(portstate, source_port_identity),
+            GeneralMessage::FollowUp(msg) => msg.dispatch(portstate, source_port_identity),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,6 +284,22 @@ impl AnnounceMessage {
     }
 }
 
+impl<P: Port> GeneralInterface<P> for AnnounceMessage {
+    fn dispatch(
+        &self,
+        portstate: &mut PortState<P>,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateTransition> {
+        match portstate {
+            PortState::Listening(port) => port.process_announce(*self, source_port_identity),
+            PortState::Slave(port) => port.process_announce(*self, source_port_identity),
+            PortState::Master(port) => port.process_announce(*self, source_port_identity),
+            PortState::Uncalibrated(port) => port.process_announce(*self, source_port_identity),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TwoStepSyncMessage {
     sequence_id: SequenceId,
@@ -262,6 +328,21 @@ impl TwoStepSyncMessage {
             .payload();
 
         payload.finalize(10)
+    }
+}
+
+impl<P: Port> EventInterface<P> for TwoStepSyncMessage {
+    fn dispatch(
+        &self,
+        portstate: &mut PortState<P>,
+        source_port_identity: PortIdentity,
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateTransition> {
+        if let PortState::Slave(port) = portstate {
+            port.process_two_step_sync(*self, source_port_identity, ingress_timestamp)
+        } else {
+            None
+        }
     }
 }
 
@@ -321,6 +402,20 @@ impl FollowUpMessage {
     }
 }
 
+impl<P: Port> GeneralInterface<P> for FollowUpMessage {
+    fn dispatch(
+        &self,
+        portstate: &mut PortState<P>,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateTransition> {
+        if let PortState::Slave(port) = portstate {
+            port.process_follow_up(*self, source_port_identity)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayRequestMessage {
     sequence_id: SequenceId,
@@ -349,6 +444,20 @@ impl DelayRequestMessage {
             .payload();
 
         payload.finalize(10)
+    }
+}
+
+impl<P: Port> EventInterface<P> for DelayRequestMessage {
+    fn dispatch(
+        &self,
+        portstate: &mut PortState<P>,
+        _source_port_identity: PortIdentity,
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateTransition> {
+        match portstate {
+            PortState::Master(port) => port.process_delay_request(*self, ingress_timestamp),
+            _ => None,
+        }
     }
 }
 
@@ -405,6 +514,19 @@ impl DelayResponseMessage {
         payload_buf[..10].copy_from_slice(&self.receive_timestamp.to_wire());
 
         payload.finalize(20)
+    }
+}
+
+impl<P: Port> GeneralInterface<P> for DelayResponseMessage {
+    fn dispatch(
+        &self,
+        portstate: &mut PortState<P>,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateTransition> {
+        match portstate {
+            PortState::Slave(port) => port.process_delay_response(*self, source_port_identity),
+            _ => None,
+        }
     }
 }
 

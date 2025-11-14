@@ -241,15 +241,19 @@ impl<P: Port> PortIngress for Option<PortState<P>> {
         msg: EventMessage,
         timestamp: TimeStamp,
     ) {
-        *self = self.take().and_then(|state| {
-            Some(state.process_event_message(source_port_identity, msg, timestamp))
-        });
+        if let Some(state) = self.as_mut() {
+            if let Some(transition) = msg.dispatch(state, source_port_identity, timestamp) {
+                *self = self.take().map(|state| state.transit(transition));
+            }
+        }
     }
 
     fn process_general_message(&mut self, source_port_identity: PortIdentity, msg: GeneralMessage) {
-        *self = self
-            .take()
-            .and_then(|state| Some(state.process_general_message(source_port_identity, msg)));
+        if let Some(state) = self.as_mut() {
+            if let Some(transition) = msg.dispatch(state, source_port_identity) {
+                *self = self.take().map(|state| state.transit(transition));
+            }
+        }
     }
 
     fn process_system_message(&mut self, msg: SystemMessage) {
