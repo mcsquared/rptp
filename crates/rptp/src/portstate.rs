@@ -507,9 +507,8 @@ mod tests {
     use crate::clock::{ClockIdentity, FakeClock, LocalClock};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::message::{
-        AnnounceMessage, AnnounceReceiptTimeout, AnnounceSendTimeout, DelayRequestMessage,
-        DelayRequestTimeout, DelayResponseMessage, FollowUpMessage, Initialized,
-        QualificationTimeout, SyncTimeout, SystemInterface, TwoStepSyncMessage,
+        AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage, SystemMessage,
+        TwoStepSyncMessage,
     };
     use crate::port::test_support::{FakePort, FakeTimeout, FakeTimerHost};
     use crate::port::{DomainPort, PortNumber};
@@ -615,7 +614,7 @@ mod tests {
 
         let mut master = PortState::master(domain_port);
 
-        SyncTimeout.dispatch(&mut master);
+        SystemMessage::SyncTimeout.dispatch(&mut master);
 
         let messages = port.take_event_messages();
         assert!(
@@ -645,7 +644,7 @@ mod tests {
         // Drain messages that could have been sent during initialization.
         timer_host.take_system_messages();
 
-        SyncTimeout.dispatch(&mut master);
+        SystemMessage::SyncTimeout.dispatch(&mut master);
 
         let messages = timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::SyncTimeout));
@@ -710,7 +709,7 @@ mod tests {
 
         timer_host.take_system_messages();
 
-        AnnounceSendTimeout.dispatch(&mut master);
+        SystemMessage::AnnounceSendTimeout.dispatch(&mut master);
 
         let messages = timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::AnnounceSendTimeout));
@@ -733,7 +732,7 @@ mod tests {
 
         let mut master = PortState::master(domain_port);
 
-        AnnounceSendTimeout.dispatch(&mut master);
+        SystemMessage::AnnounceSendTimeout.dispatch(&mut master);
 
         let messages = port.take_general_messages();
         assert!(
@@ -880,7 +879,7 @@ mod tests {
 
         timer_host.take_system_messages();
 
-        DelayRequestTimeout.dispatch(&mut slave);
+        SystemMessage::DelayRequestTimeout.dispatch(&mut slave);
 
         let messages = timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::DelayRequestTimeout));
@@ -902,7 +901,7 @@ mod tests {
 
         let mut slave = PortState::slave(domain_port);
 
-        DelayRequestTimeout.dispatch(&mut slave);
+        SystemMessage::DelayRequestTimeout.dispatch(&mut slave);
 
         let events = port.take_event_messages();
         assert!(events.contains(&EventMessage::DelayReq(DelayRequestMessage::new(0.into()))));
@@ -923,7 +922,7 @@ mod tests {
 
         let mut slave = PortState::slave(domain_port);
 
-        let transition = AnnounceReceiptTimeout.dispatch(&mut slave);
+        let transition = SystemMessage::AnnounceReceiptTimeout.dispatch(&mut slave);
 
         assert!(matches!(transition, Some(StateTransition::ToMaster)));
     }
@@ -941,7 +940,7 @@ mod tests {
             PortNumber::new(1),
         )));
 
-        let transition = Initialized.dispatch(&mut initializing);
+        let transition = SystemMessage::Initialized.dispatch(&mut initializing);
 
         assert!(matches!(transition, Some(StateTransition::ToListening)));
     }
@@ -966,7 +965,7 @@ mod tests {
         let mut listening =
             PortState::Listening(ListeningPort::new(domain_port, announce_receipt_timeout));
 
-        let transition = AnnounceReceiptTimeout.dispatch(&mut listening);
+        let transition = SystemMessage::AnnounceReceiptTimeout.dispatch(&mut listening);
 
         assert!(matches!(transition, Some(StateTransition::ToMaster)));
     }
@@ -1121,7 +1120,7 @@ mod tests {
         let mut pre_master =
             PortState::PreMaster(PreMasterPort::new(domain_port, qualification_timeout));
 
-        let transition = QualificationTimeout.dispatch(&mut pre_master);
+        let transition = SystemMessage::QualificationTimeout.dispatch(&mut pre_master);
 
         assert!(matches!(transition, Some(StateTransition::ToMaster)));
     }
@@ -1179,7 +1178,7 @@ mod tests {
         let mut uncalibrated =
             PortState::Uncalibrated(UncalibratedPort::new(domain_port, announce_receipt_timeout));
 
-        let transition = AnnounceReceiptTimeout.dispatch(&mut uncalibrated);
+        let transition = SystemMessage::AnnounceReceiptTimeout.dispatch(&mut uncalibrated);
 
         assert!(matches!(transition, Some(StateTransition::ToMaster)));
     }
