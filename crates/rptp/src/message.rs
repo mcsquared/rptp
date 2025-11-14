@@ -24,6 +24,10 @@ pub trait GeneralInterface<P: Port> {
     ) -> Option<StateTransition>;
 }
 
+pub trait SystemInterface<P: Port> {
+    fn dispatch(&self, port: &mut PortState<P>) -> Option<StateTransition>;
+}
+
 pub struct DomainMessage<'a> {
     buf: &'a [u8],
 }
@@ -123,13 +127,24 @@ pub enum SystemMessage {
     AnnounceSendTimeout,
     DelayRequestTimeout,
     SyncTimeout,
-    Timestamp {
-        msg: EventMessage,
-        timestamp: TimeStamp,
-    },
+    Timestamp(TimestampMessage),
     Initialized,
     AnnounceReceiptTimeout,
     QualificationTimeout,
+}
+
+impl SystemMessage {
+    pub fn dispatch<P: Port>(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
+        match self {
+            SystemMessage::AnnounceSendTimeout => AnnounceSendTimeout.dispatch(portstate),
+            SystemMessage::DelayRequestTimeout => DelayRequestTimeout.dispatch(portstate),
+            SystemMessage::SyncTimeout => SyncTimeout.dispatch(portstate),
+            SystemMessage::Timestamp(msg) => msg.dispatch(portstate),
+            SystemMessage::Initialized => Initialized.dispatch(portstate),
+            SystemMessage::AnnounceReceiptTimeout => AnnounceReceiptTimeout.dispatch(portstate),
+            SystemMessage::QualificationTimeout => QualificationTimeout.dispatch(portstate),
+        }
+    }
 }
 
 impl EventMessage {
@@ -525,6 +540,117 @@ impl<P: Port> GeneralInterface<P> for DelayResponseMessage {
     ) -> Option<StateTransition> {
         match portstate {
             PortState::Slave(port) => port.process_delay_response(*self, source_port_identity),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) struct AnnounceSendTimeout;
+
+impl<P: Port> SystemInterface<P> for AnnounceSendTimeout {
+    fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
+        match portstate {
+            PortState::Master(port) => {
+                port.send_announce();
+                None
+            }
+            _ => None,
+        }
+    }
+}
+
+pub(crate) struct DelayRequestTimeout;
+
+impl<P: Port> SystemInterface<P> for DelayRequestTimeout {
+    fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
+        match portstate {
+            PortState::Slave(port) => {
+                port.send_delay_request();
+                None
+            }
+            _ => None,
+        }
+    }
+}
+
+pub(crate) struct SyncTimeout;
+
+impl<P: Port> SystemInterface<P> for SyncTimeout {
+    fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
+        match portstate {
+            PortState::Master(port) => {
+                port.send_sync();
+                None
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimestampMessage {
+    msg: EventMessage,
+    egress_timestamp: TimeStamp,
+}
+
+impl TimestampMessage {
+    pub fn new(msg: EventMessage, egress_timestamp: TimeStamp) -> Self {
+        Self {
+            msg,
+            egress_timestamp,
+        }
+    }
+}
+
+impl<P: Port> SystemInterface<P> for TimestampMessage {
+    fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
+        match portstate {
+            PortState::Master(port) => match self.msg {
+                EventMessage::TwoStepSync(msg) => port.send_follow_up(msg, self.egress_timestamp),
+                _ => None,
+            },
+            PortState::Slave(port) => match self.msg {
+                EventMessage::DelayReq(msg) => {
+                    port.process_delay_request(msg, self.egress_timestamp)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+pub(crate) struct AnnounceReceiptTimeout;
+
+impl<P: Port> SystemInterface<P> for AnnounceReceiptTimeout {
+    fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
+        match portstate {
+            PortState::Listening(_) => Some(StateTransition::ToMaster),
+            PortState::Slave(_) => Some(StateTransition::ToMaster),
+            PortState::Master(_) => Some(StateTransition::ToMaster),
+            PortState::Uncalibrated(_) => Some(StateTransition::ToMaster),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) struct QualificationTimeout;
+
+impl<P: Port> SystemInterface<P> for QualificationTimeout {
+    fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
+        match portstate {
+            PortState::PreMaster(_) => Some(StateTransition::ToMaster),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) struct Initialized;
+
+impl<P: Port> SystemInterface<P> for Initialized {
+    fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
+        match portstate {
+            PortState::Initializing(_) => Some(StateTransition::ToListening),
             _ => None,
         }
     }

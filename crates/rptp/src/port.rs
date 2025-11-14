@@ -257,9 +257,11 @@ impl<P: Port> PortIngress for Option<PortState<P>> {
     }
 
     fn process_system_message(&mut self, msg: SystemMessage) {
-        *self = self
-            .take()
-            .and_then(|state| Some(state.process_system_message(msg)));
+        if let Some(state) = self.as_mut() {
+            if let Some(transition) = msg.dispatch(state) {
+                *self = self.take().map(|state| state.transit(transition));
+            }
+        }
     }
 }
 

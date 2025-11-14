@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use rptp::{
     clock::LocalClock,
     infra::infra_support::SortedForeignClockRecordsVec,
-    message::{DomainMessage, EventMessage, SystemMessage},
+    message::{DomainMessage, EventMessage, SystemMessage, TimestampMessage},
     port::{DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
 };
 
@@ -136,10 +136,10 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> PhysicalPort for TokioPhysica
         // eprintln!("[event] send {:?}", msg);
         let _ = self.event_socket.try_send(buf);
 
-        let timestamp_msg = SystemMessage::Timestamp {
-            msg: EventMessage::try_from(buf).unwrap(),
-            timestamp: self.clock.now(),
-        };
+        let timestamp_msg = SystemMessage::Timestamp(TimestampMessage::new(
+            EventMessage::try_from(buf).unwrap(),
+            self.clock.now(),
+        ));
 
         self.system_tx
             .send((self.domain_number, timestamp_msg))
