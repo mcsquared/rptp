@@ -23,8 +23,12 @@ impl MessageBuffer {
         Self { buf }
     }
 
-    pub fn typed<'a>(&'a mut self, msg_type: u8, control: ControlField) -> TypedBuffer<'a> {
-        self.buf[0] = (self.buf[0] & 0xF0) | (msg_type & 0x0F);
+    pub fn typed<'a>(
+        &'a mut self,
+        msg_type: MessageType,
+        control: ControlField,
+    ) -> TypedBuffer<'a> {
+        self.buf[0] = (self.buf[0] & 0xF0) | (msg_type as u8 & 0x0F);
         self.buf[32] = control as u8;
         TypedBuffer { buf: &mut self.buf }
     }
@@ -90,6 +94,14 @@ impl AsRef<[u8]> for FinalizedBuffer<'_> {
     fn as_ref(&self) -> &[u8] {
         self.buf
     }
+}
+
+pub enum MessageType {
+    Sync = 0x00,
+    DelayRequest = 0x01,
+    FollowUp = 0x08,
+    DelayResponse = 0x09,
+    Announce = 0x0B,
 }
 
 pub enum ControlField {

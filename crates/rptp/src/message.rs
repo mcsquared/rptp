@@ -1,6 +1,6 @@
 use crate::{
     bmca::ForeignClockDS,
-    buffer::{ControlField, FinalizedBuffer, MessageBuffer},
+    buffer::{ControlField, FinalizedBuffer, MessageBuffer, MessageType},
     port::{Port, PortIdentity, PortMap},
     portstate::{PortState, StateTransition},
     result::{ParseError, ProtocolError, Result},
@@ -314,7 +314,7 @@ impl AnnounceMessage {
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
-            .typed(0x0B, ControlField::Other)
+            .typed(MessageType::Announce, ControlField::Other)
             .flagged(0)
             .sequenced(self.sequence_id)
             .payload();
@@ -348,7 +348,7 @@ impl TwoStepSyncMessage {
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let payload = buf
-            .typed(0x00, ControlField::Sync)
+            .typed(MessageType::Sync, ControlField::Sync)
             .flagged(0x0002)
             .sequenced(self.sequence_id)
             .payload();
@@ -401,7 +401,7 @@ impl FollowUpMessage {
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
-            .typed(0x08, ControlField::FollowUp)
+            .typed(MessageType::FollowUp, ControlField::FollowUp)
             .flagged(0)
             .sequenced(self.sequence_id)
             .payload();
@@ -435,7 +435,7 @@ impl DelayRequestMessage {
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let payload = buf
-            .typed(0x01, ControlField::DelayRequest)
+            .typed(MessageType::DelayRequest, ControlField::DelayRequest)
             .flagged(0)
             .sequenced(self.sequence_id)
             .payload();
@@ -488,7 +488,7 @@ impl DelayResponseMessage {
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
-            .typed(0x09, ControlField::DelayResponse)
+            .typed(MessageType::DelayResponse, ControlField::DelayResponse)
             .flagged(0)
             .sequenced(self.sequence_id)
             .payload();
