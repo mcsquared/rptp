@@ -549,13 +549,10 @@ pub(crate) struct AnnounceSendTimeout;
 
 impl<P: Port> SystemInterface<P> for AnnounceSendTimeout {
     fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
-        match portstate {
-            PortState::Master(port) => {
-                port.send_announce();
-                None
-            }
-            _ => None,
+        if let PortState::Master(port) = portstate {
+            port.send_announce();
         }
+        None
     }
 }
 
@@ -563,13 +560,10 @@ pub(crate) struct DelayRequestTimeout;
 
 impl<P: Port> SystemInterface<P> for DelayRequestTimeout {
     fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
-        match portstate {
-            PortState::Slave(port) => {
-                port.send_delay_request();
-                None
-            }
-            _ => None,
+        if let PortState::Slave(port) = portstate {
+            port.send_delay_request();
         }
+        None
     }
 }
 
@@ -577,13 +571,10 @@ pub(crate) struct SyncTimeout;
 
 impl<P: Port> SystemInterface<P> for SyncTimeout {
     fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
-        match portstate {
-            PortState::Master(port) => {
-                port.send_sync();
-                None
-            }
-            _ => None,
+        if let PortState::Master(port) = portstate {
+            port.send_sync();
         }
+        None
     }
 }
 
@@ -604,17 +595,13 @@ impl TimestampMessage {
 
 impl<P: Port> SystemInterface<P> for TimestampMessage {
     fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
-        match portstate {
-            PortState::Master(port) => match self.msg {
-                EventMessage::TwoStepSync(msg) => port.send_follow_up(msg, self.egress_timestamp),
-                _ => None,
-            },
-            PortState::Slave(port) => match self.msg {
-                EventMessage::DelayReq(msg) => {
-                    port.process_delay_request(msg, self.egress_timestamp)
-                }
-                _ => None,
-            },
+        match (portstate, self.msg) {
+            (PortState::Master(port), EventMessage::TwoStepSync(msg)) => {
+                port.send_follow_up(msg, self.egress_timestamp)
+            }
+            (PortState::Slave(port), EventMessage::DelayReq(msg)) => {
+                port.process_delay_request(msg, self.egress_timestamp)
+            }
             _ => None,
         }
     }
@@ -649,9 +636,10 @@ pub(crate) struct Initialized;
 
 impl<P: Port> SystemInterface<P> for Initialized {
     fn dispatch(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
-        match portstate {
-            PortState::Initializing(_) => Some(StateTransition::ToListening),
-            _ => None,
+        if let PortState::Initializing(_) = portstate {
+            Some(StateTransition::ToListening)
+        } else {
+            None
         }
     }
 }
