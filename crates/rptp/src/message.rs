@@ -144,13 +144,13 @@ impl SystemMessage {
                 port.send_sync();
                 None
             }
-            (PortState::Master(port), SystemMessage::Timestamp(msg)) => match msg.msg {
+            (PortState::Master(port), SystemMessage::Timestamp(msg)) => match msg.event_msg {
                 EventMessage::TwoStepSync(sync_msg) => {
                     port.send_follow_up(sync_msg, msg.egress_timestamp)
                 }
                 _ => None,
             },
-            (PortState::Slave(port), SystemMessage::Timestamp(msg)) => match msg.msg {
+            (PortState::Slave(port), SystemMessage::Timestamp(msg)) => match msg.event_msg {
                 EventMessage::DelayReq(req_msg) => {
                     port.process_delay_request(req_msg, msg.egress_timestamp)
                 }
@@ -502,14 +502,14 @@ impl DelayResponseMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimestampMessage {
-    msg: EventMessage,
+    event_msg: EventMessage,
     egress_timestamp: TimeStamp,
 }
 
 impl TimestampMessage {
-    pub fn new(msg: EventMessage, egress_timestamp: TimeStamp) -> Self {
+    pub fn new(event_msg: EventMessage, egress_timestamp: TimeStamp) -> Self {
         Self {
-            msg,
+            event_msg,
             egress_timestamp,
         }
     }
