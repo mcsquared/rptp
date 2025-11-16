@@ -110,6 +110,82 @@ impl<P: Port> PortState<P> {
             },
         }
     }
+
+    pub fn dispatch_event(
+        &mut self,
+        msg: EventMessage,
+        source_port_identity: PortIdentity,
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateTransition> {
+        use EventMessage::*;
+        use PortState::*;
+
+        match (self, msg) {
+            (Slave(port), TwoStepSync(msg)) => {
+                port.process_two_step_sync(msg, source_port_identity, ingress_timestamp)
+            }
+            (Master(port), DelayReq(msg)) => port.process_delay_request(msg, ingress_timestamp),
+            _ => None,
+        }
+    }
+
+    pub fn dispatch_general(
+        &mut self,
+        msg: GeneralMessage,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateTransition> {
+        use GeneralMessage::*;
+        use PortState::*;
+
+        match (self, msg) {
+            (Listening(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
+            (Slave(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
+            (Master(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
+            (Uncalibrated(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
+            (Slave(port), FollowUp(msg)) => port.process_follow_up(msg, source_port_identity),
+            (Slave(port), DelayResp(msg)) => port.process_delay_response(msg, source_port_identity),
+            _ => None,
+        }
+    }
+
+    pub fn dispatch_system(&mut self, msg: SystemMessage) -> Option<StateTransition> {
+        use PortState::*;
+        use StateTransition::*;
+        use SystemMessage::*;
+
+        match (self, msg) {
+            (Master(port), AnnounceSendTimeout) => {
+                port.send_announce();
+                None
+            }
+            (Slave(port), DelayRequestTimeout) => {
+                port.send_delay_request();
+                None
+            }
+            (Master(port), SyncTimeout) => {
+                port.send_sync();
+                None
+            }
+            (Master(port), Timestamp(msg)) => match msg.event_msg {
+                EventMessage::TwoStepSync(sync_msg) => {
+                    port.send_follow_up(sync_msg, msg.egress_timestamp)
+                }
+                _ => None,
+            },
+            (Slave(port), Timestamp(msg)) => match msg.event_msg {
+                EventMessage::DelayReq(req_msg) => {
+                    port.process_delay_request(req_msg, msg.egress_timestamp)
+                }
+                _ => None,
+            },
+            (Initializing(_), Initialized) => Some(ToListening),
+            (Listening(_) | Slave(_) | Master(_) | Uncalibrated(_), AnnounceReceiptTimeout) => {
+                Some(StateTransition::ToMaster)
+            }
+            (PreMaster(_), QualificationTimeout) => Some(ToMaster),
+            _ => None,
+        }
+    }
 }
 
 pub struct InitializingPort<P: Port> {
@@ -635,7 +711,7 @@ mod tests {
 
         let mut master = PortState::master(domain_port);
 
-        SystemMessage::SyncTimeout.dispatch(&mut master);
+        master.dispatch_system(SystemMessage::SyncTimeout);
 
         let messages = port.take_event_messages();
         assert!(
@@ -665,7 +741,7 @@ mod tests {
         // Drain messages that could have been sent during initialization.
         timer_host.take_system_messages();
 
-        SystemMessage::SyncTimeout.dispatch(&mut master);
+        master.dispatch_system(SystemMessage::SyncTimeout);
 
         let messages = timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::SyncTimeout));
@@ -730,7 +806,7 @@ mod tests {
 
         timer_host.take_system_messages();
 
-        SystemMessage::AnnounceSendTimeout.dispatch(&mut master);
+        master.dispatch_system(SystemMessage::AnnounceSendTimeout);
 
         let messages = timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::AnnounceSendTimeout));
@@ -753,7 +829,7 @@ mod tests {
 
         let mut master = PortState::master(domain_port);
 
-        SystemMessage::AnnounceSendTimeout.dispatch(&mut master);
+        master.dispatch_system(SystemMessage::AnnounceSendTimeout);
 
         let messages = port.take_general_messages();
         assert!(
@@ -900,7 +976,7 @@ mod tests {
 
         timer_host.take_system_messages();
 
-        SystemMessage::DelayRequestTimeout.dispatch(&mut slave);
+        slave.dispatch_system(SystemMessage::DelayRequestTimeout);
 
         let messages = timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::DelayRequestTimeout));
@@ -922,7 +998,7 @@ mod tests {
 
         let mut slave = PortState::slave(domain_port);
 
-        SystemMessage::DelayRequestTimeout.dispatch(&mut slave);
+        slave.dispatch_system(SystemMessage::DelayRequestTimeout);
 
         let events = port.take_event_messages();
         assert!(events.contains(&EventMessage::DelayReq(DelayRequestMessage::new(0.into()))));
@@ -943,7 +1019,7 @@ mod tests {
 
         let mut slave = PortState::slave(domain_port);
 
-        let transition = SystemMessage::AnnounceReceiptTimeout.dispatch(&mut slave);
+        let transition = slave.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
 
         assert!(matches!(transition, Some(StateTransition::ToMaster)));
     }
@@ -961,7 +1037,7 @@ mod tests {
             PortNumber::new(1),
         )));
 
-        let transition = SystemMessage::Initialized.dispatch(&mut initializing);
+        let transition = initializing.dispatch_system(SystemMessage::Initialized);
 
         assert!(matches!(transition, Some(StateTransition::ToListening)));
     }
@@ -986,7 +1062,7 @@ mod tests {
         let mut listening =
             PortState::Listening(ListeningPort::new(domain_port, announce_receipt_timeout));
 
-        let transition = SystemMessage::AnnounceReceiptTimeout.dispatch(&mut listening);
+        let transition = listening.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
 
         assert!(matches!(transition, Some(StateTransition::ToMaster)));
     }
@@ -1141,7 +1217,7 @@ mod tests {
         let mut pre_master =
             PortState::PreMaster(PreMasterPort::new(domain_port, qualification_timeout));
 
-        let transition = SystemMessage::QualificationTimeout.dispatch(&mut pre_master);
+        let transition = pre_master.dispatch_system(SystemMessage::QualificationTimeout);
 
         assert!(matches!(transition, Some(StateTransition::ToMaster)));
     }
@@ -1199,7 +1275,7 @@ mod tests {
         let mut uncalibrated =
             PortState::Uncalibrated(UncalibratedPort::new(domain_port, announce_receipt_timeout));
 
-        let transition = SystemMessage::AnnounceReceiptTimeout.dispatch(&mut uncalibrated);
+        let transition = uncalibrated.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
 
         assert!(matches!(transition, Some(StateTransition::ToMaster)));
     }

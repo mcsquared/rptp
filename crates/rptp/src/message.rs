@@ -1,8 +1,7 @@
 use crate::{
     bmca::ForeignClockDS,
     buffer::{ControlField, FinalizedBuffer, MessageBuffer, MessageType},
-    port::{Port, PortIdentity, PortMap},
-    portstate::{PortState, StateTransition},
+    port::{PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Duration, TimeStamp},
 };
@@ -62,24 +61,7 @@ pub enum EventMessage {
     TwoStepSync(TwoStepSyncMessage),
 }
 
-impl EventMessage {
-    pub fn dispatch<P: Port>(
-        &self,
-        portstate: &mut PortState<P>,
-        source_port_identity: PortIdentity,
-        ingress_timestamp: TimeStamp,
-    ) -> Option<StateTransition> {
-        match (portstate, self) {
-            (PortState::Slave(port), EventMessage::TwoStepSync(msg)) => {
-                port.process_two_step_sync(*msg, source_port_identity, ingress_timestamp)
-            }
-            (PortState::Master(port), EventMessage::DelayReq(msg)) => {
-                port.process_delay_request(*msg, ingress_timestamp)
-            }
-            _ => None,
-        }
-    }
-}
+impl EventMessage {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneralMessage {
@@ -88,35 +70,7 @@ pub enum GeneralMessage {
     FollowUp(FollowUpMessage),
 }
 
-impl GeneralMessage {
-    pub fn dispatch<P: Port>(
-        &self,
-        portstate: &mut PortState<P>,
-        source_port_identity: PortIdentity,
-    ) -> Option<StateTransition> {
-        match (portstate, self) {
-            (PortState::Listening(port), GeneralMessage::Announce(msg)) => {
-                port.process_announce(*msg, source_port_identity)
-            }
-            (PortState::Slave(port), GeneralMessage::Announce(msg)) => {
-                port.process_announce(*msg, source_port_identity)
-            }
-            (PortState::Master(port), GeneralMessage::Announce(msg)) => {
-                port.process_announce(*msg, source_port_identity)
-            }
-            (PortState::Uncalibrated(port), GeneralMessage::Announce(msg)) => {
-                port.process_announce(*msg, source_port_identity)
-            }
-            (PortState::Slave(port), GeneralMessage::FollowUp(msg)) => {
-                port.process_follow_up(*msg, source_port_identity)
-            }
-            (PortState::Slave(port), GeneralMessage::DelayResp(msg)) => {
-                port.process_delay_response(*msg, source_port_identity)
-            }
-            _ => None,
-        }
-    }
-}
+impl GeneralMessage {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemMessage {
@@ -127,51 +81,6 @@ pub enum SystemMessage {
     Initialized,
     AnnounceReceiptTimeout,
     QualificationTimeout,
-}
-
-impl SystemMessage {
-    pub fn dispatch<P: Port>(&self, portstate: &mut PortState<P>) -> Option<StateTransition> {
-        match (portstate, self) {
-            (PortState::Master(port), SystemMessage::AnnounceSendTimeout) => {
-                port.send_announce();
-                None
-            }
-            (PortState::Slave(port), SystemMessage::DelayRequestTimeout) => {
-                port.send_delay_request();
-                None
-            }
-            (PortState::Master(port), SystemMessage::SyncTimeout) => {
-                port.send_sync();
-                None
-            }
-            (PortState::Master(port), SystemMessage::Timestamp(msg)) => match msg.event_msg {
-                EventMessage::TwoStepSync(sync_msg) => {
-                    port.send_follow_up(sync_msg, msg.egress_timestamp)
-                }
-                _ => None,
-            },
-            (PortState::Slave(port), SystemMessage::Timestamp(msg)) => match msg.event_msg {
-                EventMessage::DelayReq(req_msg) => {
-                    port.process_delay_request(req_msg, msg.egress_timestamp)
-                }
-                _ => None,
-            },
-            (PortState::Initializing(_), SystemMessage::Initialized) => {
-                Some(StateTransition::ToListening)
-            }
-            (
-                PortState::Listening(_)
-                | PortState::Slave(_)
-                | PortState::Master(_)
-                | PortState::Uncalibrated(_),
-                SystemMessage::AnnounceReceiptTimeout,
-            ) => Some(StateTransition::ToMaster),
-            (PortState::PreMaster(_), SystemMessage::QualificationTimeout) => {
-                Some(StateTransition::ToMaster)
-            }
-            _ => None,
-        }
-    }
 }
 
 impl EventMessage {
@@ -502,8 +411,8 @@ impl DelayResponseMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimestampMessage {
-    event_msg: EventMessage,
-    egress_timestamp: TimeStamp,
+    pub event_msg: EventMessage,
+    pub egress_timestamp: TimeStamp,
 }
 
 impl TimestampMessage {
