@@ -84,59 +84,28 @@ impl<P: Port> PortState<P> {
     pub fn transit(self, transition: StateTransition) -> Self {
         match transition {
             StateTransition::ToMaster => match self {
-                PortState::Listening(port) => PortState::master(port.port),
-                PortState::Slave(port) => PortState::master(port.port),
-                PortState::PreMaster(port) => PortState::master(port.port),
-                PortState::Uncalibrated(port) => PortState::master(port.port),
+                PortState::Listening(port) => port.to_master(),
+                PortState::Slave(port) => port.to_master(),
+                PortState::PreMaster(port) => port.to_master(),
+                PortState::Uncalibrated(port) => port.to_master(),
                 _ => self,
             },
             StateTransition::ToSlave => match self {
-                PortState::Listening(listening) => {
-                    let delay_cycle = DelayCycle::new(
-                        0.into(),
-                        listening
-                            .port
-                            .timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0)),
-                    );
-                    PortState::Slave(SlavePort::new(
-                        listening.port,
-                        listening.announce_receipt_timeout,
-                        delay_cycle,
-                    ))
-                }
-                PortState::Uncalibrated(uncalibrated) => {
-                    let delay_cycle = DelayCycle::new(
-                        0.into(),
-                        uncalibrated
-                            .port
-                            .timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0)),
-                    );
-                    PortState::Slave(SlavePort::new(
-                        uncalibrated.port,
-                        uncalibrated.announce_receipt_timeout,
-                        delay_cycle,
-                    ))
-                }
+                PortState::Uncalibrated(uncalibrated) => uncalibrated.to_slave(),
                 _ => self,
             },
             StateTransition::ToUncalibrated => match self {
-                PortState::Listening(listening) => PortState::Uncalibrated(UncalibratedPort::new(
-                    listening.port,
-                    listening.announce_receipt_timeout,
-                )),
-                PortState::Master(master) => PortState::uncalibrated(master.port),
+                PortState::Listening(listening) => listening.to_uncalibrated(),
+                PortState::Master(master) => master.to_uncalibrated(),
                 _ => self,
             },
             StateTransition::ToPreMaster => match self {
-                PortState::Listening(listening) => PortState::pre_master(listening.port),
+                PortState::Listening(listening) => listening.to_pre_master(),
                 _ => self,
             },
             StateTransition::ToListening => match self {
-                PortState::Initializing(initializing) => PortState::listening(initializing.port),
-                PortState::Uncalibrated(uncalibrated) => PortState::Listening(ListeningPort::new(
-                    uncalibrated.port,
-                    uncalibrated.announce_receipt_timeout,
-                )),
+                PortState::Initializing(initializing) => initializing.to_listening(),
+                PortState::Uncalibrated(uncalibrated) => uncalibrated.to_listening(),
                 _ => self,
             },
         }
@@ -151,6 +120,10 @@ impl<P: Port> InitializingPort<P> {
     pub fn new(port: P) -> Self {
         Self { port }
     }
+
+    pub fn to_listening(self) -> PortState<P> {
+        PortState::listening(self.port)
+    }
 }
 
 pub struct ListeningPort<P: Port> {
@@ -164,6 +137,21 @@ impl<P: Port> ListeningPort<P> {
             port,
             announce_receipt_timeout,
         }
+    }
+
+    pub fn to_uncalibrated(self) -> PortState<P> {
+        PortState::Uncalibrated(UncalibratedPort::new(
+            self.port,
+            self.announce_receipt_timeout,
+        ))
+    }
+
+    pub fn to_pre_master(self) -> PortState<P> {
+        PortState::pre_master(self.port)
+    }
+
+    pub fn to_master(self) -> PortState<P> {
+        PortState::master(self.port)
     }
 
     pub fn process_announce(
@@ -312,6 +300,10 @@ impl<P: Port> SlavePort<P> {
         self.port.send_event(EventMessage::DelayReq(delay_request));
         self.delay_cycle.next();
     }
+
+    pub fn to_master(self) -> PortState<P> {
+        PortState::master(self.port)
+    }
 }
 
 pub struct MasterPort<P: Port> {
@@ -381,6 +373,10 @@ impl<P: Port> MasterPort<P> {
             .send_general(GeneralMessage::FollowUp(sync.follow_up(egress_timestamp)));
         None
     }
+
+    pub fn to_uncalibrated(self) -> PortState<P> {
+        PortState::uncalibrated(self.port)
+    }
 }
 
 pub struct PreMasterPort<P: Port> {
@@ -394,6 +390,10 @@ impl<P: Port> PreMasterPort<P> {
             port,
             _qualification_timeout,
         }
+    }
+
+    pub fn to_master(self) -> PortState<P> {
+        PortState::master(self.port)
     }
 }
 
@@ -424,6 +424,27 @@ impl<P: Port> UncalibratedPort<P> {
             BmcaRecommendation::Slave(_parent) => Some(StateTransition::ToSlave),
             BmcaRecommendation::Undecided => Some(StateTransition::ToListening),
         }
+    }
+
+    pub fn to_slave(self) -> PortState<P> {
+        let delay_cycle = DelayCycle::new(
+            0.into(),
+            self.port
+                .timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0)),
+        );
+        PortState::Slave(SlavePort::new(
+            self.port,
+            self.announce_receipt_timeout,
+            delay_cycle,
+        ))
+    }
+
+    pub fn to_listening(self) -> PortState<P> {
+        PortState::Listening(ListeningPort::new(self.port, self.announce_receipt_timeout))
+    }
+
+    pub fn to_master(self) -> PortState<P> {
+        PortState::master(self.port)
     }
 }
 
