@@ -1,0 +1,12 @@
+[package]
+name = "rptp"
+version = "0.1.0"
+edition = "2024"
+description = "A domain-driven, object-oriented implementation of IEEE 1588 Precision Time Protocol (PTP) in Rust."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mcsquared/rptp"
+homepage = "https://github.com/mcsquared/rptp"
+readme = "../../README.md"
+keywords = ["ptp", "ieee1588", "time", "synchronization", "networking"]
+categories = ["date-and-time", "network-programming"]
+rust-version = "1.89"
