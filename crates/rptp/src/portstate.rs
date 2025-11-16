@@ -12,7 +12,7 @@ use crate::time::TimeStamp;
 
 pub enum StateTransition {
     ToMaster,
-    ToSlave,
+    ToSlave(PortIdentity),
     ToUncalibrated,
     ToPreMaster,
     ToListening,
@@ -42,7 +42,7 @@ impl<P: Port> PortState<P> {
         PortState::Master(MasterPort::new(port, announce_cycle, sync_cycle))
     }
 
-    pub fn slave(port: P) -> Self {
+    pub fn slave(port: P, parent_port_identity: PortIdentity) -> Self {
         let announce_receipt_timeout = port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -53,7 +53,12 @@ impl<P: Port> PortState<P> {
             port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0)),
         );
 
-        PortState::Slave(SlavePort::new(port, announce_receipt_timeout, delay_cycle))
+        PortState::Slave(SlavePort::new(
+            port,
+            parent_port_identity,
+            announce_receipt_timeout,
+            delay_cycle,
+        ))
     }
 
     pub fn pre_master(port: P) -> Self {
@@ -90,8 +95,10 @@ impl<P: Port> PortState<P> {
                 PortState::Uncalibrated(port) => port.to_master(),
                 _ => self,
             },
-            StateTransition::ToSlave => match self {
-                PortState::Uncalibrated(uncalibrated) => uncalibrated.to_slave(),
+            StateTransition::ToSlave(parent_port_identity) => match self {
+                PortState::Uncalibrated(uncalibrated) => {
+                    uncalibrated.to_slave(parent_port_identity)
+                }
                 _ => self,
             },
             StateTransition::ToUncalibrated => match self {
@@ -252,37 +259,27 @@ pub struct SlavePort<P: Port> {
     announce_receipt_timeout: P::Timeout,
     delay_cycle: DelayCycle<P::Timeout>,
     master_estimate: MasterEstimate,
-    parent_port_identity: Option<PortIdentity>,
+    parent_port_identity: PortIdentity,
 }
 
 impl<P: Port> SlavePort<P> {
     pub fn new(
         port: P,
+        parent_port_identity: PortIdentity,
         announce_receipt_timeout: P::Timeout,
         delay_cycle: DelayCycle<P::Timeout>,
     ) -> Self {
         Self {
             port,
+            parent_port_identity,
             announce_receipt_timeout,
             delay_cycle,
             master_estimate: MasterEstimate::new(),
-            parent_port_identity: None,
         }
     }
 
     fn accepts_from(&self, source_port_identity: &PortIdentity) -> bool {
-        match &self.parent_port_identity {
-            Some(parent) => parent == source_port_identity,
-            None => true,
-        }
-    }
-
-    #[cfg(test)]
-    fn with_parent(self, parent_port_identity: PortIdentity) -> Self {
-        Self {
-            parent_port_identity: Some(parent_port_identity),
-            ..self
-        }
+        self.parent_port_identity == *source_port_identity
     }
 
     pub fn process_announce(
@@ -297,7 +294,7 @@ impl<P: Port> SlavePort<P> {
         match self.port.bmca().recommendation(self.port.local_clock()) {
             BmcaRecommendation::Master => Some(StateTransition::ToUncalibrated),
             BmcaRecommendation::Slave(parent) => {
-                self.parent_port_identity = Some(parent);
+                self.parent_port_identity = parent;
                 None
             }
             BmcaRecommendation::Undecided => None,
@@ -497,12 +494,12 @@ impl<P: Port> UncalibratedPort<P> {
 
         match self.port.bmca().recommendation(self.port.local_clock()) {
             BmcaRecommendation::Master => Some(StateTransition::ToPreMaster),
-            BmcaRecommendation::Slave(_parent) => Some(StateTransition::ToSlave),
+            BmcaRecommendation::Slave(parent) => Some(StateTransition::ToSlave(parent)),
             BmcaRecommendation::Undecided => Some(StateTransition::ToListening),
         }
     }
 
-    pub fn to_slave(self) -> PortState<P> {
+    pub fn to_slave(self, parent_port_identity: PortIdentity) -> PortState<P> {
         let delay_cycle = DelayCycle::new(
             0.into(),
             self.port
@@ -510,6 +507,7 @@ impl<P: Port> UncalibratedPort<P> {
         );
         PortState::Slave(SlavePort::new(
             self.port,
+            parent_port_identity,
             self.announce_receipt_timeout,
             delay_cycle,
         ))
@@ -627,6 +625,7 @@ mod tests {
 
         let mut slave = SlavePort::new(
             domain_port,
+            PortIdentity::fake(),
             FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
             DelayCycle::new(
                 0.into(),
@@ -972,7 +971,7 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut slave = PortState::slave(domain_port);
+        let mut slave = PortState::slave(domain_port, PortIdentity::fake());
 
         timer_host.take_system_messages();
 
@@ -996,7 +995,7 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut slave = PortState::slave(domain_port);
+        let mut slave = PortState::slave(domain_port, PortIdentity::fake());
 
         slave.dispatch_system(SystemMessage::DelayRequestTimeout);
 
@@ -1017,7 +1016,7 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut slave = PortState::slave(domain_port);
+        let mut slave = PortState::slave(domain_port, PortIdentity::fake());
 
         let transition = slave.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
 
@@ -1252,7 +1251,7 @@ mod tests {
             PortIdentity::fake(),
         );
 
-        assert!(matches!(transition, Some(StateTransition::ToSlave)));
+        assert!(matches!(transition, Some(StateTransition::ToSlave(_))));
     }
 
     #[test]
@@ -1337,8 +1336,7 @@ mod tests {
         );
 
         // Create slave with a chosen parent
-        let mut slave =
-            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle).with_parent(parent);
+        let mut slave = SlavePort::new(domain_port, parent, announce_receipt_timeout, delay_cycle);
 
         // Record a TwoStepSync from the parent so a matching FollowUp could produce ms_offset
         let transition = slave.process_two_step_sync(
@@ -1403,8 +1401,7 @@ mod tests {
         );
 
         // Create slave with chosen parent
-        let mut slave =
-            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle).with_parent(parent);
+        let mut slave = SlavePort::new(domain_port, parent, announce_receipt_timeout, delay_cycle);
 
         // Send a FollowUp from the parent first (ms offset incomplete without sync)
         let transition =
@@ -1463,8 +1460,7 @@ mod tests {
         );
 
         // Create slave with parent
-        let mut slave =
-            SlavePort::new(domain_port, announce_receipt_timeout, delay_cycle).with_parent(parent);
+        let mut slave = SlavePort::new(domain_port, parent, announce_receipt_timeout, delay_cycle);
 
         // Matching conversation from the parent (numbers chosen to yield estimate 2s)
         let transition = slave.process_two_step_sync(

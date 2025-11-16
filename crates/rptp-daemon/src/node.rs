@@ -274,7 +274,7 @@ mod tests {
     use rptp::bmca::LocalClockDS;
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
     use rptp::message::{EventMessage, GeneralMessage};
-    use rptp::port::{DomainPort, Port, PortNumber};
+    use rptp::port::{DomainPort, Port, PortIdentity, PortNumber};
     use rptp::portstate::{DelayCycle, PortState, SlavePort};
 
     use crate::net::{FakeNetworkSocket, MulticastSocket};
@@ -428,6 +428,10 @@ mod tests {
 
         let port_state = PortState::Slave(SlavePort::new(
             domain_port,
+            PortIdentity::new(
+                ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+                PortNumber::new(1),
+            ),
             announce_receipt_timeout,
             delay_cycle,
         ));
