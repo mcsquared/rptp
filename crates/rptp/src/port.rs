@@ -143,6 +143,23 @@ impl PortIdentity {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParentPortIdentity {
+    parent_port_identity: PortIdentity,
+}
+
+impl ParentPortIdentity {
+    pub fn new(parent_port_identity: PortIdentity) -> Self {
+        Self {
+            parent_port_identity,
+        }
+    }
+
+    pub fn matches(&self, source_port_identity: &PortIdentity) -> bool {
+        self.parent_port_identity == *source_port_identity
+    }
+}
+
 pub struct DomainPort<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> {
     local_clock: &'a LocalClock<C>,
     physical_port: P,

@@ -7,13 +7,13 @@ use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
     GeneralMessage, SequenceId, SystemMessage, TwoStepSyncMessage,
 };
-use crate::port::{Port, PortIdentity, Timeout};
+use crate::port::{ParentPortIdentity, Port, PortIdentity, Timeout};
 use crate::sync::MasterEstimate;
 use crate::time::TimeStamp;
 
 pub enum StateTransition {
     ToMaster,
-    ToSlave(PortIdentity),
+    ToSlave(ParentPortIdentity),
     ToUncalibrated,
     ToPreMaster,
     ToListening,
@@ -43,7 +43,7 @@ impl<P: Port, B: Bmca, L: Log> PortState<P, B, L> {
         PortState::Master(MasterPort::new(port, bmca, announce_cycle, sync_cycle, log))
     }
 
-    pub fn slave(port: P, bmca: B, parent_port_identity: PortIdentity, log: L) -> Self {
+    pub fn slave(port: P, bmca: B, parent_port_identity: ParentPortIdentity, log: L) -> Self {
         let announce_receipt_timeout = port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -282,7 +282,7 @@ pub struct SlavePort<P: Port, B: Bmca, L: Log> {
     announce_receipt_timeout: P::Timeout,
     delay_cycle: DelayCycle<P::Timeout>,
     master_estimate: MasterEstimate,
-    parent_port_identity: PortIdentity,
+    parent_port_identity: ParentPortIdentity,
     log: L,
 }
 
@@ -290,7 +290,7 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
     pub fn new(
         port: P,
         bmca: B,
-        parent_port_identity: PortIdentity,
+        parent_port_identity: ParentPortIdentity,
         announce_receipt_timeout: P::Timeout,
         delay_cycle: DelayCycle<P::Timeout>,
         log: L,
@@ -304,10 +304,6 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
             master_estimate: MasterEstimate::new(),
             log,
         }
-    }
-
-    fn accepts_from(&self, source_port_identity: &PortIdentity) -> bool {
-        self.parent_port_identity == *source_port_identity
     }
 
     pub fn process_announce(
@@ -337,7 +333,7 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         ingress_timestamp: TimeStamp,
     ) -> Option<StateTransition> {
         self.log.message_received("Sync");
-        if !self.accepts_from(&source_port_identity) {
+        if !self.parent_port_identity.matches(&source_port_identity) {
             return None;
         }
 
@@ -357,7 +353,7 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         source_port_identity: PortIdentity,
     ) -> Option<StateTransition> {
         self.log.message_received("FollowUp");
-        if !self.accepts_from(&source_port_identity) {
+        if !self.parent_port_identity.matches(&source_port_identity) {
             return None;
         }
 
@@ -390,7 +386,7 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         source_port_identity: PortIdentity,
     ) -> Option<StateTransition> {
         self.log.message_received("DelayResp");
-        if !self.accepts_from(&source_port_identity) {
+        if !self.parent_port_identity.matches(&source_port_identity) {
             return None;
         }
 
@@ -549,7 +545,7 @@ impl<P: Port, B: Bmca, L: Log> UncalibratedPort<P, B, L> {
         }
     }
 
-    pub fn to_slave(self, parent_port_identity: PortIdentity) -> PortState<P, B, L> {
+    pub fn to_slave(self, parent_port_identity: ParentPortIdentity) -> PortState<P, B, L> {
         let delay_cycle = DelayCycle::new(
             0.into(),
             self.port
@@ -683,7 +679,7 @@ mod tests {
         let mut slave = SlavePort::new(
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            PortIdentity::fake(),
+            ParentPortIdentity::new(PortIdentity::fake()),
             FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
             DelayCycle::new(
                 0.into(),
@@ -1069,7 +1065,7 @@ mod tests {
         let mut slave = PortState::slave(
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            PortIdentity::fake(),
+            ParentPortIdentity::new(PortIdentity::fake()),
             NoopLog,
         );
 
@@ -1097,7 +1093,7 @@ mod tests {
         let mut slave = PortState::slave(
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            PortIdentity::fake(),
+            ParentPortIdentity::new(PortIdentity::fake()),
             NoopLog,
         );
 
@@ -1122,7 +1118,7 @@ mod tests {
         let mut slave = PortState::slave(
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            PortIdentity::fake(),
+            ParentPortIdentity::new(PortIdentity::fake()),
             NoopLog,
         );
 
@@ -1478,7 +1474,7 @@ mod tests {
         let mut slave = SlavePort::new(
             domain_port,
             bmca,
-            parent,
+            ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
             NoopLog,
@@ -1550,7 +1546,7 @@ mod tests {
         let mut slave = SlavePort::new(
             domain_port,
             bmca,
-            parent,
+            ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
             NoopLog,
@@ -1616,7 +1612,7 @@ mod tests {
         let mut slave = SlavePort::new(
             domain_port,
             bmca,
-            parent,
+            ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
             NoopLog,
@@ -1764,7 +1760,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            PortIdentity::fake(),
+            ParentPortIdentity::new(PortIdentity::fake()),
             NoopLog,
         );
 
@@ -1834,7 +1830,7 @@ mod tests {
             NoopLog,
         );
 
-        let parent = PortIdentity::fake();
+        let parent = ParentPortIdentity::new(PortIdentity::fake());
         let slave = uncalibrated.transit(StateTransition::ToSlave(parent));
 
         assert!(matches!(slave, PortState::Slave(_)));

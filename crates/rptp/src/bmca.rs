@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use crate::clock::{ClockIdentity, ClockQuality, LocalClock, SynchronizableClock};
 use crate::message::{AnnounceMessage, SequenceId};
-use crate::port::PortIdentity;
+use crate::port::{ParentPortIdentity, PortIdentity};
 
 pub trait SortedForeignClockRecords {
     fn insert(&mut self, record: ForeignClockRecord);
@@ -201,7 +201,7 @@ impl PartialOrd for ForeignClockRecord {
 pub enum BmcaRecommendation {
     Undecided,
     Master,
-    Slave(PortIdentity),
+    Slave(ParentPortIdentity),
     // TODO: Passive,
 }
 
@@ -254,7 +254,9 @@ impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
                     if local_clock.outranks_foreign(foreign_clock) {
                         BmcaRecommendation::Master
                     } else {
-                        BmcaRecommendation::Slave(foreign_record.source_port_identity())
+                        BmcaRecommendation::Slave(ParentPortIdentity::new(
+                            foreign_record.source_port_identity(),
+                        ))
                     }
                 } else {
                     BmcaRecommendation::Undecided
@@ -421,7 +423,10 @@ pub(crate) mod tests {
 
         let recommendation = bmca.recommendation(&local_clock);
 
-        assert_eq!(recommendation, BmcaRecommendation::Slave(port_id_high));
+        assert_eq!(
+            recommendation,
+            BmcaRecommendation::Slave(ParentPortIdentity::new(port_id_high))
+        );
     }
 
     #[test]
@@ -449,7 +454,10 @@ pub(crate) mod tests {
 
         let recommendation = bmca.recommendation(&local_clock);
 
-        assert_eq!(recommendation, BmcaRecommendation::Slave(port_id_high));
+        assert_eq!(
+            recommendation,
+            BmcaRecommendation::Slave(ParentPortIdentity::new(port_id_high))
+        );
     }
 
     #[test]
