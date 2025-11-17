@@ -12,7 +12,7 @@ use rptp::{
     infra::infra_support::SortedForeignClockRecordsVec,
     log::NoopLog,
     message::{DomainMessage, EventMessage, SystemMessage, TimestampMessage},
-    port::{DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
+    port::{DomainNumber, DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
 };
 
 use crate::net::NetworkSocket;
@@ -22,16 +22,16 @@ pub struct TokioTimeout {
 }
 
 struct TokioTimeoutInner {
-    domain_number: u8,
-    tx: mpsc::UnboundedSender<(u8, SystemMessage)>,
+    domain_number: DomainNumber,
+    tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
     msg: Mutex<SystemMessage>,
     handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl TokioTimeout {
     fn new(
-        domain_number: u8,
-        tx: mpsc::UnboundedSender<(u8, SystemMessage)>,
+        domain_number: DomainNumber,
+        tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
         msg: SystemMessage,
         delay: Duration,
     ) -> Self {
@@ -88,12 +88,15 @@ impl Drop for TokioTimeout {
 }
 
 pub struct TokioTimerHost {
-    domain_number: u8,
-    tx: mpsc::UnboundedSender<(u8, SystemMessage)>,
+    domain_number: DomainNumber,
+    tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
 }
 
 impl TokioTimerHost {
-    pub fn new(domain_number: u8, tx: mpsc::UnboundedSender<(u8, SystemMessage)>) -> Self {
+    pub fn new(
+        domain_number: DomainNumber,
+        tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
+    ) -> Self {
         Self { domain_number, tx }
     }
 }
@@ -108,19 +111,19 @@ impl TimerHost for TokioTimerHost {
 
 pub struct TokioPhysicalPort<'a, C: SynchronizableClock, N: NetworkSocket> {
     clock: &'a LocalClock<C>,
-    domain_number: u8,
+    domain_number: DomainNumber,
     event_socket: Rc<N>,
     general_socket: Rc<N>,
-    system_tx: mpsc::UnboundedSender<(u8, SystemMessage)>,
+    system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
 }
 
 impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPhysicalPort<'a, C, N> {
     pub fn new(
         clock: &'a LocalClock<C>,
-        domain_number: u8,
+        domain_number: DomainNumber,
         event_socket: Rc<N>,
         general_socket: Rc<N>,
-        system_tx: mpsc::UnboundedSender<(u8, SystemMessage)>,
+        system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
     ) -> Self {
         Self {
             clock,
@@ -160,7 +163,7 @@ pub struct TokioPortsLoop<'a, C: SynchronizableClock, N: NetworkSocket> {
     >,
     event_socket: Rc<N>,
     general_socket: Rc<N>,
-    system_rx: mpsc::UnboundedReceiver<(u8, SystemMessage)>,
+    system_rx: mpsc::UnboundedReceiver<(DomainNumber, SystemMessage)>,
 }
 
 impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
@@ -173,7 +176,7 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
         >,
         event_socket: Rc<N>,
         general_socket: Rc<N>,
-        system_rx: mpsc::UnboundedReceiver<(u8, SystemMessage)>,
+        system_rx: mpsc::UnboundedReceiver<(DomainNumber, SystemMessage)>,
     ) -> std::io::Result<Self> {
         Ok(Self {
             local_clock,
@@ -199,7 +202,7 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
 
         let port = self
             .portmap
-            .port_by_domain(0)
+            .port_by_domain(DomainNumber::new(0))
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "no port for domain 0"))?;
         port.process_system_message(SystemMessage::Initialized);
 
@@ -295,7 +298,7 @@ mod tests {
         let event_socket = Rc::new(event_socket);
         let general_socket = Rc::new(general_socket);
 
-        let domain_number = 0;
+        let domain_number = DomainNumber::new(0);
 
         let local_clock = LocalClock::new(
             FakeClock::default(),
@@ -379,7 +382,7 @@ mod tests {
         let event_socket = Rc::new(event_socket);
         let general_socket = Rc::new(general_socket);
 
-        let domain_number = 0;
+        let domain_number = DomainNumber::new(0);
 
         let local_clock = LocalClock::new(
             FakeClock::default(),

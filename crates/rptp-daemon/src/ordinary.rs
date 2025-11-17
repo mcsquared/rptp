@@ -7,7 +7,7 @@ use rptp::clock::{LocalClock, SynchronizableClock};
 use rptp::infra::infra_support::SortedForeignClockRecordsVec;
 use rptp::log::NoopLog;
 use rptp::message::SystemMessage;
-use rptp::port::{DomainPort, PortNumber};
+use rptp::port::{DomainNumber, DomainPort, PortNumber};
 use rptp::portstate::PortState;
 
 use crate::net::NetworkSocket;
@@ -15,10 +15,10 @@ use crate::node::{TokioPhysicalPort, TokioTimerHost};
 
 pub fn ordinary_clock_port<'a, C, N>(
     local_clock: &'a LocalClock<C>,
-    domain_number: u8,
+    domain_number: DomainNumber,
     event_socket: Rc<N>,
     general_socket: Rc<N>,
-    system_tx: mpsc::UnboundedSender<(u8, SystemMessage)>,
+    system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
     port_number: PortNumber,
 ) -> PortState<
     Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,

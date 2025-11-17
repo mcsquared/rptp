@@ -6,7 +6,7 @@ use tokio::time::{Duration, timeout};
 
 use rptp::bmca::LocalClockDS;
 use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
-use rptp::port::{PortNumber, SingleDomainPortMap};
+use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
 use rptp::time::TimeStamp;
 use rptp_daemon::net::MulticastSocket;
 use rptp_daemon::node::TokioPortsLoop;
@@ -14,7 +14,7 @@ use rptp_daemon::ordinary::ordinary_clock_port;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::io::Result<()> {
-    let domain = 0;
+    let domain = DomainNumber::new(0);
 
     let local_clock = LocalClock::new(
         Rc::new(FakeClock::new(TimeStamp::new(0, 0))),

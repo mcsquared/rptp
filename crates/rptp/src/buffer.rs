@@ -1,4 +1,5 @@
 use crate::message::SequenceId;
+use crate::port::DomainNumber;
 use crate::port::PortIdentity;
 
 pub struct MessageBuffer {
@@ -9,14 +10,14 @@ impl MessageBuffer {
     pub fn new(
         transport_specific: u8,
         version: u8,
-        domain_number: u8,
+        domain_number: DomainNumber,
         source_port_identity: PortIdentity,
         log_message_interval: i8,
     ) -> Self {
         let mut buf = [0u8; 2048];
         buf[0] = (transport_specific & 0x0F) << 4;
         buf[1] = version & 0x0F;
-        buf[4] = domain_number;
+        buf[4] = domain_number.as_u8();
         buf[20..30].copy_from_slice(source_port_identity.to_bytes().as_ref());
         buf[33] = log_message_interval as u8;
 
@@ -132,7 +133,7 @@ mod tests {
         let mut buf = MessageBuffer::new(
             0,
             2,
-            0,
+            DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             0x7F,
         );
@@ -150,7 +151,7 @@ mod tests {
         let mut buf = MessageBuffer::new(
             0,
             2,
-            0,
+            DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             0x7F,
         );
@@ -168,7 +169,7 @@ mod tests {
         let mut buf = MessageBuffer::new(
             0,
             2,
-            0,
+            DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             0x7F,
         );
@@ -186,7 +187,7 @@ mod tests {
         let mut buf = MessageBuffer::new(
             0,
             2,
-            0,
+            DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             0x7F,
         );
@@ -212,7 +213,7 @@ mod tests {
         let mut buf = MessageBuffer::new(
             0,
             2,
-            0,
+            DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             0x7F,
         );

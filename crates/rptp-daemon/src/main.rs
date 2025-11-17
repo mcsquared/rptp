@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 
 use rptp::bmca::LocalClockDS;
 use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
-use rptp::port::{PortNumber, SingleDomainPortMap};
+use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
 
 use crate::net::MulticastSocket;
 use crate::node::TokioPortsLoop;
@@ -16,7 +16,7 @@ use crate::ordinary::ordinary_clock_port;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::io::Result<()> {
-    let domain = 0;
+    let domain = DomainNumber::new(0);
 
     let local_clock = LocalClock::new(
         FakeClock::default(),

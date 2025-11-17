@@ -664,7 +664,7 @@ mod tests {
         TwoStepSyncMessage,
     };
     use crate::port::test_support::{FakePort, FakeTimeout, FakeTimerHost};
-    use crate::port::{DomainPort, PortNumber};
+    use crate::port::{DomainNumber, DomainPort, PortNumber};
 
     #[test]
     fn slave_port_synchronizes_clock() {
@@ -676,7 +676,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
 
@@ -718,7 +718,13 @@ mod tests {
         );
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(&local_clock, &port, &timer_host, 0, PortNumber::new(1));
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
@@ -757,7 +763,13 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(&local_clock, &port, &timer_host, 0, PortNumber::new(1));
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
 
         let mut master = PortState::master(
             domain_port,
@@ -781,7 +793,13 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(&local_clock, &port, &timer_host, 0, PortNumber::new(1));
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
 
         let mut master = PortState::master(
             domain_port,
@@ -804,7 +822,13 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(&local_clock, &port, &timer_host, 0, PortNumber::new(1));
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
@@ -843,7 +867,13 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(&local_clock, &port, &timer_host, 0, PortNumber::new(1));
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
 
         let mut master = PortState::master(
             domain_port,
@@ -865,7 +895,13 @@ mod tests {
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(&local_clock, &port, &timer_host, 0, PortNumber::new(1));
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
 
         let mut master = PortState::master(
             domain_port,
@@ -898,7 +934,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let announce_cycle = AnnounceCycle::new(
@@ -938,7 +974,13 @@ mod tests {
         .with_resolved_clock(foreign_clock_ds)];
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(&local_clock, &port, &timer_host, 0, PortNumber::new(1));
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
@@ -975,7 +1017,13 @@ mod tests {
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(&local_clock, &port, &timer_host, 0, PortNumber::new(1));
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
@@ -1014,7 +1062,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             &timer_host,
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
 
@@ -1042,7 +1090,7 @@ mod tests {
             &local_clock,
             &port,
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
 
@@ -1067,7 +1115,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
 
@@ -1092,7 +1140,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -1112,7 +1160,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -1141,7 +1189,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             &timer_host,
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -1180,7 +1228,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -1218,7 +1266,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             &timer_host,
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -1263,7 +1311,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             &timer_host,
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let qualification_timeout =
@@ -1288,7 +1336,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let qualification_timeout =
@@ -1320,7 +1368,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -1351,7 +1399,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -1405,7 +1453,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let announce_receipt_timeout = domain_port.timeout(
@@ -1476,7 +1524,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
@@ -1546,7 +1594,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
-            0,
+            DomainNumber::new(0),
             PortNumber::new(1),
         );
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
@@ -1690,7 +1738,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -1712,7 +1760,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -1735,7 +1783,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -1757,7 +1805,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -1779,7 +1827,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -1802,7 +1850,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -1824,7 +1872,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -1846,7 +1894,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -1868,7 +1916,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
@@ -1890,7 +1938,7 @@ mod tests {
                 &local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
-                0,
+                DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),

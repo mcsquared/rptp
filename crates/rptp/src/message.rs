@@ -1,7 +1,7 @@
 use crate::{
     bmca::ForeignClockDS,
     buffer::{ControlField, FinalizedBuffer, MessageBuffer, MessageType},
-    port::{PortIdentity, PortMap},
+    port::{DomainNumber, PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Duration, TimeStamp},
 };
@@ -35,10 +35,11 @@ impl<'a> DomainMessage<'a> {
         Ok(())
     }
 
-    fn domain_number(&self) -> Result<u8> {
+    fn domain_number(&self) -> Result<DomainNumber> {
         self.buf
             .get(4)
             .copied()
+            .map(DomainNumber::new)
             .ok_or(ProtocolError::DomainNotFound.into())
     }
 
@@ -507,7 +508,7 @@ mod tests {
         let mut buf = MessageBuffer::new(
             0,
             2,
-            0,
+            DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             0x7F,
         );
@@ -523,7 +524,7 @@ mod tests {
         let mut buf = MessageBuffer::new(
             0,
             2,
-            0,
+            DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             0x7F,
         );
@@ -539,7 +540,7 @@ mod tests {
         let mut buf = MessageBuffer::new(
             0,
             2,
-            0,
+            DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             0x7F,
         );
@@ -555,7 +556,7 @@ mod tests {
         let mut buf = MessageBuffer::new(
             0,
             2,
-            0,
+            DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             0x7F,
         );
@@ -571,7 +572,7 @@ mod tests {
         let mut buf = MessageBuffer::new(
             0,
             2,
-            0,
+            DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             0x7F,
         );

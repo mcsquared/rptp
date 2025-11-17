@@ -75,6 +75,31 @@ impl From<PortNumber> for u16 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DomainNumber(u8);
+
+impl DomainNumber {
+    pub const fn new(n: u8) -> Self {
+        Self(n)
+    }
+
+    pub fn as_u8(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<u8> for DomainNumber {
+    fn from(value: u8) -> Self {
+        DomainNumber::new(value)
+    }
+}
+
+impl From<DomainNumber> for u8 {
+    fn from(value: DomainNumber) -> Self {
+        value.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PortIdentity {
     clock_identity: ClockIdentity,
     port_number: PortNumber,
@@ -122,7 +147,7 @@ pub struct DomainPort<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost>
     local_clock: &'a LocalClock<C>,
     physical_port: P,
     timer_host: T,
-    domain_number: u8,
+    domain_number: DomainNumber,
     port_number: PortNumber,
 }
 
@@ -131,7 +156,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> DomainPort<'a, C
         local_clock: &'a LocalClock<C>,
         physical_port: P,
         timer_host: T,
-        domain_number: u8,
+        domain_number: DomainNumber,
         port_number: PortNumber,
     ) -> Self {
         Self {
@@ -183,16 +208,16 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> Port for DomainP
 }
 
 pub trait PortMap {
-    fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn PortIngress>;
+    fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress>;
 }
 
 pub struct SingleDomainPortMap<P: Port, B: Bmca, L: Log> {
-    domain_number: u8,
+    domain_number: DomainNumber,
     port_state: Option<PortState<P, B, L>>,
 }
 
 impl<P: Port, B: Bmca, L: Log> SingleDomainPortMap<P, B, L> {
-    pub fn new(domain_number: u8, port_state: PortState<P, B, L>) -> Self {
+    pub fn new(domain_number: DomainNumber, port_state: PortState<P, B, L>) -> Self {
         Self {
             domain_number,
             port_state: Some(port_state),
@@ -201,7 +226,7 @@ impl<P: Port, B: Bmca, L: Log> SingleDomainPortMap<P, B, L> {
 }
 
 impl<P: Port, B: Bmca, L: Log> PortMap for SingleDomainPortMap<P, B, L> {
-    fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn PortIngress> {
+    fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress> {
         if self.domain_number == domain_number {
             Ok(&mut self.port_state)
         } else {
@@ -294,7 +319,7 @@ mod tests {
         );
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();
-        let domain_number = 3u8;
+        let domain_number = DomainNumber::new(3);
         let port_number = PortNumber::new(5);
 
         let port = DomainPort::new(
@@ -309,7 +334,7 @@ mod tests {
         let bufs = sent.borrow();
         assert!(!bufs.is_empty());
         let bytes = &bufs[0];
-        assert_eq!(bytes[4], domain_number);
+        assert_eq!(bytes[4], domain_number.as_u8());
         assert_eq!(
             &bytes[20..30],
             &crate::port::PortIdentity::new(identity, port_number).to_bytes()
@@ -325,7 +350,7 @@ mod tests {
         );
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();
-        let domain_number = 9u8;
+        let domain_number = DomainNumber::new(9);
         let port_number = PortNumber::new(2);
 
         let port = DomainPort::new(
@@ -341,7 +366,7 @@ mod tests {
         let bufs = sent.borrow();
         assert!(!bufs.is_empty());
         let bytes = &bufs[0];
-        assert_eq!(bytes[4], domain_number);
+        assert_eq!(bytes[4], domain_number.as_u8());
         assert_eq!(
             &bytes[20..30],
             &crate::port::PortIdentity::new(identity, port_number).to_bytes()
