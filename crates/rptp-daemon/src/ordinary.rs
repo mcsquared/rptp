@@ -20,15 +20,8 @@ pub fn ordinary_clock_port<'a, C, N>(
     system_tx: mpsc::UnboundedSender<(u8, SystemMessage)>,
     port_number: PortNumber,
 ) -> PortState<
-    Box<
-        DomainPort<
-            'a,
-            C,
-            FullBmca<SortedForeignClockRecordsVec>,
-            TokioPhysicalPort<'a, C, N>,
-            TokioTimerHost,
-        >,
-    >,
+    Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
+    FullBmca<SortedForeignClockRecordsVec>,
 >
 where
     C: SynchronizableClock,
@@ -47,12 +40,11 @@ where
 
     let domain_port = Box::new(DomainPort::new(
         local_clock,
-        bmca,
         physical_port,
         timer_host,
         domain_number,
         port_number,
     ));
 
-    PortState::initializing(domain_port)
+    PortState::initializing(domain_port, bmca)
 }

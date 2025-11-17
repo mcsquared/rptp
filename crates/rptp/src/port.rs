@@ -36,11 +36,9 @@ pub trait TimerHost {
 pub trait Port {
     type Clock: SynchronizableClock;
     type PhysicalPort: PhysicalPort;
-    type Bmca: Bmca;
     type Timeout: Timeout;
 
     fn local_clock(&self) -> &LocalClock<Self::Clock>;
-    fn bmca(&self) -> &Self::Bmca;
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
@@ -119,21 +117,17 @@ impl PortIdentity {
     }
 }
 
-pub struct DomainPort<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost> {
+pub struct DomainPort<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> {
     local_clock: &'a LocalClock<C>,
-    bmca: B,
     physical_port: P,
     timer_host: T,
     domain_number: u8,
     port_number: PortNumber,
 }
 
-impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost>
-    DomainPort<'a, C, B, P, T>
-{
+impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> DomainPort<'a, C, P, T> {
     pub fn new(
         local_clock: &'a LocalClock<C>,
-        bmca: B,
         physical_port: P,
         timer_host: T,
         domain_number: u8,
@@ -141,7 +135,6 @@ impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost>
     ) -> Self {
         Self {
             local_clock,
-            bmca,
             physical_port,
             timer_host,
             domain_number,
@@ -150,20 +143,13 @@ impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost>
     }
 }
 
-impl<'a, C: SynchronizableClock, B: Bmca, P: PhysicalPort, T: TimerHost> Port
-    for DomainPort<'a, C, B, P, T>
-{
+impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> Port for DomainPort<'a, C, P, T> {
     type Clock = C;
     type PhysicalPort = P;
-    type Bmca = B;
     type Timeout = T::Timeout;
 
     fn local_clock(&self) -> &LocalClock<Self::Clock> {
         &self.local_clock
-    }
-
-    fn bmca(&self) -> &Self::Bmca {
-        &self.bmca
     }
 
     fn send_event(&self, msg: EventMessage) {
@@ -199,13 +185,13 @@ pub trait PortMap {
     fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn PortIngress>;
 }
 
-pub struct SingleDomainPortMap<P: Port> {
+pub struct SingleDomainPortMap<P: Port, B: Bmca> {
     domain_number: u8,
-    port_state: Option<PortState<P>>,
+    port_state: Option<PortState<P, B>>,
 }
 
-impl<P: Port> SingleDomainPortMap<P> {
-    pub fn new(domain_number: u8, port_state: PortState<P>) -> Self {
+impl<P: Port, B: Bmca> SingleDomainPortMap<P, B> {
+    pub fn new(domain_number: u8, port_state: PortState<P, B>) -> Self {
         Self {
             domain_number,
             port_state: Some(port_state),
@@ -213,7 +199,7 @@ impl<P: Port> SingleDomainPortMap<P> {
     }
 }
 
-impl<P: Port> PortMap for SingleDomainPortMap<P> {
+impl<P: Port, B: Bmca> PortMap for SingleDomainPortMap<P, B> {
     fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn PortIngress> {
         if self.domain_number == domain_number {
             Ok(&mut self.port_state)
@@ -234,7 +220,7 @@ pub trait PortIngress {
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
-impl<P: Port> PortIngress for Option<PortState<P>> {
+impl<P: Port, B: Bmca> PortIngress for Option<PortState<P, B>> {
     fn process_event_message(
         &mut self,
         source_port_identity: PortIdentity,
@@ -274,7 +260,7 @@ mod tests {
 
     use self::test_support::FakeTimerHost;
 
-    use crate::bmca::{LocalClockDS, NoopBmca};
+    use crate::bmca::LocalClockDS;
     use crate::clock::{ClockQuality, FakeClock};
     use crate::message::{DelayRequestMessage, FollowUpMessage};
 
@@ -312,7 +298,6 @@ mod tests {
 
         let port = DomainPort::new(
             &local_clock,
-            NoopBmca,
             cap_port,
             &timer_host,
             domain_number,
@@ -344,7 +329,6 @@ mod tests {
 
         let port = DomainPort::new(
             &local_clock,
-            NoopBmca,
             cap_port,
             &timer_host,
             domain_number,

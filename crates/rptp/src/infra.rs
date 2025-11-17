@@ -28,15 +28,10 @@ pub mod infra_support {
     impl<P: Port> Port for Box<P> {
         type Clock = P::Clock;
         type PhysicalPort = P::PhysicalPort;
-        type Bmca = P::Bmca;
         type Timeout = P::Timeout;
 
         fn local_clock(&self) -> &LocalClock<Self::Clock> {
             self.as_ref().local_clock()
-        }
-
-        fn bmca(&self) -> &Self::Bmca {
-            self.as_ref().bmca()
         }
 
         fn send_event(&self, msg: EventMessage) {

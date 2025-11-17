@@ -155,15 +155,8 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> PhysicalPort for TokioPhysica
 pub struct TokioPortsLoop<'a, C: SynchronizableClock, N: NetworkSocket> {
     local_clock: &'a LocalClock<C>,
     portmap: SingleDomainPortMap<
-        Box<
-            DomainPort<
-                'a,
-                C,
-                FullBmca<SortedForeignClockRecordsVec>,
-                TokioPhysicalPort<'a, C, N>,
-                TokioTimerHost,
-            >,
-        >,
+        Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
+        FullBmca<SortedForeignClockRecordsVec>,
     >,
     event_socket: Rc<N>,
     general_socket: Rc<N>,
@@ -174,15 +167,8 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
     pub async fn new(
         local_clock: &'a LocalClock<C>,
         portmap: SingleDomainPortMap<
-            Box<
-                DomainPort<
-                    'a,
-                    C,
-                    FullBmca<SortedForeignClockRecordsVec>,
-                    TokioPhysicalPort<'a, C, N>,
-                    TokioTimerHost,
-                >,
-            >,
+            Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
+            FullBmca<SortedForeignClockRecordsVec>,
         >,
         event_socket: Rc<N>,
         general_socket: Rc<N>,
@@ -288,11 +274,11 @@ mod tests {
                     DomainPort<
                         '_,
                         FakeClock,
-                        FullBmca<SortedForeignClockRecordsVec>,
                         TokioPhysicalPort<'_, FakeClock, MulticastSocket>,
                         TokioTimerHost,
                     >,
                 >,
+                FullBmca<SortedForeignClockRecordsVec>,
             >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
@@ -328,13 +314,13 @@ mod tests {
         );
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             domain_number,
             PortNumber::new(1),
         ));
-        let port_state = PortState::master(domain_port);
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let port_state = PortState::master(domain_port, bmca);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(
             &local_clock,
@@ -412,12 +398,12 @@ mod tests {
         );
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             domain_number,
             PortNumber::new(1),
         ));
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(10),
@@ -428,6 +414,7 @@ mod tests {
 
         let port_state = PortState::Slave(SlavePort::new(
             domain_port,
+            bmca,
             PortIdentity::new(
                 ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
                 PortNumber::new(1),
