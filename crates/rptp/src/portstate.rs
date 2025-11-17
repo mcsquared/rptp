@@ -1679,4 +1679,226 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn portstate_listening_to_master_transition() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+
+        let listening = PortState::listening(
+            DomainPort::new(
+                &local_clock,
+                FakePort::new(),
+                FakeTimerHost::new(),
+                0,
+                PortNumber::new(1),
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        let master = listening.transit(StateTransition::ToMaster);
+
+        assert!(matches!(master, PortState::Master(_)));
+    }
+
+    #[test]
+    fn portstate_slave_to_master_transition() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+
+        let slave = PortState::slave(
+            DomainPort::new(
+                &local_clock,
+                FakePort::new(),
+                FakeTimerHost::new(),
+                0,
+                PortNumber::new(1),
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            PortIdentity::fake(),
+            NoopLog,
+        );
+
+        let master = slave.transit(StateTransition::ToMaster);
+
+        assert!(matches!(master, PortState::Master(_)));
+    }
+
+    #[test]
+    fn portstate_pre_master_to_master_transition() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+
+        let pre_master = PortState::pre_master(
+            DomainPort::new(
+                &local_clock,
+                FakePort::new(),
+                FakeTimerHost::new(),
+                0,
+                PortNumber::new(1),
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        let master = pre_master.transit(StateTransition::ToMaster);
+
+        assert!(matches!(master, PortState::Master(_)));
+    }
+
+    #[test]
+    fn portstate_uncalibrated_to_master_transition() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+
+        let uncalibrated = PortState::uncalibrated(
+            DomainPort::new(
+                &local_clock,
+                FakePort::new(),
+                FakeTimerHost::new(),
+                0,
+                PortNumber::new(1),
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        let master = uncalibrated.transit(StateTransition::ToMaster);
+
+        assert!(matches!(master, PortState::Master(_)));
+    }
+
+    #[test]
+    fn portstate_uncalibrated_to_slave_transition() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+
+        let uncalibrated = PortState::uncalibrated(
+            DomainPort::new(
+                &local_clock,
+                FakePort::new(),
+                FakeTimerHost::new(),
+                0,
+                PortNumber::new(1),
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        let parent = PortIdentity::fake();
+        let slave = uncalibrated.transit(StateTransition::ToSlave(parent));
+
+        assert!(matches!(slave, PortState::Slave(_)));
+    }
+
+    #[test]
+    fn portstate_listening_to_uncalibrated_transition() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+
+        let listening = PortState::listening(
+            DomainPort::new(
+                &local_clock,
+                FakePort::new(),
+                FakeTimerHost::new(),
+                0,
+                PortNumber::new(1),
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        let uncalibrated = listening.transit(StateTransition::ToUncalibrated);
+
+        assert!(matches!(uncalibrated, PortState::Uncalibrated(_)));
+    }
+
+    #[test]
+    fn portstate_master_to_uncalibrated_transition() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+
+        let master = PortState::master(
+            DomainPort::new(
+                &local_clock,
+                FakePort::new(),
+                FakeTimerHost::new(),
+                0,
+                PortNumber::new(1),
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        let uncalibrated = master.transit(StateTransition::ToUncalibrated);
+
+        assert!(matches!(uncalibrated, PortState::Uncalibrated(_)));
+    }
+
+    #[test]
+    fn portstate_listening_to_pre_master_transition() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+
+        let listening = PortState::listening(
+            DomainPort::new(
+                &local_clock,
+                FakePort::new(),
+                FakeTimerHost::new(),
+                0,
+                PortNumber::new(1),
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        let pre_master = listening.transit(StateTransition::ToPreMaster);
+
+        assert!(matches!(pre_master, PortState::PreMaster(_)));
+    }
+
+    #[test]
+    fn portstate_initializing_to_listening_transition() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+
+        let initializing = PortState::initializing(
+            DomainPort::new(
+                &local_clock,
+                FakePort::new(),
+                FakeTimerHost::new(),
+                0,
+                PortNumber::new(1),
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        let listening = initializing.transit(StateTransition::ToListening);
+
+        assert!(matches!(listening, PortState::Listening(_)));
+    }
+
+    #[test]
+    fn portstate_uncalibrated_to_listening_transition() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+
+        let uncalibrated = PortState::uncalibrated(
+            DomainPort::new(
+                &local_clock,
+                FakePort::new(),
+                FakeTimerHost::new(),
+                0,
+                PortNumber::new(1),
+            ),
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        let listening = uncalibrated.transit(StateTransition::ToListening);
+
+        assert!(matches!(listening, PortState::Listening(_)));
+    }
 }
