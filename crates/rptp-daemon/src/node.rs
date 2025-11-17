@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 use rptp::{
     clock::LocalClock,
     infra::infra_support::SortedForeignClockRecordsVec,
+    log::NoopLog,
     message::{DomainMessage, EventMessage, SystemMessage, TimestampMessage},
     port::{DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
 };
@@ -133,7 +134,6 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPhysicalPort<'a, C, N> {
 
 impl<'a, C: SynchronizableClock, N: NetworkSocket> PhysicalPort for TokioPhysicalPort<'a, C, N> {
     fn send_event(&self, buf: &[u8]) {
-        // eprintln!("[event] send {:?}", msg);
         let _ = self.event_socket.try_send(buf);
 
         let timestamp_msg = SystemMessage::Timestamp(TimestampMessage::new(
@@ -147,7 +147,6 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> PhysicalPort for TokioPhysica
     }
 
     fn send_general(&self, buf: &[u8]) {
-        // eprintln!("[general] send {:?}", msg);
         let _ = self.general_socket.try_send(buf);
     }
 }
@@ -157,6 +156,7 @@ pub struct TokioPortsLoop<'a, C: SynchronizableClock, N: NetworkSocket> {
     portmap: SingleDomainPortMap<
         Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
         FullBmca<SortedForeignClockRecordsVec>,
+        NoopLog,
     >,
     event_socket: Rc<N>,
     general_socket: Rc<N>,
@@ -169,6 +169,7 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
         portmap: SingleDomainPortMap<
             Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
             FullBmca<SortedForeignClockRecordsVec>,
+            NoopLog,
         >,
         event_socket: Rc<N>,
         general_socket: Rc<N>,
@@ -259,6 +260,7 @@ mod tests {
 
     use rptp::bmca::LocalClockDS;
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
+    use rptp::log::NoopLog;
     use rptp::message::{EventMessage, GeneralMessage};
     use rptp::port::{DomainPort, Port, PortIdentity, PortNumber};
     use rptp::portstate::{DelayCycle, PortState, SlavePort};
@@ -279,6 +281,7 @@ mod tests {
                     >,
                 >,
                 FullBmca<SortedForeignClockRecordsVec>,
+                NoopLog,
             >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
@@ -320,7 +323,7 @@ mod tests {
             PortNumber::new(1),
         ));
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
-        let port_state = PortState::master(domain_port, bmca);
+        let port_state = PortState::master(domain_port, bmca, NoopLog);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(
             &local_clock,
@@ -421,6 +424,7 @@ mod tests {
             ),
             announce_receipt_timeout,
             delay_cycle,
+            NoopLog,
         ));
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(

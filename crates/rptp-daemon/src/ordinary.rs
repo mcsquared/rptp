@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 use rptp::bmca::FullBmca;
 use rptp::clock::{LocalClock, SynchronizableClock};
 use rptp::infra::infra_support::SortedForeignClockRecordsVec;
+use rptp::log::NoopLog;
 use rptp::message::SystemMessage;
 use rptp::port::{DomainPort, PortNumber};
 use rptp::portstate::PortState;
@@ -22,6 +23,7 @@ pub fn ordinary_clock_port<'a, C, N>(
 ) -> PortState<
     Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
     FullBmca<SortedForeignClockRecordsVec>,
+    NoopLog,
 >
 where
     C: SynchronizableClock,
@@ -46,5 +48,5 @@ where
         port_number,
     ));
 
-    PortState::initializing(domain_port, bmca)
+    PortState::initializing(domain_port, bmca, NoopLog)
 }

@@ -2,6 +2,7 @@ pub mod bmca;
 pub mod buffer;
 pub mod clock;
 pub mod infra;
+pub mod log;
 pub mod message;
 pub mod port;
 pub mod portstate;

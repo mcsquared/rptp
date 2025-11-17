@@ -20,7 +20,6 @@ impl<'a> DomainMessage<'a> {
         let port = ports.port_by_domain(domain_number)?;
         let source_port_identity = self.source_port_identity()?;
         let msg = EventMessage::try_from(self.buf)?;
-        eprintln!("[event] recv {:?}", msg);
         port.process_event_message(source_port_identity, msg, timestamp);
 
         Ok(())
@@ -31,7 +30,6 @@ impl<'a> DomainMessage<'a> {
         let port = ports.port_by_domain(domain_number)?;
         let source_port_identity = self.source_port_identity()?;
         let msg = GeneralMessage::try_from(self.buf)?;
-        eprintln!("[general] recv {:?}", msg);
         port.process_general_message(source_port_identity, msg);
 
         Ok(())

@@ -3,6 +3,7 @@ use std::ops::Range;
 use crate::bmca::Bmca;
 use crate::buffer::MessageBuffer;
 use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
+use crate::log::Log;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::PortState;
 use crate::result::{ProtocolError, Result};
@@ -185,13 +186,13 @@ pub trait PortMap {
     fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn PortIngress>;
 }
 
-pub struct SingleDomainPortMap<P: Port, B: Bmca> {
+pub struct SingleDomainPortMap<P: Port, B: Bmca, L: Log> {
     domain_number: u8,
-    port_state: Option<PortState<P, B>>,
+    port_state: Option<PortState<P, B, L>>,
 }
 
-impl<P: Port, B: Bmca> SingleDomainPortMap<P, B> {
-    pub fn new(domain_number: u8, port_state: PortState<P, B>) -> Self {
+impl<P: Port, B: Bmca, L: Log> SingleDomainPortMap<P, B, L> {
+    pub fn new(domain_number: u8, port_state: PortState<P, B, L>) -> Self {
         Self {
             domain_number,
             port_state: Some(port_state),
@@ -199,7 +200,7 @@ impl<P: Port, B: Bmca> SingleDomainPortMap<P, B> {
     }
 }
 
-impl<P: Port, B: Bmca> PortMap for SingleDomainPortMap<P, B> {
+impl<P: Port, B: Bmca, L: Log> PortMap for SingleDomainPortMap<P, B, L> {
     fn port_by_domain(&mut self, domain_number: u8) -> Result<&mut dyn PortIngress> {
         if self.domain_number == domain_number {
             Ok(&mut self.port_state)
@@ -220,7 +221,7 @@ pub trait PortIngress {
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
-impl<P: Port, B: Bmca> PortIngress for Option<PortState<P, B>> {
+impl<P: Port, B: Bmca, L: Log> PortIngress for Option<PortState<P, B, L>> {
     fn process_event_message(
         &mut self,
         source_port_identity: PortIdentity,
