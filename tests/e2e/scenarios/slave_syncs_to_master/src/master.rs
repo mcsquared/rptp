@@ -17,7 +17,7 @@ async fn main() -> std::io::Result<()> {
     let domain = DomainNumber::new(0);
 
     let local_clock = LocalClock::new(
-        Rc::new(FakeClock::new(TimeStamp::new(10, 500_000_000))),
+        FakeClock::new(TimeStamp::new(10, 500_000_000)),
         LocalClockDS::new(
             ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             120,
