@@ -1,6 +1,7 @@
 pub mod bmca;
 pub mod buffer;
 pub mod clock;
+pub mod faulty;
 pub mod infra;
 pub mod log;
 pub mod message;
