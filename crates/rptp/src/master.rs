@@ -1,0 +1,556 @@
+use std::time::Duration;
+
+use crate::bmca::{Bmca, BmcaRecommendation};
+use crate::clock::{LocalClock, SynchronizableClock};
+use crate::log::Log;
+use crate::message::{
+    AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId,
+    TwoStepSyncMessage,
+};
+use crate::port::{Port, PortIdentity, Timeout};
+use crate::portstate::{PortState, StateTransition};
+use crate::time::TimeStamp;
+
+pub struct MasterPort<P: Port, B: Bmca, L: Log> {
+    port: P,
+    bmca: B,
+    announce_cycle: AnnounceCycle<P::Timeout>,
+    sync_cycle: SyncCycle<P::Timeout>,
+    log: L,
+}
+
+impl<P: Port, B: Bmca, L: Log> MasterPort<P, B, L> {
+    pub fn new(
+        port: P,
+        bmca: B,
+        announce_cycle: AnnounceCycle<P::Timeout>,
+        sync_cycle: SyncCycle<P::Timeout>,
+        log: L,
+    ) -> Self {
+        Self {
+            port,
+            bmca,
+            announce_cycle,
+            sync_cycle,
+            log,
+        }
+    }
+
+    pub fn send_announce(&mut self) {
+        let announce_message = self.announce_cycle.announce(&self.port.local_clock());
+        self.port
+            .send_general(GeneralMessage::Announce(announce_message));
+        self.announce_cycle.next();
+    }
+
+    pub fn process_announce(
+        &mut self,
+        msg: AnnounceMessage,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateTransition> {
+        self.log.message_received("Announce");
+        self.bmca.consider(source_port_identity, msg);
+
+        match self.bmca.recommendation(self.port.local_clock()) {
+            BmcaRecommendation::Undecided => None,
+            BmcaRecommendation::Slave(_) => Some(StateTransition::ToUncalibrated),
+            BmcaRecommendation::Master => None,
+        }
+    }
+
+    pub fn process_delay_request(
+        &mut self,
+        req: DelayRequestMessage,
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateTransition> {
+        self.log.message_received("DelayReq");
+        self.port
+            .send_general(GeneralMessage::DelayResp(req.response(ingress_timestamp)));
+
+        None
+    }
+
+    pub fn send_sync(&mut self) {
+        let sync_message = self.sync_cycle.two_step_sync();
+        self.port
+            .send_event(EventMessage::TwoStepSync(sync_message));
+        self.sync_cycle.next();
+    }
+
+    pub fn send_follow_up(
+        &mut self,
+        sync: TwoStepSyncMessage,
+        egress_timestamp: TimeStamp,
+    ) -> Option<StateTransition> {
+        self.port
+            .send_general(GeneralMessage::FollowUp(sync.follow_up(egress_timestamp)));
+        None
+    }
+
+    pub fn to_uncalibrated(self) -> PortState<P, B, L> {
+        PortState::uncalibrated(self.port, self.bmca, self.log)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AnnounceCycle<T: Timeout> {
+    sequence_id: SequenceId,
+    timeout: T,
+}
+
+impl<T: Timeout> AnnounceCycle<T> {
+    pub fn new(start: SequenceId, timeout: T) -> Self {
+        Self {
+            sequence_id: start,
+            timeout,
+        }
+    }
+
+    pub fn next(&mut self) {
+        self.timeout.restart(Duration::from_secs(1));
+        self.sequence_id = self.sequence_id.next();
+    }
+
+    pub fn announce<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> AnnounceMessage {
+        local_clock.announce(self.sequence_id)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct SyncCycle<T: Timeout> {
+    sequence_id: SequenceId,
+    timeout: T,
+}
+
+impl<T: Timeout> SyncCycle<T> {
+    pub fn new(start: SequenceId, timeout: T) -> Self {
+        Self {
+            sequence_id: start,
+            timeout,
+        }
+    }
+
+    pub fn next(&mut self) {
+        self.timeout.restart(Duration::from_secs(1));
+        self.sequence_id = self.sequence_id.next();
+    }
+
+    pub fn two_step_sync(&self) -> TwoStepSyncMessage {
+        TwoStepSyncMessage::new(self.sequence_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::bmca::{ForeignClockDS, ForeignClockRecord, FullBmca, LocalClockDS};
+    use crate::clock::{FakeClock, LocalClock};
+    use crate::infra::infra_support::SortedForeignClockRecordsVec;
+    use crate::log::NoopLog;
+    use crate::message::{
+        DelayResponseMessage, EventMessage, FollowUpMessage, GeneralMessage, SystemMessage,
+        TwoStepSyncMessage,
+    };
+    use crate::port::test_support::{FakePort, FakeTimeout, FakeTimerHost};
+    use crate::port::{DomainNumber, DomainPort, PortNumber};
+
+    #[test]
+    fn master_port_answers_delay_request_with_delay_response() {
+        let local_clock = LocalClock::new(
+            FakeClock::new(TimeStamp::new(0, 0)),
+            LocalClockDS::high_grade_test_clock(),
+        );
+        let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+        );
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+        );
+
+        let mut master = MasterPort::new(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            announce_cycle,
+            sync_cycle,
+            NoopLog,
+        );
+
+        timer_host.take_system_messages();
+
+        master.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
+
+        let messages = port.take_general_messages();
+        assert!(
+            messages.contains(&GeneralMessage::DelayResp(DelayResponseMessage::new(
+                0.into(),
+                TimeStamp::new(0, 0)
+            )))
+        );
+
+        assert!(timer_host.take_system_messages().is_empty());
+    }
+
+    #[test]
+    fn master_port_answers_sync_timeout_with_sync() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+
+        let mut master = PortState::master(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        master.dispatch_system(SystemMessage::SyncTimeout);
+
+        let messages = port.take_event_messages();
+        assert!(
+            messages.contains(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(
+                0.into()
+            )))
+        );
+    }
+
+    #[test]
+    fn master_port_schedules_next_sync() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+
+        let mut master = PortState::master(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        // Drain messages that could have been sent during initialization.
+        timer_host.take_system_messages();
+
+        master.dispatch_system(SystemMessage::SyncTimeout);
+
+        let messages = timer_host.take_system_messages();
+        assert!(messages.contains(&SystemMessage::SyncTimeout));
+    }
+
+    #[test]
+    fn master_port_answers_timestamped_sync_with_follow_up() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+        );
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+        );
+
+        let mut master = MasterPort::new(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            announce_cycle,
+            sync_cycle,
+            NoopLog,
+        );
+
+        timer_host.take_system_messages();
+
+        master.send_follow_up(TwoStepSyncMessage::new(0.into()), TimeStamp::new(0, 0));
+
+        let messages = port.take_general_messages();
+        assert!(
+            messages.contains(&GeneralMessage::FollowUp(FollowUpMessage::new(
+                0.into(),
+                TimeStamp::new(0, 0)
+            )))
+        );
+
+        assert!(timer_host.take_system_messages().is_empty());
+    }
+
+    #[test]
+    fn master_port_schedules_next_announce() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+
+        let mut master = PortState::master(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        timer_host.take_system_messages();
+
+        master.dispatch_system(SystemMessage::AnnounceSendTimeout);
+
+        let messages = timer_host.take_system_messages();
+        assert!(messages.contains(&SystemMessage::AnnounceSendTimeout));
+    }
+
+    #[test]
+    fn master_port_sends_announce_on_send_timeout() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+
+        let mut master = PortState::master(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            NoopLog,
+        );
+
+        master.dispatch_system(SystemMessage::AnnounceSendTimeout);
+
+        let messages = port.take_general_messages();
+        assert!(
+            messages.contains(&GeneralMessage::Announce(AnnounceMessage::new(
+                0.into(),
+                ForeignClockDS::high_grade_test_clock()
+            )))
+        );
+    }
+
+    #[test]
+    fn master_port_to_uncalibrated_transition_on_following_announce() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
+        let prior_records = [ForeignClockRecord::new(
+            PortIdentity::fake(),
+            AnnounceMessage::new(41.into(), foreign_clock_ds),
+        )
+        .with_resolved_clock(foreign_clock_ds)];
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+        );
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+        );
+
+        let mut master = MasterPort::new(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+            announce_cycle,
+            sync_cycle,
+            NoopLog,
+        );
+
+        let transition = master.process_announce(
+            AnnounceMessage::new(42.into(), foreign_clock_ds),
+            PortIdentity::fake(),
+        );
+
+        assert!(matches!(transition, Some(StateTransition::ToUncalibrated)));
+    }
+
+    #[test]
+    fn master_port_stays_master_on_subsequent_announce() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
+        let prior_records = [ForeignClockRecord::new(
+            PortIdentity::fake(),
+            AnnounceMessage::new(41.into(), foreign_clock_ds),
+        )
+        .with_resolved_clock(foreign_clock_ds)];
+        let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+        );
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+        );
+
+        let mut master = MasterPort::new(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+            announce_cycle,
+            sync_cycle,
+            NoopLog,
+        );
+
+        // Drain any setup timers
+        timer_host.take_system_messages();
+
+        let transition = master.process_announce(
+            AnnounceMessage::new(42.into(), foreign_clock_ds),
+            PortIdentity::fake(),
+        );
+
+        assert!(matches!(transition, None));
+        assert!(timer_host.take_system_messages().is_empty());
+    }
+
+    #[test]
+    fn master_port_stays_master_on_undecided_bmca() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
+        let port = FakePort::new();
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            &port,
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+        );
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+        );
+
+        let mut master = MasterPort::new(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            announce_cycle,
+            sync_cycle,
+            NoopLog,
+        );
+
+        // Drain any setup timers
+        timer_host.take_system_messages();
+
+        let transition = master.process_announce(
+            AnnounceMessage::new(42.into(), foreign_clock_ds),
+            PortIdentity::fake(),
+        );
+
+        assert!(matches!(transition, None));
+        assert!(timer_host.take_system_messages().is_empty());
+    }
+
+    #[test]
+    fn announce_cycle_produces_announce_messages_with_monotonic_sequence_ids() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+
+        let mut cycle = AnnounceCycle::new(
+            0.into(),
+            FakeTimeout::new(SystemMessage::AnnounceSendTimeout),
+        );
+        let msg1 = cycle.announce(&local_clock);
+        cycle.next();
+        let msg2 = cycle.announce(&local_clock);
+
+        assert_eq!(
+            msg1,
+            AnnounceMessage::new(0.into(), ForeignClockDS::high_grade_test_clock())
+        );
+        assert_eq!(
+            msg2,
+            AnnounceMessage::new(1.into(), ForeignClockDS::high_grade_test_clock())
+        );
+    }
+
+    #[test]
+    fn sync_cycle_message_produces_two_step_sync_message() {
+        let sync_cycle = SyncCycle::new(0.into(), FakeTimeout::new(SystemMessage::SyncTimeout));
+        let two_step_sync = sync_cycle.two_step_sync();
+
+        assert_eq!(two_step_sync, TwoStepSyncMessage::new(0.into()));
+    }
+
+    #[test]
+    fn sync_cycle_next() {
+        let mut sync_cycle = SyncCycle::new(0.into(), FakeTimeout::new(SystemMessage::SyncTimeout));
+        sync_cycle.next();
+
+        assert_eq!(
+            sync_cycle,
+            SyncCycle::new(1.into(), FakeTimeout::new(SystemMessage::SyncTimeout))
+        );
+    }
+
+    #[test]
+    fn sync_cycle_next_wraps() {
+        let mut sync_cycle = SyncCycle::new(
+            u16::MAX.into(),
+            FakeTimeout::new(SystemMessage::SyncTimeout),
+        );
+        sync_cycle.next();
+
+        assert_eq!(
+            sync_cycle,
+            SyncCycle::new(0.into(), FakeTimeout::new(SystemMessage::SyncTimeout))
+        );
+    }
+}

@@ -266,7 +266,8 @@ mod tests {
     use rptp::log::NoopLog;
     use rptp::message::{EventMessage, GeneralMessage};
     use rptp::port::{DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber};
-    use rptp::portstate::{DelayCycle, PortState, SlavePort};
+    use rptp::portstate::PortState;
+    use rptp::slave::{DelayCycle, SlavePort};
 
     use crate::net::{FakeNetworkSocket, MulticastSocket};
 
