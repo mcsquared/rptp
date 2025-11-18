@@ -18,16 +18,6 @@ pub trait PhysicalPort {
     fn send_general(&self, buf: &[u8]);
 }
 
-impl<P: PhysicalPort> PhysicalPort for Box<P> {
-    fn send_event(&self, buf: &[u8]) {
-        self.as_ref().send_event(buf)
-    }
-
-    fn send_general(&self, buf: &[u8]) {
-        self.as_ref().send_general(buf)
-    }
-}
-
 pub trait TimerHost {
     type Timeout: Timeout + Drop;
 
