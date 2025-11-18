@@ -106,30 +106,38 @@ impl<P: Port, B: Bmca, L: Log> PortState<P, B, L> {
     pub fn transit(self, transition: StateTransition) -> Self {
         match transition {
             StateTransition::ToMaster => match self {
-                PortState::Listening(port) => port.to_master(),
-                PortState::Slave(port) => port.to_master(),
-                PortState::PreMaster(port) => port.to_master(),
-                PortState::Uncalibrated(port) => port.to_master(),
+                PortState::Listening(listening) => PortState::Master(listening.to_master()),
+                PortState::Slave(slave) => PortState::Master(slave.to_master()),
+                PortState::PreMaster(pre_master) => PortState::Master(pre_master.to_master()),
+                PortState::Uncalibrated(uncalibrated) => {
+                    PortState::Master(uncalibrated.to_master())
+                }
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateTransition::ToSlave(parent_port_identity) => match self {
                 PortState::Uncalibrated(uncalibrated) => {
-                    uncalibrated.to_slave(parent_port_identity)
+                    PortState::Slave(uncalibrated.to_slave(parent_port_identity))
                 }
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateTransition::ToUncalibrated => match self {
-                PortState::Listening(listening) => listening.to_uncalibrated(),
-                PortState::Master(master) => master.to_uncalibrated(),
+                PortState::Listening(listening) => {
+                    PortState::Uncalibrated(listening.to_uncalibrated())
+                }
+                PortState::Master(master) => PortState::Uncalibrated(master.to_uncalibrated()),
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateTransition::ToPreMaster => match self {
-                PortState::Listening(listening) => listening.to_pre_master(),
+                PortState::Listening(listening) => PortState::PreMaster(listening.to_pre_master()),
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateTransition::ToListening => match self {
-                PortState::Initializing(initializing) => initializing.to_listening(),
-                PortState::Uncalibrated(uncalibrated) => uncalibrated.to_listening(),
+                PortState::Initializing(initializing) => {
+                    PortState::Listening(initializing.to_listening())
+                }
+                PortState::Uncalibrated(uncalibrated) => {
+                    PortState::Listening(uncalibrated.to_listening())
+                }
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateTransition::ToFaulty => PortState::Faulty(FaultyPort::new()),

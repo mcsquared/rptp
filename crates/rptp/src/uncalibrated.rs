@@ -3,9 +3,10 @@ use std::time::Duration;
 use crate::bmca::{Bmca, BmcaRecommendation};
 use crate::listening::ListeningPort;
 use crate::log::Log;
+use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{AnnounceMessage, SystemMessage};
 use crate::port::{ParentPortIdentity, Port, PortIdentity, Timeout};
-use crate::portstate::{PortState, StateTransition};
+use crate::portstate::StateTransition;
 use crate::slave::{DelayCycle, SlavePort};
 
 pub struct UncalibratedPort<P: Port, B: Bmca, L: Log> {
@@ -42,33 +43,41 @@ impl<P: Port, B: Bmca, L: Log> UncalibratedPort<P, B, L> {
         }
     }
 
-    pub fn to_slave(self, parent_port_identity: ParentPortIdentity) -> PortState<P, B, L> {
+    pub fn to_slave(self, parent_port_identity: ParentPortIdentity) -> SlavePort<P, B, L> {
         let delay_cycle = DelayCycle::new(
             0.into(),
             self.port
                 .timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0)),
         );
-        PortState::Slave(SlavePort::new(
+        SlavePort::new(
             self.port,
             self.bmca,
             parent_port_identity,
             self.announce_receipt_timeout,
             delay_cycle,
             self.log,
-        ))
+        )
     }
 
-    pub fn to_listening(self) -> PortState<P, B, L> {
-        PortState::Listening(ListeningPort::new(
+    pub fn to_listening(self) -> ListeningPort<P, B, L> {
+        ListeningPort::new(
             self.port,
             self.bmca,
             self.announce_receipt_timeout,
             self.log,
-        ))
+        )
     }
 
-    pub fn to_master(self) -> PortState<P, B, L> {
-        PortState::master(self.port, self.bmca, self.log)
+    pub fn to_master(self) -> MasterPort<P, B, L> {
+        let announce_send_timeout = self.port.timeout(
+            SystemMessage::AnnounceSendTimeout,
+            Duration::from_secs(0),
+        );
+        let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
+        let sync_timeout = self.port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
+        let sync_cycle = SyncCycle::new(0.into(), sync_timeout);
+
+        MasterPort::new(self.port, self.bmca, announce_cycle, sync_cycle, self.log)
     }
 }
 
@@ -78,6 +87,7 @@ mod tests {
 
     use crate::bmca::{ForeignClockDS, ForeignClockRecord, FullBmca, LocalClockDS};
     use crate::clock::{FakeClock, LocalClock};
+    use crate::portstate::PortState;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopLog;
     use crate::port::test_support::{FakePort, FakeTimerHost};

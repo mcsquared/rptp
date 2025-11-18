@@ -2,12 +2,13 @@ use std::time::Duration;
 
 use crate::bmca::{Bmca, BmcaRecommendation};
 use crate::log::Log;
+use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
-    SequenceId, TwoStepSyncMessage,
+    SequenceId, SystemMessage, TwoStepSyncMessage,
 };
 use crate::port::{ParentPortIdentity, Port, PortIdentity, Timeout};
-use crate::portstate::{PortState, StateTransition};
+use crate::portstate::StateTransition;
 use crate::sync::MasterEstimate;
 use crate::time::TimeStamp;
 
@@ -138,8 +139,16 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         self.delay_cycle.next();
     }
 
-    pub fn to_master(self) -> PortState<P, B, L> {
-        PortState::master(self.port, self.bmca, self.log)
+    pub fn to_master(self) -> MasterPort<P, B, L> {
+        let announce_send_timeout = self.port.timeout(
+            SystemMessage::AnnounceSendTimeout,
+            Duration::from_secs(0),
+        );
+        let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
+        let sync_timeout = self.port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
+        let sync_cycle = SyncCycle::new(0.into(), sync_timeout);
+
+        MasterPort::new(self.port, self.bmca, announce_cycle, sync_cycle, self.log)
     }
 }
 
@@ -178,6 +187,7 @@ mod tests {
     use crate::message::SystemMessage;
     use crate::port::test_support::{FakePort, FakeTimeout, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
+    use crate::portstate::PortState;
 
     #[test]
     fn slave_port_synchronizes_clock() {

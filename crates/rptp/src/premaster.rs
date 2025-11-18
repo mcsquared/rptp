@@ -1,7 +1,10 @@
+use std::time::Duration;
+
 use crate::bmca::Bmca;
 use crate::log::Log;
+use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
+use crate::message::SystemMessage;
 use crate::port::Port;
-use crate::portstate::PortState;
 
 pub struct PreMasterPort<P: Port, B: Bmca, L: Log> {
     port: P,
@@ -20,8 +23,17 @@ impl<P: Port, B: Bmca, L: Log> PreMasterPort<P, B, L> {
         }
     }
 
-    pub fn to_master(self) -> PortState<P, B, L> {
-        PortState::master(self.port, self.bmca, self.log)
+    pub fn to_master(self) -> MasterPort<P, B, L> {
+        let announce_send_timeout = self
+            .port
+            .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
+        let sync_timeout = self
+            .port
+            .timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
+        let sync_cycle = SyncCycle::new(0.into(), sync_timeout);
+
+        MasterPort::new(self.port, self.bmca, announce_cycle, sync_cycle, self.log)
     }
 }
 
@@ -38,6 +50,7 @@ mod tests {
     use crate::message::SystemMessage;
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
+    use crate::portstate::PortState;
     use crate::portstate::StateTransition;
 
     #[test]

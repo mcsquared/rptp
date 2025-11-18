@@ -2,9 +2,11 @@ use std::time::Duration;
 
 use crate::bmca::{Bmca, BmcaRecommendation};
 use crate::log::Log;
-use crate::message::AnnounceMessage;
+use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
+use crate::message::{AnnounceMessage, SystemMessage};
 use crate::port::{Port, PortIdentity, Timeout};
-use crate::portstate::{PortState, StateTransition};
+use crate::portstate::StateTransition;
+use crate::premaster::PreMasterPort;
 use crate::uncalibrated::UncalibratedPort;
 
 pub struct ListeningPort<P: Port, B: Bmca, L: Log> {
@@ -24,21 +26,34 @@ impl<P: Port, B: Bmca, L: Log> ListeningPort<P, B, L> {
         }
     }
 
-    pub fn to_uncalibrated(self) -> PortState<P, B, L> {
-        PortState::Uncalibrated(UncalibratedPort::new(
+    pub fn to_uncalibrated(self) -> UncalibratedPort<P, B, L> {
+        UncalibratedPort::new(
             self.port,
             self.bmca,
             self.announce_receipt_timeout,
             self.log,
-        ))
+        )
     }
 
-    pub fn to_pre_master(self) -> PortState<P, B, L> {
-        PortState::pre_master(self.port, self.bmca, self.log)
+    pub fn to_pre_master(self) -> PreMasterPort<P, B, L> {
+        let qualification_timeout = self
+            .port
+            .timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+
+        PreMasterPort::new(self.port, self.bmca, qualification_timeout, self.log)
     }
 
-    pub fn to_master(self) -> PortState<P, B, L> {
-        PortState::master(self.port, self.bmca, self.log)
+    pub fn to_master(self) -> MasterPort<P, B, L> {
+        let announce_send_timeout = self
+            .port
+            .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
+        let sync_timeout = self
+            .port
+            .timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
+        let sync_cycle = SyncCycle::new(0.into(), sync_timeout);
+
+        MasterPort::new(self.port, self.bmca, announce_cycle, sync_cycle, self.log)
     }
 
     pub fn process_announce(
@@ -70,6 +85,7 @@ mod tests {
     use crate::message::SystemMessage;
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
+    use crate::portstate::PortState;
 
     #[test]
     fn listening_port_to_master_transition_on_announce_receipt_timeout() {

@@ -1,7 +1,10 @@
+use std::time::Duration;
+
 use crate::bmca::Bmca;
+use crate::listening::ListeningPort;
 use crate::log::Log;
+use crate::message::SystemMessage;
 use crate::port::Port;
-use crate::portstate::PortState;
 
 pub struct InitializingPort<P: Port, B: Bmca, L: Log> {
     port: P,
@@ -14,8 +17,13 @@ impl<P: Port, B: Bmca, L: Log> InitializingPort<P, B, L> {
         Self { port, bmca, log }
     }
 
-    pub fn to_listening(self) -> PortState<P, B, L> {
-        PortState::listening(self.port, self.bmca, self.log)
+    pub fn to_listening(self) -> ListeningPort<P, B, L> {
+        let announce_receipt_timeout = self.port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+
+        ListeningPort::new(self.port, self.bmca, announce_receipt_timeout, self.log)
     }
 }
 
@@ -30,7 +38,7 @@ mod tests {
     use crate::message::SystemMessage;
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
-    use crate::portstate::StateTransition;
+    use crate::portstate::{PortState, StateTransition};
 
     #[test]
     fn initializing_port_to_listening_transition() {

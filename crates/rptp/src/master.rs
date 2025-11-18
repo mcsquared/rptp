@@ -5,11 +5,12 @@ use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::Log;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId,
-    TwoStepSyncMessage,
+    SystemMessage, TwoStepSyncMessage,
 };
 use crate::port::{Port, PortIdentity, Timeout};
-use crate::portstate::{PortState, StateTransition};
+use crate::portstate::StateTransition;
 use crate::time::TimeStamp;
+use crate::uncalibrated::UncalibratedPort;
 
 pub struct MasterPort<P: Port, B: Bmca, L: Log> {
     port: P,
@@ -87,8 +88,13 @@ impl<P: Port, B: Bmca, L: Log> MasterPort<P, B, L> {
         None
     }
 
-    pub fn to_uncalibrated(self) -> PortState<P, B, L> {
-        PortState::uncalibrated(self.port, self.bmca, self.log)
+    pub fn to_uncalibrated(self) -> UncalibratedPort<P, B, L> {
+        let announce_receipt_timeout = self.port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+
+        UncalibratedPort::new(self.port, self.bmca, announce_receipt_timeout, self.log)
     }
 }
 
@@ -146,6 +152,7 @@ mod tests {
 
     use crate::bmca::{ForeignClockDS, ForeignClockRecord, FullBmca, LocalClockDS};
     use crate::clock::{FakeClock, LocalClock};
+    use crate::portstate::PortState;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopLog;
     use crate::message::{
