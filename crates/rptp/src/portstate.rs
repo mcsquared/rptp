@@ -13,13 +13,14 @@ use crate::slave::{DelayCycle, SlavePort};
 use crate::time::TimeStamp;
 use crate::uncalibrated::UncalibratedPort;
 
-pub enum StateTransition {
-    ToMaster,
-    ToSlave(ParentPortIdentity),
-    ToUncalibrated,
-    ToPreMaster,
-    ToListening,
-    ToFaulty,
+pub enum StateDecision {
+    Initialized,
+    MasterClockSelected(ParentPortIdentity),
+    RecommendedSlave,
+    RecommendedMaster,
+    FaultDetected,
+    QualificationTimeoutExpired,
+    AnnounceReceiptTimeoutExpired,
 }
 
 pub enum PortState<P: Port, B: Bmca, L: Log> {
@@ -103,44 +104,50 @@ impl<P: Port, B: Bmca, L: Log> PortState<P, B, L> {
         ))
     }
 
-    pub fn transit(self, transition: StateTransition) -> Self {
+    pub fn transit(self, transition: StateDecision) -> Self {
         match transition {
-            StateTransition::ToMaster => match self {
-                PortState::Listening(listening) => PortState::Master(listening.to_master()),
-                PortState::Slave(slave) => PortState::Master(slave.to_master()),
-                PortState::PreMaster(pre_master) => PortState::Master(pre_master.to_master()),
-                PortState::Uncalibrated(uncalibrated) => {
-                    PortState::Master(uncalibrated.to_master())
-                }
-                _ => PortState::Faulty(FaultyPort::new()),
-            },
-            StateTransition::ToSlave(parent_port_identity) => match self {
-                PortState::Uncalibrated(uncalibrated) => {
-                    PortState::Slave(uncalibrated.to_slave(parent_port_identity))
-                }
-                _ => PortState::Faulty(FaultyPort::new()),
-            },
-            StateTransition::ToUncalibrated => match self {
+            StateDecision::AnnounceReceiptTimeoutExpired => match self {
                 PortState::Listening(listening) => {
-                    PortState::Uncalibrated(listening.to_uncalibrated())
+                    PortState::Master(listening.announce_receipt_timeout_expired())
                 }
-                PortState::Master(master) => PortState::Uncalibrated(master.to_uncalibrated()),
-                _ => PortState::Faulty(FaultyPort::new()),
-            },
-            StateTransition::ToPreMaster => match self {
-                PortState::Listening(listening) => PortState::PreMaster(listening.to_pre_master()),
-                _ => PortState::Faulty(FaultyPort::new()),
-            },
-            StateTransition::ToListening => match self {
-                PortState::Initializing(initializing) => {
-                    PortState::Listening(initializing.to_listening())
+                PortState::Slave(slave) => {
+                    PortState::Master(slave.announce_receipt_timeout_expired())
                 }
                 PortState::Uncalibrated(uncalibrated) => {
-                    PortState::Listening(uncalibrated.to_listening())
+                    PortState::Master(uncalibrated.announce_receipt_timeout_expired())
                 }
                 _ => PortState::Faulty(FaultyPort::new()),
             },
-            StateTransition::ToFaulty => PortState::Faulty(FaultyPort::new()),
+            StateDecision::MasterClockSelected(parent_port_identity) => match self {
+                PortState::Uncalibrated(uncalibrated) => {
+                    PortState::Slave(uncalibrated.master_clock_selected(parent_port_identity))
+                }
+                _ => PortState::Faulty(FaultyPort::new()),
+            },
+            StateDecision::RecommendedSlave => match self {
+                PortState::Listening(listening) => {
+                    PortState::Uncalibrated(listening.recommended_slave())
+                }
+                PortState::Master(master) => PortState::Uncalibrated(master.recommended_slave()),
+                _ => PortState::Faulty(FaultyPort::new()),
+            },
+            StateDecision::RecommendedMaster => match self {
+                PortState::Listening(listening) => {
+                    PortState::PreMaster(listening.recommended_master())
+                }
+                _ => PortState::Faulty(FaultyPort::new()),
+            },
+            StateDecision::Initialized => match self {
+                PortState::Initializing(initializing) => {
+                    PortState::Listening(initializing.initialized())
+                }
+                _ => PortState::Faulty(FaultyPort::new()),
+            },
+            StateDecision::QualificationTimeoutExpired => match self {
+                PortState::PreMaster(pre_master) => PortState::Master(pre_master.qualified()),
+                _ => PortState::Faulty(FaultyPort::new()),
+            },
+            StateDecision::FaultDetected => PortState::Faulty(FaultyPort::new()),
         }
     }
 
@@ -149,7 +156,7 @@ impl<P: Port, B: Bmca, L: Log> PortState<P, B, L> {
         msg: EventMessage,
         source_port_identity: PortIdentity,
         ingress_timestamp: TimeStamp,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         use EventMessage::*;
         use PortState::*;
 
@@ -166,7 +173,7 @@ impl<P: Port, B: Bmca, L: Log> PortState<P, B, L> {
         &mut self,
         msg: GeneralMessage,
         source_port_identity: PortIdentity,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         use GeneralMessage::*;
         use PortState::*;
 
@@ -181,9 +188,8 @@ impl<P: Port, B: Bmca, L: Log> PortState<P, B, L> {
         }
     }
 
-    pub fn dispatch_system(&mut self, msg: SystemMessage) -> Option<StateTransition> {
+    pub fn dispatch_system(&mut self, msg: SystemMessage) -> Option<StateDecision> {
         use PortState::*;
-        use StateTransition::*;
         use SystemMessage::*;
 
         match (self, msg) {
@@ -211,11 +217,13 @@ impl<P: Port, B: Bmca, L: Log> PortState<P, B, L> {
                 }
                 _ => None,
             },
-            (Initializing(_), Initialized) => Some(ToListening),
+            (Initializing(_), SystemMessage::Initialized) => Some(StateDecision::Initialized),
             (Listening(_) | Slave(_) | Master(_) | Uncalibrated(_), AnnounceReceiptTimeout) => {
-                Some(StateTransition::ToMaster)
+                Some(StateDecision::AnnounceReceiptTimeoutExpired)
             }
-            (PreMaster(_), QualificationTimeout) => Some(ToMaster),
+            (PreMaster(_), QualificationTimeout) => {
+                Some(StateDecision::QualificationTimeoutExpired)
+            }
             _ => None,
         }
     }
@@ -249,7 +257,7 @@ mod tests {
             NoopLog,
         );
 
-        let master = listening.transit(StateTransition::ToMaster);
+        let master = listening.transit(StateDecision::AnnounceReceiptTimeoutExpired);
 
         assert!(matches!(master, PortState::Master(_)));
     }
@@ -272,7 +280,7 @@ mod tests {
             NoopLog,
         );
 
-        let master = slave.transit(StateTransition::ToMaster);
+        let master = slave.transit(StateDecision::AnnounceReceiptTimeoutExpired);
 
         assert!(matches!(master, PortState::Master(_)));
     }
@@ -294,7 +302,7 @@ mod tests {
             NoopLog,
         );
 
-        let master = pre_master.transit(StateTransition::ToMaster);
+        let master = pre_master.transit(StateDecision::QualificationTimeoutExpired);
 
         assert!(matches!(master, PortState::Master(_)));
     }
@@ -316,7 +324,7 @@ mod tests {
             NoopLog,
         );
 
-        let master = uncalibrated.transit(StateTransition::ToMaster);
+        let master = uncalibrated.transit(StateDecision::AnnounceReceiptTimeoutExpired);
 
         assert!(matches!(master, PortState::Master(_)));
     }
@@ -339,7 +347,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let slave = uncalibrated.transit(StateTransition::ToSlave(parent));
+        let slave = uncalibrated.transit(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(slave, PortState::Slave(_)));
     }
@@ -361,7 +369,7 @@ mod tests {
             NoopLog,
         );
 
-        let uncalibrated = listening.transit(StateTransition::ToUncalibrated);
+        let uncalibrated = listening.transit(StateDecision::RecommendedSlave);
 
         assert!(matches!(uncalibrated, PortState::Uncalibrated(_)));
     }
@@ -383,7 +391,7 @@ mod tests {
             NoopLog,
         );
 
-        let uncalibrated = master.transit(StateTransition::ToUncalibrated);
+        let uncalibrated = master.transit(StateDecision::RecommendedSlave);
 
         assert!(matches!(uncalibrated, PortState::Uncalibrated(_)));
     }
@@ -405,7 +413,7 @@ mod tests {
             NoopLog,
         );
 
-        let pre_master = listening.transit(StateTransition::ToPreMaster);
+        let pre_master = listening.transit(StateDecision::RecommendedMaster);
 
         assert!(matches!(pre_master, PortState::PreMaster(_)));
     }
@@ -427,29 +435,7 @@ mod tests {
             NoopLog,
         );
 
-        let listening = initializing.transit(StateTransition::ToListening);
-
-        assert!(matches!(listening, PortState::Listening(_)));
-    }
-
-    #[test]
-    fn portstate_uncalibrated_to_listening_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-
-        let uncalibrated = PortState::uncalibrated(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
-        );
-
-        let listening = uncalibrated.transit(StateTransition::ToListening);
+        let listening = initializing.transit(StateDecision::Initialized);
 
         assert!(matches!(listening, PortState::Listening(_)));
     }
@@ -457,7 +443,7 @@ mod tests {
     // Tests for unimplemented/illegal ToMaster transitions
 
     #[test]
-    fn portstate_initializing_to_master_unimplemented_transition_goes_to_faulty() {
+    fn portstate_initializing_to_master_illegal_transition_goes_to_faulty() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
@@ -473,7 +459,8 @@ mod tests {
             NoopLog,
         );
 
-        let result = initializing.transit(StateTransition::ToMaster);
+        let result = initializing.transit(StateDecision::AnnounceReceiptTimeoutExpired);
+        // TODO:: do we need to check for all possible transition types from illegal to faulty?
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -495,7 +482,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = master.transit(StateTransition::ToMaster);
+        let result = master.transit(StateDecision::AnnounceReceiptTimeoutExpired);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -520,7 +507,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let result = initializing.transit(StateTransition::ToSlave(parent));
+        let result = initializing.transit(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -543,7 +530,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let result = listening.transit(StateTransition::ToSlave(parent));
+        let result = listening.transit(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -567,7 +554,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let result = slave.transit(StateTransition::ToSlave(parent));
+        let result = slave.transit(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -590,7 +577,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let result = master.transit(StateTransition::ToSlave(parent));
+        let result = master.transit(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -613,7 +600,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let result = pre_master.transit(StateTransition::ToSlave(parent));
+        let result = pre_master.transit(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -637,7 +624,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = initializing.transit(StateTransition::ToUncalibrated);
+        let result = initializing.transit(StateDecision::RecommendedSlave);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -660,7 +647,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = slave.transit(StateTransition::ToUncalibrated);
+        let result = slave.transit(StateDecision::RecommendedSlave);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -682,7 +669,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = pre_master.transit(StateTransition::ToUncalibrated);
+        let result = pre_master.transit(StateDecision::RecommendedSlave);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -704,7 +691,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = uncalibrated.transit(StateTransition::ToUncalibrated);
+        let result = uncalibrated.transit(StateDecision::RecommendedSlave);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -728,7 +715,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = initializing.transit(StateTransition::ToPreMaster);
+        let result = initializing.transit(StateDecision::RecommendedMaster);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -751,7 +738,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = slave.transit(StateTransition::ToPreMaster);
+        let result = slave.transit(StateDecision::RecommendedMaster);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -773,7 +760,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = master.transit(StateTransition::ToPreMaster);
+        let result = master.transit(StateDecision::RecommendedMaster);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -795,7 +782,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = pre_master.transit(StateTransition::ToPreMaster);
+        let result = pre_master.transit(StateDecision::RecommendedMaster);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -817,7 +804,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = uncalibrated.transit(StateTransition::ToPreMaster);
+        let result = uncalibrated.transit(StateDecision::RecommendedMaster);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -841,7 +828,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = listening.transit(StateTransition::ToListening);
+        let result = listening.transit(StateDecision::Initialized);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -864,7 +851,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = slave.transit(StateTransition::ToListening);
+        let result = slave.transit(StateDecision::Initialized);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -886,7 +873,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = master.transit(StateTransition::ToListening);
+        let result = master.transit(StateDecision::Initialized);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -908,7 +895,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = pre_master.transit(StateTransition::ToListening);
+        let result = pre_master.transit(StateDecision::Initialized);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -932,7 +919,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = initializing.transit(StateTransition::ToFaulty);
+        let result = initializing.transit(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -954,7 +941,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = listening.transit(StateTransition::ToFaulty);
+        let result = listening.transit(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -977,7 +964,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = slave.transit(StateTransition::ToFaulty);
+        let result = slave.transit(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -999,7 +986,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = master.transit(StateTransition::ToFaulty);
+        let result = master.transit(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -1021,7 +1008,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = pre_master.transit(StateTransition::ToFaulty);
+        let result = pre_master.transit(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -1043,7 +1030,7 @@ mod tests {
             NoopLog,
         );
 
-        let result = uncalibrated.transit(StateTransition::ToFaulty);
+        let result = uncalibrated.transit(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -1056,7 +1043,7 @@ mod tests {
             NoopLog,
         > = PortState::Faulty(FaultyPort::new());
 
-        let result = faulty.transit(StateTransition::ToFaulty);
+        let result = faulty.transit(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }

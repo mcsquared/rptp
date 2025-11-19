@@ -5,7 +5,7 @@ use crate::log::Log;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{AnnounceMessage, SystemMessage};
 use crate::port::{Port, PortIdentity, Timeout};
-use crate::portstate::StateTransition;
+use crate::portstate::StateDecision;
 use crate::premaster::PreMasterPort;
 use crate::uncalibrated::UncalibratedPort;
 
@@ -26,7 +26,7 @@ impl<P: Port, B: Bmca, L: Log> ListeningPort<P, B, L> {
         }
     }
 
-    pub fn to_uncalibrated(self) -> UncalibratedPort<P, B, L> {
+    pub fn recommended_slave(self) -> UncalibratedPort<P, B, L> {
         UncalibratedPort::new(
             self.port,
             self.bmca,
@@ -35,7 +35,7 @@ impl<P: Port, B: Bmca, L: Log> ListeningPort<P, B, L> {
         )
     }
 
-    pub fn to_pre_master(self) -> PreMasterPort<P, B, L> {
+    pub fn recommended_master(self) -> PreMasterPort<P, B, L> {
         let qualification_timeout = self
             .port
             .timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
@@ -43,7 +43,7 @@ impl<P: Port, B: Bmca, L: Log> ListeningPort<P, B, L> {
         PreMasterPort::new(self.port, self.bmca, qualification_timeout, self.log)
     }
 
-    pub fn to_master(self) -> MasterPort<P, B, L> {
+    pub fn announce_receipt_timeout_expired(self) -> MasterPort<P, B, L> {
         let announce_send_timeout = self
             .port
             .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
@@ -60,15 +60,15 @@ impl<P: Port, B: Bmca, L: Log> ListeningPort<P, B, L> {
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         self.log.message_received("Announce");
         self.announce_receipt_timeout
             .restart(Duration::from_secs(5));
         self.bmca.consider(source_port_identity, msg);
 
         match self.bmca.recommendation(self.port.local_clock()) {
-            BmcaRecommendation::Master => Some(StateTransition::ToPreMaster),
-            BmcaRecommendation::Slave(_) => Some(StateTransition::ToUncalibrated),
+            BmcaRecommendation::Master => Some(StateDecision::RecommendedMaster),
+            BmcaRecommendation::Slave(_) => Some(StateDecision::RecommendedSlave),
             BmcaRecommendation::Undecided => None,
         }
     }
@@ -112,7 +112,10 @@ mod tests {
 
         let transition = listening.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
 
-        assert!(matches!(transition, Some(StateTransition::ToMaster)));
+        assert!(matches!(
+            transition,
+            Some(StateDecision::AnnounceReceiptTimeoutExpired)
+        ));
     }
 
     #[test]
@@ -189,7 +192,7 @@ mod tests {
             AnnounceMessage::new(1.into(), foreign_clock.clone()),
             PortIdentity::fake(),
         );
-        assert!(matches!(transition, Some(StateTransition::ToPreMaster)));
+        assert!(matches!(transition, Some(StateDecision::RecommendedMaster)));
     }
 
     #[test]
@@ -231,7 +234,7 @@ mod tests {
             AnnounceMessage::new(1.into(), foreign_clock),
             PortIdentity::fake(),
         );
-        assert!(matches!(transition, Some(StateTransition::ToUncalibrated)));
+        assert!(matches!(transition, Some(StateDecision::RecommendedSlave)));
 
         let system_messages = timer_host.take_system_messages();
         assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));

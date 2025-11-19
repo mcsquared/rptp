@@ -8,7 +8,7 @@ use crate::message::{
     SequenceId, SystemMessage, TwoStepSyncMessage,
 };
 use crate::port::{ParentPortIdentity, Port, PortIdentity, Timeout};
-use crate::portstate::StateTransition;
+use crate::portstate::StateDecision;
 use crate::sync::MasterEstimate;
 use crate::time::TimeStamp;
 
@@ -46,14 +46,14 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         self.log.message_received("Announce");
         self.announce_receipt_timeout
             .restart(Duration::from_secs(5));
         self.bmca.consider(source_port_identity, msg);
 
         match self.bmca.recommendation(self.port.local_clock()) {
-            BmcaRecommendation::Master => Some(StateTransition::ToUncalibrated),
+            BmcaRecommendation::Master => Some(StateDecision::RecommendedSlave),
             BmcaRecommendation::Slave(parent) => {
                 self.parent_port_identity = parent;
                 None
@@ -67,7 +67,7 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         sync: TwoStepSyncMessage,
         source_port_identity: PortIdentity,
         ingress_timestamp: TimeStamp,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         self.log.message_received("Sync");
         if !self.parent_port_identity.matches(&source_port_identity) {
             return None;
@@ -87,7 +87,7 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         &mut self,
         follow_up: FollowUpMessage,
         source_port_identity: PortIdentity,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         self.log.message_received("FollowUp");
         if !self.parent_port_identity.matches(&source_port_identity) {
             return None;
@@ -104,7 +104,7 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         &mut self,
         req: DelayRequestMessage,
         egress_timestamp: TimeStamp,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         self.log.message_received("DelayReq");
         if let Some(estimate) = self
             .master_estimate
@@ -120,7 +120,7 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         &mut self,
         resp: DelayResponseMessage,
         source_port_identity: PortIdentity,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         self.log.message_received("DelayResp");
         if !self.parent_port_identity.matches(&source_port_identity) {
             return None;
@@ -139,13 +139,14 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         self.delay_cycle.next();
     }
 
-    pub fn to_master(self) -> MasterPort<P, B, L> {
-        let announce_send_timeout = self.port.timeout(
-            SystemMessage::AnnounceSendTimeout,
-            Duration::from_secs(0),
-        );
+    pub fn announce_receipt_timeout_expired(self) -> MasterPort<P, B, L> {
+        let announce_send_timeout = self
+            .port
+            .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
         let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
-        let sync_timeout = self.port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
+        let sync_timeout = self
+            .port
+            .timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
         let sync_cycle = SyncCycle::new(0.into(), sync_timeout);
 
         MasterPort::new(self.port, self.bmca, announce_cycle, sync_cycle, self.log)
@@ -308,7 +309,10 @@ mod tests {
 
         let transition = slave.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
 
-        assert!(matches!(transition, Some(StateTransition::ToMaster)));
+        assert!(matches!(
+            transition,
+            Some(StateDecision::AnnounceReceiptTimeoutExpired)
+        ));
     }
 
     #[test]

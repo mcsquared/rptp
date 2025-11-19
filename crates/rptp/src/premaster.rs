@@ -23,7 +23,7 @@ impl<P: Port, B: Bmca, L: Log> PreMasterPort<P, B, L> {
         }
     }
 
-    pub fn to_master(self) -> MasterPort<P, B, L> {
+    pub fn qualified(self) -> MasterPort<P, B, L> {
         let announce_send_timeout = self
             .port
             .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
@@ -51,7 +51,7 @@ mod tests {
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
-    use crate::portstate::StateTransition;
+    use crate::portstate::StateDecision;
 
     #[test]
     fn pre_master_port_schedules_qualification_timeout() {
@@ -102,6 +102,9 @@ mod tests {
 
         let transition = pre_master.dispatch_system(SystemMessage::QualificationTimeout);
 
-        assert!(matches!(transition, Some(StateTransition::ToMaster)));
+        assert!(matches!(
+            transition,
+            Some(StateDecision::QualificationTimeoutExpired)
+        ));
     }
 }

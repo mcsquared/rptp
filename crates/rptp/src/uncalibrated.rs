@@ -1,12 +1,11 @@
 use std::time::Duration;
 
 use crate::bmca::{Bmca, BmcaRecommendation};
-use crate::listening::ListeningPort;
 use crate::log::Log;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{AnnounceMessage, SystemMessage};
 use crate::port::{ParentPortIdentity, Port, PortIdentity, Timeout};
-use crate::portstate::StateTransition;
+use crate::portstate::StateDecision;
 use crate::slave::{DelayCycle, SlavePort};
 
 pub struct UncalibratedPort<P: Port, B: Bmca, L: Log> {
@@ -30,20 +29,23 @@ impl<P: Port, B: Bmca, L: Log> UncalibratedPort<P, B, L> {
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         self.log.message_received("Announce");
         self.announce_receipt_timeout
             .restart(Duration::from_secs(5));
         self.bmca.consider(source_port_identity, msg);
 
         match self.bmca.recommendation(self.port.local_clock()) {
-            BmcaRecommendation::Master => Some(StateTransition::ToPreMaster),
-            BmcaRecommendation::Slave(parent) => Some(StateTransition::ToSlave(parent)),
-            BmcaRecommendation::Undecided => Some(StateTransition::ToListening),
+            BmcaRecommendation::Master => Some(StateDecision::RecommendedMaster),
+            BmcaRecommendation::Slave(parent) => Some(StateDecision::MasterClockSelected(parent)),
+            BmcaRecommendation::Undecided => None,
         }
     }
 
-    pub fn to_slave(self, parent_port_identity: ParentPortIdentity) -> SlavePort<P, B, L> {
+    pub fn master_clock_selected(
+        self,
+        parent_port_identity: ParentPortIdentity,
+    ) -> SlavePort<P, B, L> {
         let delay_cycle = DelayCycle::new(
             0.into(),
             self.port
@@ -59,22 +61,14 @@ impl<P: Port, B: Bmca, L: Log> UncalibratedPort<P, B, L> {
         )
     }
 
-    pub fn to_listening(self) -> ListeningPort<P, B, L> {
-        ListeningPort::new(
-            self.port,
-            self.bmca,
-            self.announce_receipt_timeout,
-            self.log,
-        )
-    }
-
-    pub fn to_master(self) -> MasterPort<P, B, L> {
-        let announce_send_timeout = self.port.timeout(
-            SystemMessage::AnnounceSendTimeout,
-            Duration::from_secs(0),
-        );
+    pub fn announce_receipt_timeout_expired(self) -> MasterPort<P, B, L> {
+        let announce_send_timeout = self
+            .port
+            .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
         let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
-        let sync_timeout = self.port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
+        let sync_timeout = self
+            .port
+            .timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
         let sync_cycle = SyncCycle::new(0.into(), sync_timeout);
 
         MasterPort::new(self.port, self.bmca, announce_cycle, sync_cycle, self.log)
@@ -87,11 +81,11 @@ mod tests {
 
     use crate::bmca::{ForeignClockDS, ForeignClockRecord, FullBmca, LocalClockDS};
     use crate::clock::{FakeClock, LocalClock};
-    use crate::portstate::PortState;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopLog;
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
+    use crate::portstate::PortState;
 
     #[test]
     fn uncalibrated_port_to_slave_transition_on_following_announce() {
@@ -127,7 +121,10 @@ mod tests {
             PortIdentity::fake(),
         );
 
-        assert!(matches!(transition, Some(StateTransition::ToSlave(_))));
+        assert!(matches!(
+            transition,
+            Some(StateDecision::MasterClockSelected(_))
+        ));
     }
 
     #[test]
@@ -155,6 +152,9 @@ mod tests {
 
         let transition = uncalibrated.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
 
-        assert!(matches!(transition, Some(StateTransition::ToMaster)));
+        assert!(matches!(
+            transition,
+            Some(StateDecision::AnnounceReceiptTimeoutExpired)
+        ));
     }
 }

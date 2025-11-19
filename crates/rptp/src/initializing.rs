@@ -17,7 +17,7 @@ impl<P: Port, B: Bmca, L: Log> InitializingPort<P, B, L> {
         Self { port, bmca, log }
     }
 
-    pub fn to_listening(self) -> ListeningPort<P, B, L> {
+    pub fn initialized(self) -> ListeningPort<P, B, L> {
         let announce_receipt_timeout = self.port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -38,7 +38,7 @@ mod tests {
     use crate::message::SystemMessage;
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
-    use crate::portstate::{PortState, StateTransition};
+    use crate::portstate::{PortState, StateDecision};
 
     #[test]
     fn initializing_port_to_listening_transition() {
@@ -58,6 +58,6 @@ mod tests {
 
         let transition = initializing.dispatch_system(SystemMessage::Initialized);
 
-        assert!(matches!(transition, Some(StateTransition::ToListening)));
+        assert!(matches!(transition, Some(StateDecision::Initialized)));
     }
 }

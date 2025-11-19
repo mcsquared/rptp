@@ -4,11 +4,11 @@ use crate::bmca::{Bmca, BmcaRecommendation};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::Log;
 use crate::message::{
-    AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId,
-    SystemMessage, TwoStepSyncMessage,
+    AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId, SystemMessage,
+    TwoStepSyncMessage,
 };
 use crate::port::{Port, PortIdentity, Timeout};
-use crate::portstate::StateTransition;
+use crate::portstate::StateDecision;
 use crate::time::TimeStamp;
 use crate::uncalibrated::UncalibratedPort;
 
@@ -48,13 +48,13 @@ impl<P: Port, B: Bmca, L: Log> MasterPort<P, B, L> {
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         self.log.message_received("Announce");
         self.bmca.consider(source_port_identity, msg);
 
         match self.bmca.recommendation(self.port.local_clock()) {
             BmcaRecommendation::Undecided => None,
-            BmcaRecommendation::Slave(_) => Some(StateTransition::ToUncalibrated),
+            BmcaRecommendation::Slave(_) => Some(StateDecision::RecommendedSlave),
             BmcaRecommendation::Master => None,
         }
     }
@@ -63,7 +63,7 @@ impl<P: Port, B: Bmca, L: Log> MasterPort<P, B, L> {
         &mut self,
         req: DelayRequestMessage,
         ingress_timestamp: TimeStamp,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         self.log.message_received("DelayReq");
         self.port
             .send_general(GeneralMessage::DelayResp(req.response(ingress_timestamp)));
@@ -82,13 +82,13 @@ impl<P: Port, B: Bmca, L: Log> MasterPort<P, B, L> {
         &mut self,
         sync: TwoStepSyncMessage,
         egress_timestamp: TimeStamp,
-    ) -> Option<StateTransition> {
+    ) -> Option<StateDecision> {
         self.port
             .send_general(GeneralMessage::FollowUp(sync.follow_up(egress_timestamp)));
         None
     }
 
-    pub fn to_uncalibrated(self) -> UncalibratedPort<P, B, L> {
+    pub fn recommended_slave(self) -> UncalibratedPort<P, B, L> {
         let announce_receipt_timeout = self.port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -152,7 +152,6 @@ mod tests {
 
     use crate::bmca::{ForeignClockDS, ForeignClockRecord, FullBmca, LocalClockDS};
     use crate::clock::{FakeClock, LocalClock};
-    use crate::portstate::PortState;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopLog;
     use crate::message::{
@@ -161,6 +160,7 @@ mod tests {
     };
     use crate::port::test_support::{FakePort, FakeTimeout, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
+    use crate::portstate::PortState;
 
     #[test]
     fn master_port_answers_delay_request_with_delay_response() {
@@ -411,7 +411,7 @@ mod tests {
             PortIdentity::fake(),
         );
 
-        assert!(matches!(transition, Some(StateTransition::ToUncalibrated)));
+        assert!(matches!(transition, Some(StateDecision::RecommendedSlave)));
     }
 
     #[test]
