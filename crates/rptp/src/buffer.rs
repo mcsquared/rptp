@@ -3,6 +3,19 @@ use crate::port::DomainNumber;
 use crate::port::PortIdentity;
 use bitflags::bitflags;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogMessageInterval(i8);
+
+impl LogMessageInterval {
+    pub const fn new(value: i8) -> Self {
+        Self(value)
+    }
+
+    pub fn to_wire(self) -> u8 {
+        self.0 as u8
+    }
+}
+
 pub struct MessageBuffer {
     buf: [u8; 2048],
 }
@@ -13,14 +26,14 @@ impl MessageBuffer {
         version: u8,
         domain_number: DomainNumber,
         source_port_identity: PortIdentity,
-        log_message_interval: i8,
+        log_message_interval: LogMessageInterval,
     ) -> Self {
         let mut buf = [0u8; 2048];
         buf[0] = (transport_specific & 0x0F) << 4;
         buf[1] = version & 0x0F;
         buf[4] = domain_number.as_u8();
         buf[20..30].copy_from_slice(source_port_identity.to_bytes().as_ref());
-        buf[33] = log_message_interval as u8;
+        buf[33] = log_message_interval.to_wire();
 
         Self { buf }
     }
@@ -143,7 +156,7 @@ mod tests {
             2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let wire = msg.serialize(&mut buf);
         let bytes = wire.as_ref();
@@ -161,7 +174,7 @@ mod tests {
             2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let wire = msg.serialize(&mut buf);
         let bytes = wire.as_ref();
@@ -179,7 +192,7 @@ mod tests {
             2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let wire = msg.serialize(&mut buf);
         let bytes = wire.as_ref();
@@ -197,7 +210,7 @@ mod tests {
             2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let wire = msg.serialize(&mut buf);
         let bytes = wire.as_ref();
@@ -223,7 +236,7 @@ mod tests {
             2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let wire = msg.serialize(&mut buf);
         let bytes = wire.as_ref();

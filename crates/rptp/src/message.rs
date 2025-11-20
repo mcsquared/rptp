@@ -491,6 +491,7 @@ mod tests {
     use super::*;
 
     use crate::bmca::{Priority1, Priority2};
+    use crate::buffer::LogMessageInterval;
     use crate::clock::{ClockIdentity, ClockQuality};
     use crate::port::PortNumber;
 
@@ -511,7 +512,7 @@ mod tests {
             2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let wire = announce.serialize(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
@@ -527,7 +528,7 @@ mod tests {
             2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let wire = sync.serialize(&mut buf);
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
@@ -543,7 +544,7 @@ mod tests {
             2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let wire = follow_up.serialize(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
@@ -559,7 +560,7 @@ mod tests {
             2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let wire = delay_req.serialize(&mut buf);
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
@@ -575,7 +576,7 @@ mod tests {
             2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let wire = delay_resp.serialize(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();

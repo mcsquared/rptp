@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
 use crate::bmca::Bmca;
-use crate::buffer::MessageBuffer;
+use crate::buffer::{LogMessageInterval, MessageBuffer};
 use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
@@ -204,7 +204,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> Port for DomainP
             2,
             self.domain_number,
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let finalized = msg.serialize(&mut buf);
         self.physical_port.send_event(finalized.as_ref());
@@ -216,7 +216,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> Port for DomainP
             2,
             self.domain_number,
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
-            0x7F,
+            LogMessageInterval::new(0x7F),
         );
         let finalized = msg.serialize(&mut buf);
         self.physical_port.send_general(finalized.as_ref());
