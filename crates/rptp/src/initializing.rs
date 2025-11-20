@@ -2,22 +2,25 @@ use std::time::Duration;
 
 use crate::bmca::Bmca;
 use crate::listening::ListeningPort;
-use crate::log::Log;
+use crate::log::PortLog;
 use crate::message::SystemMessage;
 use crate::port::Port;
 
-pub struct InitializingPort<P: Port, B: Bmca, L: Log> {
+pub struct InitializingPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: B,
     log: L,
 }
 
-impl<P: Port, B: Bmca, L: Log> InitializingPort<P, B, L> {
+impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
     pub fn new(port: P, bmca: B, log: L) -> Self {
         Self { port, bmca, log }
     }
 
     pub fn initialized(self) -> ListeningPort<P, B, L> {
+        self.log
+            .state_transition("Initializing", "Listening", "Port has been initialized");
+
         let announce_receipt_timeout = self.port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -34,7 +37,7 @@ mod tests {
     use crate::bmca::{FullBmca, LocalClockDS};
     use crate::clock::{FakeClock, LocalClock};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
-    use crate::log::NoopLog;
+    use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
@@ -53,7 +56,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         ));
 
         let transition = initializing.dispatch_system(SystemMessage::Initialized);

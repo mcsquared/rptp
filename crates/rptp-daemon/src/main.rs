@@ -1,3 +1,4 @@
+pub mod log;
 pub mod net;
 pub mod node;
 pub mod ordinary;
@@ -16,6 +17,8 @@ use crate::ordinary::ordinary_clock_port;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::io::Result<()> {
+    rptp_daemon::init_tracing();
+
     let domain = DomainNumber::new(0);
 
     let local_clock = LocalClock::new(

@@ -5,11 +5,11 @@ use tokio::sync::mpsc;
 use rptp::bmca::FullBmca;
 use rptp::clock::{LocalClock, SynchronizableClock};
 use rptp::infra::infra_support::SortedForeignClockRecordsVec;
-use rptp::log::NoopLog;
 use rptp::message::SystemMessage;
-use rptp::port::{DomainNumber, DomainPort, PortNumber};
+use rptp::port::{DomainNumber, DomainPort, PortIdentity, PortNumber};
 use rptp::portstate::PortState;
 
+use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
 use crate::node::{TokioPhysicalPort, TokioTimerHost};
 
@@ -23,7 +23,7 @@ pub fn ordinary_clock_port<'a, C, N>(
 ) -> PortState<
     Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
     FullBmca<SortedForeignClockRecordsVec>,
-    NoopLog,
+    TracingPortLog,
 >
 where
     C: SynchronizableClock,
@@ -48,5 +48,8 @@ where
         port_number,
     ));
 
-    PortState::initializing(domain_port, bmca, NoopLog)
+    let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
+    let log = TracingPortLog::new(port_identity);
+
+    PortState::initializing(domain_port, bmca, log)
 }

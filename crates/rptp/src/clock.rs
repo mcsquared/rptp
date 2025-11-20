@@ -1,3 +1,4 @@
+use core::fmt::{Display, Formatter};
 use std::cell::Cell;
 use std::ops::Range;
 
@@ -19,6 +20,23 @@ impl ClockIdentity {
 
     pub fn as_bytes(&self) -> &[u8; 8] {
         &self.id
+    }
+}
+
+impl Display for ClockIdentity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:02x}{:02x}{:02x}.{:02x}{:02x}.{:02x}{:02x}{:02x}",
+            self.id[0],
+            self.id[1],
+            self.id[2],
+            self.id[3],
+            self.id[4],
+            self.id[5],
+            self.id[6],
+            self.id[7]
+        )
     }
 }
 

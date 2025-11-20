@@ -4,7 +4,7 @@ use crate::bmca::Bmca;
 use crate::faulty::FaultyPort;
 use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
-use crate::log::Log;
+use crate::log::PortLog;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::port::{ParentPortIdentity, Port, PortIdentity};
@@ -16,14 +16,14 @@ use crate::uncalibrated::UncalibratedPort;
 pub enum StateDecision {
     Initialized,
     MasterClockSelected(ParentPortIdentity),
-    RecommendedSlave,
+    RecommendedSlave(ParentPortIdentity),
     RecommendedMaster,
     FaultDetected,
     QualificationTimeoutExpired,
     AnnounceReceiptTimeoutExpired,
 }
 
-pub enum PortState<P: Port, B: Bmca, L: Log> {
+pub enum PortState<P: Port, B: Bmca, L: PortLog> {
     Initializing(InitializingPort<P, B, L>),
     Listening(ListeningPort<P, B, L>),
     Slave(SlavePort<P, B, L>),
@@ -33,7 +33,7 @@ pub enum PortState<P: Port, B: Bmca, L: Log> {
     Faulty(FaultyPort<P, B, L>),
 }
 
-impl<P: Port, B: Bmca, L: Log> PortState<P, B, L> {
+impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
     pub fn initializing(port: P, bmca: B, log: L) -> Self {
         PortState::Initializing(InitializingPort::new(port, bmca, log))
     }
@@ -118,17 +118,19 @@ impl<P: Port, B: Bmca, L: Log> PortState<P, B, L> {
                 }
                 _ => PortState::Faulty(FaultyPort::new()),
             },
-            StateDecision::MasterClockSelected(parent_port_identity) => match self {
+            StateDecision::MasterClockSelected(parent) => match self {
                 PortState::Uncalibrated(uncalibrated) => {
-                    PortState::Slave(uncalibrated.master_clock_selected(parent_port_identity))
+                    PortState::Slave(uncalibrated.master_clock_selected(parent))
                 }
                 _ => PortState::Faulty(FaultyPort::new()),
             },
-            StateDecision::RecommendedSlave => match self {
+            StateDecision::RecommendedSlave(parent) => match self {
                 PortState::Listening(listening) => {
-                    PortState::Uncalibrated(listening.recommended_slave())
+                    PortState::Uncalibrated(listening.recommended_slave(parent))
                 }
-                PortState::Master(master) => PortState::Uncalibrated(master.recommended_slave()),
+                PortState::Master(master) => {
+                    PortState::Uncalibrated(master.recommended_slave(parent))
+                }
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateDecision::RecommendedMaster => match self {
@@ -236,7 +238,7 @@ mod tests {
     use crate::bmca::{FullBmca, LocalClockDS};
     use crate::clock::{FakeClock, LocalClock};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
-    use crate::log::NoopLog;
+    use crate::log::NoopPortLog;
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
 
@@ -254,7 +256,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let master = listening.transit(StateDecision::AnnounceReceiptTimeoutExpired);
@@ -277,7 +279,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let master = slave.transit(StateDecision::AnnounceReceiptTimeoutExpired);
@@ -299,7 +301,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let master = pre_master.transit(StateDecision::QualificationTimeoutExpired);
@@ -321,7 +323,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let master = uncalibrated.transit(StateDecision::AnnounceReceiptTimeoutExpired);
@@ -343,7 +345,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -366,10 +368,11 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
-        let uncalibrated = listening.transit(StateDecision::RecommendedSlave);
+        let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
+        let uncalibrated = listening.transit(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(uncalibrated, PortState::Uncalibrated(_)));
     }
@@ -388,10 +391,11 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
-        let uncalibrated = master.transit(StateDecision::RecommendedSlave);
+        let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
+        let uncalibrated = master.transit(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(uncalibrated, PortState::Uncalibrated(_)));
     }
@@ -410,7 +414,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let pre_master = listening.transit(StateDecision::RecommendedMaster);
@@ -432,7 +436,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let listening = initializing.transit(StateDecision::Initialized);
@@ -456,7 +460,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = initializing.transit(StateDecision::AnnounceReceiptTimeoutExpired);
@@ -479,7 +483,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = master.transit(StateDecision::AnnounceReceiptTimeoutExpired);
@@ -503,7 +507,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -526,7 +530,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -550,7 +554,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -573,7 +577,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -596,7 +600,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -621,10 +625,11 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
-        let result = initializing.transit(StateDecision::RecommendedSlave);
+        let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
+        let result = initializing.transit(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -644,10 +649,11 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
-            NoopLog,
+            NoopPortLog,
         );
 
-        let result = slave.transit(StateDecision::RecommendedSlave);
+        let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
+        let result = slave.transit(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -666,10 +672,11 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
-        let result = pre_master.transit(StateDecision::RecommendedSlave);
+        let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
+        let result = pre_master.transit(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -688,10 +695,11 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
-        let result = uncalibrated.transit(StateDecision::RecommendedSlave);
+        let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
+        let result = uncalibrated.transit(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -712,7 +720,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = initializing.transit(StateDecision::RecommendedMaster);
@@ -735,7 +743,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = slave.transit(StateDecision::RecommendedMaster);
@@ -757,7 +765,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = master.transit(StateDecision::RecommendedMaster);
@@ -779,7 +787,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = pre_master.transit(StateDecision::RecommendedMaster);
@@ -801,7 +809,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = uncalibrated.transit(StateDecision::RecommendedMaster);
@@ -825,7 +833,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = listening.transit(StateDecision::Initialized);
@@ -848,7 +856,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = slave.transit(StateDecision::Initialized);
@@ -870,7 +878,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = master.transit(StateDecision::Initialized);
@@ -892,7 +900,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = pre_master.transit(StateDecision::Initialized);
@@ -916,7 +924,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = initializing.transit(StateDecision::FaultDetected);
@@ -938,7 +946,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = listening.transit(StateDecision::FaultDetected);
@@ -961,7 +969,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = slave.transit(StateDecision::FaultDetected);
@@ -983,7 +991,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = master.transit(StateDecision::FaultDetected);
@@ -1005,7 +1013,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = pre_master.transit(StateDecision::FaultDetected);
@@ -1027,7 +1035,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let result = uncalibrated.transit(StateDecision::FaultDetected);
@@ -1040,7 +1048,7 @@ mod tests {
         let faulty: PortState<
             DomainPort<FakeClock, FakePort, FakeTimerHost>,
             FullBmca<SortedForeignClockRecordsVec>,
-            NoopLog,
+            NoopPortLog,
         > = PortState::Faulty(FaultyPort::new());
 
         let result = faulty.transit(StateDecision::FaultDetected);

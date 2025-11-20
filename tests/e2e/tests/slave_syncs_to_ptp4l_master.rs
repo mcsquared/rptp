@@ -33,6 +33,7 @@ mod tests {
         let slave = TestContainer::new(
             GenericImage::new(image.name(), &tag)
                 .with_wait_for(WaitFor::message_on_stdout("Slave ready"))
+                .with_env_var("RUST_LOG", "debug")
                 .with_log_consumer(PrintLog { prefix: "slave" })
                 .with_cmd(["/app/slave-syncs-to-ptp4l-master"])
                 .with_network(net.name())

@@ -1,9 +1,10 @@
+use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
 use crate::bmca::Bmca;
 use crate::buffer::MessageBuffer;
 use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
-use crate::log::Log;
+use crate::log::PortLog;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::PortState;
 use crate::result::{ProtocolError, Result};
@@ -133,6 +134,12 @@ impl PortIdentity {
     }
 }
 
+impl Display for PortIdentity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}", self.clock_identity, self.port_number.0)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ParentPortIdentity {
     parent_port_identity: PortIdentity,
@@ -147,6 +154,12 @@ impl ParentPortIdentity {
 
     pub fn matches(&self, source_port_identity: &PortIdentity) -> bool {
         self.parent_port_identity == *source_port_identity
+    }
+}
+
+impl Display for ParentPortIdentity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.parent_port_identity)
     }
 }
 
@@ -218,12 +231,12 @@ pub trait PortMap {
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress>;
 }
 
-pub struct SingleDomainPortMap<P: Port, B: Bmca, L: Log> {
+pub struct SingleDomainPortMap<P: Port, B: Bmca, L: PortLog> {
     domain_number: DomainNumber,
     port_state: Option<PortState<P, B, L>>,
 }
 
-impl<P: Port, B: Bmca, L: Log> SingleDomainPortMap<P, B, L> {
+impl<P: Port, B: Bmca, L: PortLog> SingleDomainPortMap<P, B, L> {
     pub fn new(domain_number: DomainNumber, port_state: PortState<P, B, L>) -> Self {
         Self {
             domain_number,
@@ -232,7 +245,7 @@ impl<P: Port, B: Bmca, L: Log> SingleDomainPortMap<P, B, L> {
     }
 }
 
-impl<P: Port, B: Bmca, L: Log> PortMap for SingleDomainPortMap<P, B, L> {
+impl<P: Port, B: Bmca, L: PortLog> PortMap for SingleDomainPortMap<P, B, L> {
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress> {
         if self.domain_number == domain_number {
             Ok(&mut self.port_state)
@@ -253,7 +266,7 @@ pub trait PortIngress {
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
-impl<P: Port, B: Bmca, L: Log> PortIngress for Option<PortState<P, B, L>> {
+impl<P: Port, B: Bmca, L: PortLog> PortIngress for Option<PortState<P, B, L>> {
     fn process_event_message(
         &mut self,
         source_port_identity: PortIdentity,

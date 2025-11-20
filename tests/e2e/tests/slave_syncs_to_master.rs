@@ -22,7 +22,8 @@ mod tests {
         let slave = TestContainer::new(
             GenericImage::new(image.name(), &tag)
                 .with_wait_for(WaitFor::message_on_stdout("Slave ready"))
-                .with_log_consumer(PrintLog { prefix: "slave" })
+                .with_env_var("RUST_LOG", "debug")
+                .with_log_consumer(PrintLog { prefix: "slave " })
                 .with_cmd(["/app/slave-syncs-to-master-slave"])
                 .with_network(net.name())
                 .start()
@@ -33,6 +34,7 @@ mod tests {
         let master = TestContainer::new(
             GenericImage::new(image.name(), &tag)
                 .with_wait_for(WaitFor::message_on_stdout("Master ready"))
+                .with_env_var("RUST_LOG", "debug")
                 .with_log_consumer(PrintLog { prefix: "master" })
                 .with_cmd(["/app/slave-syncs-to-master-master"])
                 .with_network(net.name())

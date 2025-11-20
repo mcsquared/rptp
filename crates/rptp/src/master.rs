@@ -2,17 +2,17 @@ use std::time::Duration;
 
 use crate::bmca::{Bmca, BmcaRecommendation};
 use crate::clock::{LocalClock, SynchronizableClock};
-use crate::log::Log;
+use crate::log::PortLog;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId, SystemMessage,
     TwoStepSyncMessage,
 };
-use crate::port::{Port, PortIdentity, Timeout};
+use crate::port::{ParentPortIdentity, Port, PortIdentity, Timeout};
 use crate::portstate::StateDecision;
 use crate::time::TimeStamp;
 use crate::uncalibrated::UncalibratedPort;
 
-pub struct MasterPort<P: Port, B: Bmca, L: Log> {
+pub struct MasterPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: B,
     announce_cycle: AnnounceCycle<P::Timeout>,
@@ -20,7 +20,7 @@ pub struct MasterPort<P: Port, B: Bmca, L: Log> {
     log: L,
 }
 
-impl<P: Port, B: Bmca, L: Log> MasterPort<P, B, L> {
+impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
     pub fn new(
         port: P,
         bmca: B,
@@ -42,6 +42,7 @@ impl<P: Port, B: Bmca, L: Log> MasterPort<P, B, L> {
         self.port
             .send_general(GeneralMessage::Announce(announce_message));
         self.announce_cycle.next();
+        self.log.message_sent("Announce");
     }
 
     pub fn process_announce(
@@ -54,7 +55,7 @@ impl<P: Port, B: Bmca, L: Log> MasterPort<P, B, L> {
 
         match self.bmca.recommendation(self.port.local_clock()) {
             BmcaRecommendation::Undecided => None,
-            BmcaRecommendation::Slave(_) => Some(StateDecision::RecommendedSlave),
+            BmcaRecommendation::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
             BmcaRecommendation::Master => None,
         }
     }
@@ -76,6 +77,7 @@ impl<P: Port, B: Bmca, L: Log> MasterPort<P, B, L> {
         self.port
             .send_event(EventMessage::TwoStepSync(sync_message));
         self.sync_cycle.next();
+        self.log.message_sent("TwoStepSync");
     }
 
     pub fn send_follow_up(
@@ -85,10 +87,20 @@ impl<P: Port, B: Bmca, L: Log> MasterPort<P, B, L> {
     ) -> Option<StateDecision> {
         self.port
             .send_general(GeneralMessage::FollowUp(sync.follow_up(egress_timestamp)));
+        self.log.message_sent("FollowUp");
         None
     }
 
-    pub fn recommended_slave(self) -> UncalibratedPort<P, B, L> {
+    pub fn recommended_slave(
+        self,
+        parent_port_identity: ParentPortIdentity,
+    ) -> UncalibratedPort<P, B, L> {
+        self.log.state_transition(
+            "Master",
+            "Uncalibrated",
+            format!("Recommended Slave, parent {}", parent_port_identity).as_str(),
+        );
+
         let announce_receipt_timeout = self.port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -153,7 +165,7 @@ mod tests {
     use crate::bmca::{ForeignClockDS, ForeignClockRecord, FullBmca, LocalClockDS};
     use crate::clock::{FakeClock, LocalClock};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
-    use crate::log::NoopLog;
+    use crate::log::NoopPortLog;
     use crate::message::{
         DelayResponseMessage, EventMessage, FollowUpMessage, GeneralMessage, SystemMessage,
         TwoStepSyncMessage,
@@ -191,7 +203,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             announce_cycle,
             sync_cycle,
-            NoopLog,
+            NoopPortLog,
         );
 
         timer_host.take_system_messages();
@@ -226,7 +238,7 @@ mod tests {
         let mut master = PortState::master(
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         master.dispatch_system(SystemMessage::SyncTimeout);
@@ -256,7 +268,7 @@ mod tests {
         let mut master = PortState::master(
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         // Drain messages that could have been sent during initialization.
@@ -295,7 +307,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             announce_cycle,
             sync_cycle,
-            NoopLog,
+            NoopPortLog,
         );
 
         timer_host.take_system_messages();
@@ -330,7 +342,7 @@ mod tests {
         let mut master = PortState::master(
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         timer_host.take_system_messages();
@@ -358,7 +370,7 @@ mod tests {
         let mut master = PortState::master(
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopLog,
+            NoopPortLog,
         );
 
         master.dispatch_system(SystemMessage::AnnounceSendTimeout);
@@ -403,7 +415,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
             announce_cycle,
             sync_cycle,
-            NoopLog,
+            NoopPortLog,
         );
 
         let transition = master.process_announce(
@@ -411,7 +423,10 @@ mod tests {
             PortIdentity::fake(),
         );
 
-        assert!(matches!(transition, Some(StateDecision::RecommendedSlave)));
+        assert!(matches!(
+            transition,
+            Some(StateDecision::RecommendedSlave(_))
+        ));
     }
 
     #[test]
@@ -447,7 +462,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
             announce_cycle,
             sync_cycle,
-            NoopLog,
+            NoopPortLog,
         );
 
         // Drain any setup timers
@@ -490,7 +505,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             announce_cycle,
             sync_cycle,
-            NoopLog,
+            NoopPortLog,
         );
 
         // Drain any setup timers

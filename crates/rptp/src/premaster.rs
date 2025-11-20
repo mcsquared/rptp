@@ -1,19 +1,19 @@
 use std::time::Duration;
 
 use crate::bmca::Bmca;
-use crate::log::Log;
+use crate::log::PortLog;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::SystemMessage;
 use crate::port::Port;
 
-pub struct PreMasterPort<P: Port, B: Bmca, L: Log> {
+pub struct PreMasterPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: B,
     _qualification_timeout: P::Timeout,
     log: L,
 }
 
-impl<P: Port, B: Bmca, L: Log> PreMasterPort<P, B, L> {
+impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
     pub fn new(port: P, bmca: B, _qualification_timeout: P::Timeout, log: L) -> Self {
         Self {
             port,
@@ -24,6 +24,9 @@ impl<P: Port, B: Bmca, L: Log> PreMasterPort<P, B, L> {
     }
 
     pub fn qualified(self) -> MasterPort<P, B, L> {
+        self.log
+            .state_transition("Pre-Master", "Master", "Port has qualified as Master");
+
         let announce_send_timeout = self
             .port
             .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
@@ -46,7 +49,7 @@ mod tests {
     use crate::bmca::{FullBmca, LocalClockDS};
     use crate::clock::{FakeClock, LocalClock};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
-    use crate::log::NoopLog;
+    use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
@@ -72,7 +75,7 @@ mod tests {
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             qualification_timeout,
-            NoopLog,
+            NoopPortLog,
         );
 
         let messages = timer_host.take_system_messages();
@@ -97,7 +100,7 @@ mod tests {
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             qualification_timeout,
-            NoopLog,
+            NoopPortLog,
         ));
 
         let transition = pre_master.dispatch_system(SystemMessage::QualificationTimeout);

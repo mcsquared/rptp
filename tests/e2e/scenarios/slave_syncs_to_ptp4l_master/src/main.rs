@@ -14,6 +14,8 @@ use rptp_daemon::ordinary::ordinary_clock_port;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::io::Result<()> {
+    rptp_daemon::init_tracing();
+
     let domain = DomainNumber::new(0);
 
     let local_clock = LocalClock::new(
@@ -48,7 +50,7 @@ async fn main() -> std::io::Result<()> {
     )
     .await?;
 
-    println!("Slave ready");
+    tracing::info!("Slave ready");
 
     let clock_sync = async {
         loop {

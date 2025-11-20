@@ -10,11 +10,11 @@ use tokio::sync::mpsc;
 use rptp::{
     clock::LocalClock,
     infra::infra_support::SortedForeignClockRecordsVec,
-    log::NoopLog,
     message::{DomainMessage, EventMessage, SystemMessage, TimestampMessage},
     port::{DomainNumber, DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
 };
 
+use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
 
 pub struct TokioTimeout {
@@ -159,7 +159,7 @@ pub struct TokioPortsLoop<'a, C: SynchronizableClock, N: NetworkSocket> {
     portmap: SingleDomainPortMap<
         Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
         FullBmca<SortedForeignClockRecordsVec>,
-        NoopLog,
+        TracingPortLog,
     >,
     event_socket: Rc<N>,
     general_socket: Rc<N>,
@@ -172,7 +172,7 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
         portmap: SingleDomainPortMap<
             Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
             FullBmca<SortedForeignClockRecordsVec>,
-            NoopLog,
+            TracingPortLog,
         >,
         event_socket: Rc<N>,
         general_socket: Rc<N>,
@@ -263,12 +263,12 @@ mod tests {
 
     use rptp::bmca::LocalClockDS;
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
-    use rptp::log::NoopLog;
     use rptp::message::{EventMessage, GeneralMessage};
     use rptp::port::{DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber};
     use rptp::portstate::PortState;
     use rptp::slave::{DelayCycle, SlavePort};
 
+    use crate::log::TracingPortLog;
     use crate::net::{FakeNetworkSocket, MulticastSocket};
 
     #[test]
@@ -278,14 +278,14 @@ mod tests {
             PortState<
                 Box<
                     DomainPort<
-                        '_,
+                        'static,
                         FakeClock,
-                        TokioPhysicalPort<'_, FakeClock, MulticastSocket>,
+                        TokioPhysicalPort<'static, FakeClock, MulticastSocket>,
                         TokioTimerHost,
                     >,
                 >,
                 FullBmca<SortedForeignClockRecordsVec>,
-                NoopLog,
+                TracingPortLog,
             >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
@@ -319,15 +319,18 @@ mod tests {
             general_socket.clone(),
             system_tx.clone(),
         );
+        let port_number = PortNumber::new(1);
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             domain_number,
-            PortNumber::new(1),
+            port_number,
         ));
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
-        let port_state = PortState::master(domain_port, bmca, NoopLog);
+        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
+        let log = TracingPortLog::new(port_identity);
+        let port_state = PortState::master(domain_port, bmca, log);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(
             &local_clock,
@@ -403,12 +406,13 @@ mod tests {
             general_socket.clone(),
             system_tx.clone(),
         );
+        let port_number = PortNumber::new(1);
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             domain_number,
-            PortNumber::new(1),
+            port_number,
         ));
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let announce_receipt_timeout = domain_port.timeout(
@@ -419,6 +423,8 @@ mod tests {
             domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
 
+        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
+        let log = TracingPortLog::new(port_identity);
         let port_state = PortState::Slave(SlavePort::new(
             domain_port,
             bmca,
@@ -428,7 +434,7 @@ mod tests {
             )),
             announce_receipt_timeout,
             delay_cycle,
-            NoopLog,
+            log,
         ));
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(

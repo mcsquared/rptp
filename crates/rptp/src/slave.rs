@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::bmca::{Bmca, BmcaRecommendation};
-use crate::log::Log;
+use crate::log::PortLog;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
@@ -12,7 +12,7 @@ use crate::portstate::StateDecision;
 use crate::sync::MasterEstimate;
 use crate::time::TimeStamp;
 
-pub struct SlavePort<P: Port, B: Bmca, L: Log> {
+pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: B,
     announce_receipt_timeout: P::Timeout,
@@ -22,7 +22,7 @@ pub struct SlavePort<P: Port, B: Bmca, L: Log> {
     log: L,
 }
 
-impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
+impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
     pub fn new(
         port: P,
         bmca: B,
@@ -53,7 +53,7 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         self.bmca.consider(source_port_identity, msg);
 
         match self.bmca.recommendation(self.port.local_clock()) {
-            BmcaRecommendation::Master => Some(StateDecision::RecommendedSlave),
+            BmcaRecommendation::Master => Some(StateDecision::RecommendedMaster),
             BmcaRecommendation::Slave(parent) => {
                 self.parent_port_identity = parent;
                 None
@@ -137,9 +137,13 @@ impl<P: Port, B: Bmca, L: Log> SlavePort<P, B, L> {
         let delay_request = self.delay_cycle.delay_request();
         self.port.send_event(EventMessage::DelayReq(delay_request));
         self.delay_cycle.next();
+        self.log.message_sent("DelayReq");
     }
 
     pub fn announce_receipt_timeout_expired(self) -> MasterPort<P, B, L> {
+        self.log
+            .state_transition("Slave", "Master", "Announce receipt timeout expired");
+
         let announce_send_timeout = self
             .port
             .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
@@ -184,7 +188,7 @@ mod tests {
     use crate::bmca::{FullBmca, LocalClockDS};
     use crate::clock::{ClockIdentity, FakeClock, LocalClock};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
-    use crate::log::NoopLog;
+    use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
     use crate::port::test_support::{FakePort, FakeTimeout, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
@@ -213,7 +217,7 @@ mod tests {
                 0.into(),
                 FakeTimeout::new(SystemMessage::DelayRequestTimeout),
             ),
-            NoopLog,
+            NoopPortLog,
         );
 
         slave.process_two_step_sync(
@@ -251,7 +255,7 @@ mod tests {
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
-            NoopLog,
+            NoopPortLog,
         );
 
         timer_host.take_system_messages();
@@ -279,7 +283,7 @@ mod tests {
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
-            NoopLog,
+            NoopPortLog,
         );
 
         slave.dispatch_system(SystemMessage::DelayRequestTimeout);
@@ -304,7 +308,7 @@ mod tests {
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
-            NoopLog,
+            NoopPortLog,
         );
 
         let transition = slave.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
@@ -354,7 +358,7 @@ mod tests {
             ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
-            NoopLog,
+            NoopPortLog,
         );
 
         // Record a TwoStepSync from the parent so a matching FollowUp could produce ms_offset
@@ -426,7 +430,7 @@ mod tests {
             ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
-            NoopLog,
+            NoopPortLog,
         );
 
         // Send a FollowUp from the parent first (ms offset incomplete without sync)
@@ -492,7 +496,7 @@ mod tests {
             ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
-            NoopLog,
+            NoopPortLog,
         );
 
         // Matching conversation from the parent (numbers chosen to yield estimate 2s)
