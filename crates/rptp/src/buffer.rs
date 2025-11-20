@@ -4,6 +4,30 @@ use crate::port::PortIdentity;
 use bitflags::bitflags;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TransportSpecific;
+
+impl TransportSpecific {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub const fn to_wire(self) -> u8 {
+        0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PtpVersion(u8);
+
+impl PtpVersion {
+    pub const V2: Self = Self(2);
+
+    pub const fn to_wire(self) -> u8 {
+        self.0 & 0x0F
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LogMessageInterval(i8);
 
 impl LogMessageInterval {
@@ -22,15 +46,15 @@ pub struct MessageBuffer {
 
 impl MessageBuffer {
     pub fn new(
-        transport_specific: u8,
-        version: u8,
+        transport_specific: TransportSpecific,
+        version: PtpVersion,
         domain_number: DomainNumber,
         source_port_identity: PortIdentity,
         log_message_interval: LogMessageInterval,
     ) -> Self {
         let mut buf = [0u8; 2048];
-        buf[0] = (transport_specific & 0x0F) << 4;
-        buf[1] = version & 0x0F;
+        buf[0] = (transport_specific.to_wire() & 0x0F) << 4;
+        buf[1] = version.to_wire() & 0x0F;
         buf[4] = domain_number.as_u8();
         buf[20..30].copy_from_slice(source_port_identity.to_bytes().as_ref());
         buf[33] = log_message_interval.to_wire();
@@ -152,8 +176,8 @@ mod tests {
     fn buffer_integrity_two_step_sync() {
         let msg = TwoStepSyncMessage::new(7.into());
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             LogMessageInterval::new(0x7F),
@@ -170,8 +194,8 @@ mod tests {
     fn buffer_integrity_follow_up() {
         let msg = FollowUpMessage::new(9.into(), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             LogMessageInterval::new(0x7F),
@@ -188,8 +212,8 @@ mod tests {
     fn buffer_integrity_delay_resp() {
         let msg = DelayResponseMessage::new(11.into(), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             LogMessageInterval::new(0x7F),
@@ -206,8 +230,8 @@ mod tests {
     fn buffer_integrity_delay_req() {
         let msg = DelayRequestMessage::new(13.into());
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             LogMessageInterval::new(0x7F),
@@ -232,8 +256,8 @@ mod tests {
             ),
         );
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             LogMessageInterval::new(0x7F),

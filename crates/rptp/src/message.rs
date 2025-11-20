@@ -491,7 +491,7 @@ mod tests {
     use super::*;
 
     use crate::bmca::{Priority1, Priority2};
-    use crate::buffer::LogMessageInterval;
+    use crate::buffer::{LogMessageInterval, PtpVersion, TransportSpecific};
     use crate::clock::{ClockIdentity, ClockQuality};
     use crate::port::PortNumber;
 
@@ -508,8 +508,8 @@ mod tests {
         );
 
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             LogMessageInterval::new(0x7F),
@@ -524,8 +524,8 @@ mod tests {
     fn two_step_sync_message_wire_roundtrip() {
         let sync = TwoStepSyncMessage::new(42.into());
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             LogMessageInterval::new(0x7F),
@@ -540,8 +540,8 @@ mod tests {
     fn follow_up_message_wire_roundtrip() {
         let follow_up = FollowUpMessage::new(42.into(), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             LogMessageInterval::new(0x7F),
@@ -556,8 +556,8 @@ mod tests {
     fn delay_request_message_wire_roundtrip() {
         let delay_req = DelayRequestMessage::new(42.into());
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             LogMessageInterval::new(0x7F),
@@ -572,8 +572,8 @@ mod tests {
     fn delay_response_message_wire_roundtrip() {
         let delay_resp = DelayResponseMessage::new(42.into(), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
             LogMessageInterval::new(0x7F),

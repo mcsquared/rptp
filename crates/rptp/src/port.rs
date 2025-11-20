@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
 use crate::bmca::Bmca;
-use crate::buffer::{LogMessageInterval, MessageBuffer};
+use crate::buffer::{LogMessageInterval, MessageBuffer, PtpVersion, TransportSpecific};
 use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
@@ -200,8 +200,8 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> Port for DomainP
 
     fn send_event(&self, msg: EventMessage) {
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             self.domain_number,
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
             LogMessageInterval::new(0x7F),
@@ -212,8 +212,8 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> Port for DomainP
 
     fn send_general(&self, msg: GeneralMessage) {
         let mut buf = MessageBuffer::new(
-            0,
-            2,
+            TransportSpecific::new(),
+            PtpVersion::V2,
             self.domain_number,
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
             LogMessageInterval::new(0x7F),
