@@ -118,7 +118,7 @@ pub enum ControlField {
 mod tests {
     use super::*;
 
-    use crate::bmca::ForeignClockDS;
+    use crate::bmca::{ForeignClockDS, Priority1, Priority2};
     use crate::clock::{ClockIdentity, ClockQuality};
     use crate::message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
@@ -205,8 +205,8 @@ mod tests {
             21.into(),
             ForeignClockDS::new(
                 ClockIdentity::new(&[0; 8]),
-                127,
-                127,
+                Priority1::new(127),
+                Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
         );

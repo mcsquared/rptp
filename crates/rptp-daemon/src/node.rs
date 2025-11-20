@@ -261,7 +261,7 @@ mod tests {
     use futures::FutureExt;
     use tokio::time;
 
-    use rptp::bmca::LocalClockDS;
+    use rptp::bmca::{LocalClockDS, Priority1, Priority2};
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
     use rptp::message::{EventMessage, GeneralMessage};
     use rptp::port::{DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber};
@@ -305,8 +305,8 @@ mod tests {
             FakeClock::default(),
             LocalClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
-                127,
-                127,
+                Priority1::new(127),
+                Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
         );
@@ -392,8 +392,8 @@ mod tests {
             FakeClock::default(),
             LocalClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
-                127,
-                127,
+                Priority1::new(127),
+                Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
         );

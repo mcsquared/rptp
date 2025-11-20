@@ -4,7 +4,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
-use rptp::bmca::LocalClockDS;
+use rptp::bmca::{LocalClockDS, Priority1, Priority2};
 use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
 use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
 use rptp::time::TimeStamp;
@@ -22,8 +22,8 @@ async fn main() -> std::io::Result<()> {
         FakeClock::new(TimeStamp::new(0, 0)),
         LocalClockDS::new(
             ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
-            250,
-            255,
+            Priority1::new(250),
+            Priority2::new(255),
             ClockQuality::new(250, 0xFE, 0xFFFF),
         ),
     );

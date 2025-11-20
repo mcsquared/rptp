@@ -490,6 +490,7 @@ impl<M> MessageWindow<M> {
 mod tests {
     use super::*;
 
+    use crate::bmca::{Priority1, Priority2};
     use crate::clock::{ClockIdentity, ClockQuality};
     use crate::port::PortNumber;
 
@@ -499,8 +500,8 @@ mod tests {
             42.into(),
             ForeignClockDS::new(
                 ClockIdentity::new(&[0; 8]),
-                127,
-                127,
+                Priority1::new(127),
+                Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
         );
