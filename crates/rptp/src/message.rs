@@ -1,6 +1,6 @@
 use crate::{
     bmca::ForeignClockDS,
-    buffer::{ControlField, FinalizedBuffer, MessageBuffer, MessageType},
+    buffer::{ControlField, FinalizedBuffer, MessageBuffer, MessageFlags, MessageType},
     port::{DomainNumber, PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Duration, TimeStamp},
@@ -223,7 +223,7 @@ impl AnnounceMessage {
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
             .typed(MessageType::Announce, ControlField::Other)
-            .flagged(0)
+            .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
             .payload();
 
@@ -257,7 +257,7 @@ impl TwoStepSyncMessage {
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let payload = buf
             .typed(MessageType::Sync, ControlField::Sync)
-            .flagged(0x0002)
+            .flagged(MessageFlags::TWO_STEP)
             .sequenced(self.sequence_id)
             .payload();
 
@@ -310,7 +310,7 @@ impl FollowUpMessage {
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
             .typed(MessageType::FollowUp, ControlField::FollowUp)
-            .flagged(0)
+            .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
             .payload();
 
@@ -344,7 +344,7 @@ impl DelayRequestMessage {
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let payload = buf
             .typed(MessageType::DelayRequest, ControlField::DelayRequest)
-            .flagged(0)
+            .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
             .payload();
 
@@ -397,7 +397,7 @@ impl DelayResponseMessage {
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
             .typed(MessageType::DelayResponse, ControlField::DelayResponse)
-            .flagged(0)
+            .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
             .payload();
 

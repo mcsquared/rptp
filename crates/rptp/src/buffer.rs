@@ -1,6 +1,7 @@
 use crate::message::SequenceId;
 use crate::port::DomainNumber;
 use crate::port::PortIdentity;
+use bitflags::bitflags;
 
 pub struct MessageBuffer {
     buf: [u8; 2048],
@@ -40,8 +41,8 @@ pub struct TypedBuffer<'a> {
 }
 
 impl<'a> TypedBuffer<'a> {
-    pub fn flagged(self, flags: u16) -> FlaggedBuffer<'a> {
-        self.buf[6..8].copy_from_slice(&flags.to_be_bytes());
+    pub fn flagged(self, flags: MessageFlags) -> FlaggedBuffer<'a> {
+        self.buf[6..8].copy_from_slice(&flags.bits().to_be_bytes());
         FlaggedBuffer { buf: self.buf }
     }
 }
@@ -112,6 +113,13 @@ pub enum ControlField {
     DelayResponse = 0x03,
     Management = 0x04,
     Other = 0x05,
+}
+
+bitflags! {
+    #[derive(Default)]
+    pub struct MessageFlags: u16 {
+        const TWO_STEP = 0x0002;
+    }
 }
 
 #[cfg(test)]

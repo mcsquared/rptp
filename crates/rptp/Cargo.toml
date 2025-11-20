@@ -10,3 +10,6 @@ readme = "../../README.md"
 keywords = ["ptp", "ieee1588", "time", "synchronization", "networking"]
 categories = ["date-and-time", "network-programming"]
 rust-version = "1.89"
+
+[dependencies]
+bitflags = "2"
