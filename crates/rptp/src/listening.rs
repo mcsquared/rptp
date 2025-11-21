@@ -1,71 +1,59 @@
-use std::time::Duration;
-
 use crate::bmca::{Bmca, BmcaRecommendation};
 use crate::log::PortLog;
-use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
-use crate::message::{AnnounceMessage, SystemMessage};
-use crate::port::{ParentPortIdentity, Port, PortIdentity, Timeout};
-use crate::portstate::StateDecision;
-use crate::premaster::PreMasterPort;
-use crate::uncalibrated::UncalibratedPort;
+use crate::message::AnnounceMessage;
+use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy, Timeout};
+use crate::portstate::{PortState, StateDecision};
 
 pub struct ListeningPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: B,
     announce_receipt_timeout: P::Timeout,
     log: L,
+    timing_policy: PortTimingPolicy,
 }
 
 impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
-    pub fn new(port: P, bmca: B, announce_receipt_timeout: P::Timeout, log: L) -> Self {
+    pub fn new(
+        port: P,
+        bmca: B,
+        announce_receipt_timeout: P::Timeout,
+        log: L,
+        timing_policy: PortTimingPolicy,
+    ) -> Self {
         Self {
             port,
             bmca,
             announce_receipt_timeout,
             log,
+            timing_policy,
         }
     }
 
-    pub fn recommended_slave(
-        self,
-        parent_port_identity: ParentPortIdentity,
-    ) -> UncalibratedPort<P, B, L> {
+    pub fn recommended_slave(self, parent_port_identity: ParentPortIdentity) -> PortState<P, B, L> {
         self.log.state_transition(
             "Listening",
             "Uncalibrated",
             format!("Recommended Slave, parent {}", parent_port_identity).as_str(),
         );
 
-        UncalibratedPort::new(
-            self.port,
-            self.bmca,
-            self.announce_receipt_timeout,
-            self.log,
-        )
+        PortState::uncalibrated(self.port, self.bmca, self.log, self.timing_policy)
     }
 
-    pub fn recommended_master(self) -> PreMasterPort<P, B, L> {
+    pub fn recommended_master(self) -> PortState<P, B, L> {
         self.log
             .state_transition("Listening", "Pre-Master", "Recommended Master");
 
-        let qualification_timeout = self
-            .port
-            .timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
-
-        PreMasterPort::new(self.port, self.bmca, qualification_timeout, self.log)
+        PortState::pre_master(self.port, self.bmca, self.log, self.timing_policy)
     }
 
-    pub fn announce_receipt_timeout_expired(self) -> MasterPort<P, B, L> {
-        let announce_send_timeout = self
-            .port
-            .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
-        let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
-        let sync_timeout = self
-            .port
-            .timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
-        let sync_cycle = SyncCycle::new(0.into(), sync_timeout);
+    pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
+        self.log.state_transition(
+            "Listening",
+            "Master",
+            "Announce receipt timeout expired, becoming to Master",
+        );
 
-        MasterPort::new(self.port, self.bmca, announce_cycle, sync_cycle, self.log)
+        PortState::master(self.port, self.bmca, self.log, self.timing_policy)
     }
 
     pub fn process_announce(
@@ -75,7 +63,7 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
     ) -> Option<StateDecision> {
         self.log.message_received("Announce");
         self.announce_receipt_timeout
-            .restart(Duration::from_secs(5));
+            .restart(self.timing_policy.announce_receipt_timeout_interval());
         self.bmca.consider(source_port_identity, msg);
 
         match self.bmca.recommendation(self.port.local_clock()) {
@@ -89,6 +77,8 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::time::Duration;
 
     use crate::bmca::{ForeignClockDS, FullBmca, LocalClockDS};
     use crate::clock::{FakeClock, LocalClock};
@@ -120,6 +110,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
+            PortTimingPolicy::default(),
         ));
 
         let transition = listening.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
@@ -152,6 +143,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
@@ -190,6 +182,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
@@ -229,6 +222,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let foreign_clock = ForeignClockDS::high_grade_test_clock();

@@ -264,7 +264,9 @@ mod tests {
     use rptp::bmca::{LocalClockDS, Priority1, Priority2};
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
     use rptp::message::{EventMessage, GeneralMessage};
-    use rptp::port::{DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber};
+    use rptp::port::{
+        DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber, PortTimingPolicy,
+    };
     use rptp::portstate::PortState;
     use rptp::slave::{DelayCycle, SlavePort};
 
@@ -289,7 +291,7 @@ mod tests {
             >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
-        assert!(s <= 256);
+        assert!(s <= 512);
     }
 
     #[tokio::test(start_paused = true)]
@@ -330,7 +332,7 @@ mod tests {
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
         let log = TracingPortLog::new(port_identity);
-        let port_state = PortState::master(domain_port, bmca, log);
+        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(
             &local_clock,
@@ -435,6 +437,7 @@ mod tests {
             announce_receipt_timeout,
             delay_cycle,
             log,
+            PortTimingPolicy::default(),
         ));
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(

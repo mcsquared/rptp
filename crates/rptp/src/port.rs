@@ -297,6 +297,81 @@ impl<P: Port, B: Bmca, L: PortLog> PortIngress for Option<PortState<P, B, L>> {
     }
 }
 
+use std::time::Duration;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogInterval {
+    log_value: i8,
+}
+
+impl LogInterval {
+    pub const fn new(log_value: i8) -> Self {
+        Self { log_value }
+    }
+
+    pub fn duration(self) -> Duration {
+        Duration::from_secs_f64(2_f64.powi(self.log_value as i32))
+    }
+}
+
+pub struct PortTimingPolicy {
+    log_announce_interval: LogInterval,
+    log_sync_interval: LogInterval,
+    log_min_delay_request_interval: LogInterval,
+    announce_receipt_timeout_interval: Duration,
+    qualification_interval: Duration,
+}
+
+impl PortTimingPolicy {
+    pub fn new(
+        log_announce_interval: LogInterval,
+        log_sync_interval: LogInterval,
+        log_min_delay_request_interval: LogInterval,
+        announce_receipt_timeout_interval: Duration,
+        qualification_interval: Duration,
+    ) -> Self {
+        Self {
+            log_announce_interval,
+            log_sync_interval,
+            log_min_delay_request_interval,
+            announce_receipt_timeout_interval,
+            qualification_interval,
+        }
+    }
+
+    pub fn announce_interval(&self) -> Duration {
+        self.log_announce_interval.duration()
+    }
+
+    pub fn sync_interval(&self) -> Duration {
+        self.log_sync_interval.duration()
+    }
+
+    pub fn min_delay_request_interval(&self) -> Duration {
+        self.log_min_delay_request_interval.duration()
+    }
+
+    pub fn announce_receipt_timeout_interval(&self) -> Duration {
+        self.announce_receipt_timeout_interval
+    }
+
+    pub fn qualification_interval(&self) -> Duration {
+        self.qualification_interval
+    }
+}
+
+impl Default for PortTimingPolicy {
+    fn default() -> Self {
+        Self::new(
+            LogInterval::new(0),
+            LogInterval::new(0),
+            LogInterval::new(0),
+            Duration::from_secs(5),
+            Duration::from_secs(3),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

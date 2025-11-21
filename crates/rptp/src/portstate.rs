@@ -7,7 +7,7 @@ use crate::listening::ListeningPort;
 use crate::log::PortLog;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-use crate::port::{ParentPortIdentity, Port, PortIdentity};
+use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy};
 use crate::premaster::PreMasterPort;
 use crate::slave::{DelayCycle, SlavePort};
 use crate::time::TimeStamp;
@@ -34,24 +34,37 @@ pub enum PortState<P: Port, B: Bmca, L: PortLog> {
 }
 
 impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
-    pub fn initializing(port: P, bmca: B, log: L) -> Self {
-        PortState::Initializing(InitializingPort::new(port, bmca, log))
+    pub fn initializing(port: P, bmca: B, log: L, timing_policy: PortTimingPolicy) -> Self {
+        PortState::Initializing(InitializingPort::new(port, bmca, log, timing_policy))
     }
 
-    pub fn master(port: P, bmca: B, log: L) -> Self {
+    pub fn master(port: P, bmca: B, log: L, timing_policy: PortTimingPolicy) -> Self {
         let announce_send_timeout =
             port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
         let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
         let sync_timeout = port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
         let sync_cycle = SyncCycle::new(0.into(), sync_timeout);
 
-        PortState::Master(MasterPort::new(port, bmca, announce_cycle, sync_cycle, log))
+        PortState::Master(MasterPort::new(
+            port,
+            bmca,
+            announce_cycle,
+            sync_cycle,
+            log,
+            timing_policy,
+        ))
     }
 
-    pub fn slave(port: P, bmca: B, parent_port_identity: ParentPortIdentity, log: L) -> Self {
+    pub fn slave(
+        port: P,
+        bmca: B,
+        parent_port_identity: ParentPortIdentity,
+        log: L,
+        timing_policy: PortTimingPolicy,
+    ) -> Self {
         let announce_receipt_timeout = port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
-            Duration::from_secs(5),
+            timing_policy.announce_receipt_timeout_interval(),
         );
 
         let delay_cycle = DelayCycle::new(
@@ -66,20 +79,29 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
             announce_receipt_timeout,
             delay_cycle,
             log,
+            timing_policy,
         ))
     }
 
-    pub fn pre_master(port: P, bmca: B, log: L) -> Self {
-        let qualification_timeout =
-            port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+    pub fn pre_master(port: P, bmca: B, log: L, timing_policy: PortTimingPolicy) -> Self {
+        let qualification_timeout = port.timeout(
+            SystemMessage::QualificationTimeout,
+            timing_policy.qualification_interval(),
+        );
 
-        PortState::PreMaster(PreMasterPort::new(port, bmca, qualification_timeout, log))
+        PortState::PreMaster(PreMasterPort::new(
+            port,
+            bmca,
+            qualification_timeout,
+            log,
+            timing_policy,
+        ))
     }
 
-    pub fn listening(port: P, bmca: B, log: L) -> Self {
+    pub fn listening(port: P, bmca: B, log: L, timing_policy: PortTimingPolicy) -> Self {
         let announce_receipt_timeout = port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
-            Duration::from_secs(5),
+            timing_policy.announce_receipt_timeout_interval(),
         );
 
         PortState::Listening(ListeningPort::new(
@@ -87,13 +109,14 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
             bmca,
             announce_receipt_timeout,
             log,
+            timing_policy,
         ))
     }
 
-    pub fn uncalibrated(port: P, bmca: B, log: L) -> Self {
+    pub fn uncalibrated(port: P, bmca: B, log: L, timing_policy: PortTimingPolicy) -> Self {
         let announce_receipt_timeout = port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
-            Duration::from_secs(5),
+            timing_policy.announce_receipt_timeout_interval(),
         );
 
         PortState::Uncalibrated(UncalibratedPort::new(
@@ -101,52 +124,39 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
             bmca,
             announce_receipt_timeout,
             log,
+            timing_policy,
         ))
     }
 
     pub fn transit(self, transition: StateDecision) -> Self {
         match transition {
             StateDecision::AnnounceReceiptTimeoutExpired => match self {
-                PortState::Listening(listening) => {
-                    PortState::Master(listening.announce_receipt_timeout_expired())
-                }
-                PortState::Slave(slave) => {
-                    PortState::Master(slave.announce_receipt_timeout_expired())
-                }
+                PortState::Listening(listening) => listening.announce_receipt_timeout_expired(),
+                PortState::Slave(slave) => slave.announce_receipt_timeout_expired(),
                 PortState::Uncalibrated(uncalibrated) => {
-                    PortState::Master(uncalibrated.announce_receipt_timeout_expired())
+                    uncalibrated.announce_receipt_timeout_expired()
                 }
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateDecision::MasterClockSelected(parent) => match self {
-                PortState::Uncalibrated(uncalibrated) => {
-                    PortState::Slave(uncalibrated.master_clock_selected(parent))
-                }
+                PortState::Uncalibrated(uncalibrated) => uncalibrated.master_clock_selected(parent),
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateDecision::RecommendedSlave(parent) => match self {
-                PortState::Listening(listening) => {
-                    PortState::Uncalibrated(listening.recommended_slave(parent))
-                }
-                PortState::Master(master) => {
-                    PortState::Uncalibrated(master.recommended_slave(parent))
-                }
+                PortState::Listening(listening) => listening.recommended_slave(parent),
+                PortState::Master(master) => master.recommended_slave(parent),
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateDecision::RecommendedMaster => match self {
-                PortState::Listening(listening) => {
-                    PortState::PreMaster(listening.recommended_master())
-                }
+                PortState::Listening(listening) => listening.recommended_master(),
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateDecision::Initialized => match self {
-                PortState::Initializing(initializing) => {
-                    PortState::Listening(initializing.initialized())
-                }
+                PortState::Initializing(initializing) => initializing.initialized(),
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateDecision::QualificationTimeoutExpired => match self {
-                PortState::PreMaster(pre_master) => PortState::Master(pre_master.qualified()),
+                PortState::PreMaster(pre_master) => pre_master.qualified(),
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateDecision::FaultDetected => PortState::Faulty(FaultyPort::new()),
@@ -257,6 +267,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let master = listening.transit(StateDecision::AnnounceReceiptTimeoutExpired);
@@ -280,6 +291,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let master = slave.transit(StateDecision::AnnounceReceiptTimeoutExpired);
@@ -302,6 +314,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let master = pre_master.transit(StateDecision::QualificationTimeoutExpired);
@@ -324,6 +337,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let master = uncalibrated.transit(StateDecision::AnnounceReceiptTimeoutExpired);
@@ -346,6 +360,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -369,6 +384,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
@@ -392,6 +408,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
@@ -415,6 +432,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let pre_master = listening.transit(StateDecision::RecommendedMaster);
@@ -437,6 +455,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let listening = initializing.transit(StateDecision::Initialized);
@@ -461,6 +480,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = initializing.transit(StateDecision::AnnounceReceiptTimeoutExpired);
@@ -484,6 +504,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = master.transit(StateDecision::AnnounceReceiptTimeoutExpired);
@@ -508,6 +529,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -531,6 +553,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -555,6 +578,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -578,6 +602,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -601,6 +626,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -626,6 +652,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
@@ -650,6 +677,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
@@ -673,6 +701,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
@@ -696,6 +725,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
@@ -721,6 +751,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = initializing.transit(StateDecision::RecommendedMaster);
@@ -744,6 +775,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = slave.transit(StateDecision::RecommendedMaster);
@@ -766,6 +798,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = master.transit(StateDecision::RecommendedMaster);
@@ -788,6 +821,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = pre_master.transit(StateDecision::RecommendedMaster);
@@ -810,6 +844,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = uncalibrated.transit(StateDecision::RecommendedMaster);
@@ -834,6 +869,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = listening.transit(StateDecision::Initialized);
@@ -857,6 +893,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = slave.transit(StateDecision::Initialized);
@@ -879,6 +916,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = master.transit(StateDecision::Initialized);
@@ -901,6 +939,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = pre_master.transit(StateDecision::Initialized);
@@ -925,6 +964,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = initializing.transit(StateDecision::FaultDetected);
@@ -947,6 +987,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = listening.transit(StateDecision::FaultDetected);
@@ -970,6 +1011,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = slave.transit(StateDecision::FaultDetected);
@@ -992,6 +1034,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = master.transit(StateDecision::FaultDetected);
@@ -1014,6 +1057,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = pre_master.transit(StateDecision::FaultDetected);
@@ -1036,6 +1080,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let result = uncalibrated.transit(StateDecision::FaultDetected);

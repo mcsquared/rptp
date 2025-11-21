@@ -4,13 +4,12 @@ use crate::bmca::{Bmca, BmcaRecommendation};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::{
-    AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId, SystemMessage,
+    AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId,
     TwoStepSyncMessage,
 };
-use crate::port::{ParentPortIdentity, Port, PortIdentity, Timeout};
-use crate::portstate::StateDecision;
+use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy, Timeout};
+use crate::portstate::{PortState, StateDecision};
 use crate::time::TimeStamp;
-use crate::uncalibrated::UncalibratedPort;
 
 pub struct MasterPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
@@ -18,6 +17,7 @@ pub struct MasterPort<P: Port, B: Bmca, L: PortLog> {
     announce_cycle: AnnounceCycle<P::Timeout>,
     sync_cycle: SyncCycle<P::Timeout>,
     log: L,
+    timing_policy: PortTimingPolicy,
 }
 
 impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
@@ -27,6 +27,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         announce_cycle: AnnounceCycle<P::Timeout>,
         sync_cycle: SyncCycle<P::Timeout>,
         log: L,
+        timing_policy: PortTimingPolicy,
     ) -> Self {
         Self {
             port,
@@ -34,6 +35,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
             announce_cycle,
             sync_cycle,
             log,
+            timing_policy,
         }
     }
 
@@ -41,7 +43,8 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         let announce_message = self.announce_cycle.announce(&self.port.local_clock());
         self.port
             .send_general(GeneralMessage::Announce(announce_message));
-        self.announce_cycle.next();
+        self.announce_cycle
+            .next(self.timing_policy.announce_interval());
         self.log.message_sent("Announce");
     }
 
@@ -76,7 +79,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         let sync_message = self.sync_cycle.two_step_sync();
         self.port
             .send_event(EventMessage::TwoStepSync(sync_message));
-        self.sync_cycle.next();
+        self.sync_cycle.next(self.timing_policy.sync_interval());
         self.log.message_sent("TwoStepSync");
     }
 
@@ -91,22 +94,14 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         None
     }
 
-    pub fn recommended_slave(
-        self,
-        parent_port_identity: ParentPortIdentity,
-    ) -> UncalibratedPort<P, B, L> {
+    pub fn recommended_slave(self, parent_port_identity: ParentPortIdentity) -> PortState<P, B, L> {
         self.log.state_transition(
             "Master",
             "Uncalibrated",
             format!("Recommended Slave, parent {}", parent_port_identity).as_str(),
         );
 
-        let announce_receipt_timeout = self.port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
-            Duration::from_secs(5),
-        );
-
-        UncalibratedPort::new(self.port, self.bmca, announce_receipt_timeout, self.log)
+        PortState::uncalibrated(self.port, self.bmca, self.log, self.timing_policy)
     }
 }
 
@@ -124,8 +119,8 @@ impl<T: Timeout> AnnounceCycle<T> {
         }
     }
 
-    pub fn next(&mut self) {
-        self.timeout.restart(Duration::from_secs(1));
+    pub fn next(&mut self, interval: Duration) {
+        self.timeout.restart(interval);
         self.sequence_id = self.sequence_id.next();
     }
 
@@ -148,8 +143,8 @@ impl<T: Timeout> SyncCycle<T> {
         }
     }
 
-    pub fn next(&mut self) {
-        self.timeout.restart(Duration::from_secs(1));
+    pub fn next(&mut self, interval: Duration) {
+        self.timeout.restart(interval);
         self.sequence_id = self.sequence_id.next();
     }
 
@@ -204,6 +199,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         timer_host.take_system_messages();
@@ -239,6 +235,7 @@ mod tests {
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         master.dispatch_system(SystemMessage::SyncTimeout);
@@ -269,6 +266,7 @@ mod tests {
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         // Drain messages that could have been sent during initialization.
@@ -308,6 +306,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         timer_host.take_system_messages();
@@ -343,6 +342,7 @@ mod tests {
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         timer_host.take_system_messages();
@@ -371,6 +371,7 @@ mod tests {
             domain_port,
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         master.dispatch_system(SystemMessage::AnnounceSendTimeout);
@@ -416,6 +417,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let transition = master.process_announce(
@@ -463,6 +465,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         // Drain any setup timers
@@ -506,6 +509,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         // Drain any setup timers
@@ -530,7 +534,7 @@ mod tests {
             FakeTimeout::new(SystemMessage::AnnounceSendTimeout),
         );
         let msg1 = cycle.announce(&local_clock);
-        cycle.next();
+        cycle.next(Duration::from_secs(1));
         let msg2 = cycle.announce(&local_clock);
 
         assert_eq!(
@@ -554,7 +558,7 @@ mod tests {
     #[test]
     fn sync_cycle_next() {
         let mut sync_cycle = SyncCycle::new(0.into(), FakeTimeout::new(SystemMessage::SyncTimeout));
-        sync_cycle.next();
+        sync_cycle.next(Duration::from_secs(1));
 
         assert_eq!(
             sync_cycle,
@@ -568,7 +572,7 @@ mod tests {
             u16::MAX.into(),
             FakeTimeout::new(SystemMessage::SyncTimeout),
         );
-        sync_cycle.next();
+        sync_cycle.next(Duration::from_secs(1));
 
         assert_eq!(
             sync_cycle,

@@ -1,42 +1,38 @@
-use std::time::Duration;
-
 use crate::bmca::Bmca;
 use crate::log::PortLog;
-use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
-use crate::message::SystemMessage;
-use crate::port::Port;
+use crate::port::{Port, PortTimingPolicy};
+use crate::portstate::PortState;
 
 pub struct PreMasterPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: B,
     _qualification_timeout: P::Timeout,
     log: L,
+    timing_policy: PortTimingPolicy,
 }
 
 impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
-    pub fn new(port: P, bmca: B, _qualification_timeout: P::Timeout, log: L) -> Self {
+    pub fn new(
+        port: P,
+        bmca: B,
+        _qualification_timeout: P::Timeout,
+        log: L,
+        timing_policy: PortTimingPolicy,
+    ) -> Self {
         Self {
             port,
             bmca,
             _qualification_timeout,
             log,
+            timing_policy,
         }
     }
 
-    pub fn qualified(self) -> MasterPort<P, B, L> {
+    pub fn qualified(self) -> PortState<P, B, L> {
         self.log
             .state_transition("Pre-Master", "Master", "Port has qualified as Master");
 
-        let announce_send_timeout = self
-            .port
-            .timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
-        let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
-        let sync_timeout = self
-            .port
-            .timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
-        let sync_cycle = SyncCycle::new(0.into(), sync_timeout);
-
-        MasterPort::new(self.port, self.bmca, announce_cycle, sync_cycle, self.log)
+        PortState::master(self.port, self.bmca, self.log, self.timing_policy)
     }
 }
 
@@ -76,6 +72,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             qualification_timeout,
             NoopPortLog,
+            PortTimingPolicy::default(),
         );
 
         let messages = timer_host.take_system_messages();
@@ -101,6 +98,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             qualification_timeout,
             NoopPortLog,
+            PortTimingPolicy::default(),
         ));
 
         let transition = pre_master.dispatch_system(SystemMessage::QualificationTimeout);

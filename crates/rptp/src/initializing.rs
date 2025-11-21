@@ -1,32 +1,30 @@
-use std::time::Duration;
-
 use crate::bmca::Bmca;
-use crate::listening::ListeningPort;
 use crate::log::PortLog;
-use crate::message::SystemMessage;
-use crate::port::Port;
+use crate::port::{Port, PortTimingPolicy};
+use crate::portstate::PortState;
 
 pub struct InitializingPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: B,
     log: L,
+    timing_policy: PortTimingPolicy,
 }
 
 impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
-    pub fn new(port: P, bmca: B, log: L) -> Self {
-        Self { port, bmca, log }
+    pub fn new(port: P, bmca: B, log: L, timing_policy: PortTimingPolicy) -> Self {
+        Self {
+            port,
+            bmca,
+            log,
+            timing_policy,
+        }
     }
 
-    pub fn initialized(self) -> ListeningPort<P, B, L> {
+    pub fn initialized(self) -> PortState<P, B, L> {
         self.log
             .state_transition("Initializing", "Listening", "Port has been initialized");
 
-        let announce_receipt_timeout = self.port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
-            Duration::from_secs(5),
-        );
-
-        ListeningPort::new(self.port, self.bmca, announce_receipt_timeout, self.log)
+        PortState::listening(self.port, self.bmca, self.log, self.timing_policy)
     }
 }
 
@@ -57,6 +55,7 @@ mod tests {
             ),
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
+            PortTimingPolicy::default(),
         ));
 
         let transition = initializing.dispatch_system(SystemMessage::Initialized);
