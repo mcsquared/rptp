@@ -129,8 +129,8 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         ))
     }
 
-    pub fn transit(self, transition: StateDecision) -> Self {
-        match transition {
+    pub fn apply(self, decision: StateDecision) -> Self {
+        match decision {
             StateDecision::AnnounceReceiptTimeoutExpired => match self {
                 PortState::Listening(listening) => listening.announce_receipt_timeout_expired(),
                 PortState::Slave(slave) => slave.announce_receipt_timeout_expired(),
@@ -276,7 +276,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let master = listening.transit(StateDecision::AnnounceReceiptTimeoutExpired);
+        let master = listening.apply(StateDecision::AnnounceReceiptTimeoutExpired);
 
         assert!(matches!(master, PortState::Master(_)));
     }
@@ -300,7 +300,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let master = slave.transit(StateDecision::AnnounceReceiptTimeoutExpired);
+        let master = slave.apply(StateDecision::AnnounceReceiptTimeoutExpired);
 
         assert!(matches!(master, PortState::Master(_)));
     }
@@ -323,7 +323,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let master = pre_master.transit(StateDecision::QualificationTimeoutExpired);
+        let master = pre_master.apply(StateDecision::QualificationTimeoutExpired);
 
         assert!(matches!(master, PortState::Master(_)));
     }
@@ -346,7 +346,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let master = uncalibrated.transit(StateDecision::AnnounceReceiptTimeoutExpired);
+        let master = uncalibrated.apply(StateDecision::AnnounceReceiptTimeoutExpired);
 
         assert!(matches!(master, PortState::Master(_)));
     }
@@ -370,7 +370,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let slave = uncalibrated.transit(StateDecision::MasterClockSelected(parent));
+        let slave = uncalibrated.apply(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(slave, PortState::Slave(_)));
     }
@@ -394,7 +394,7 @@ mod tests {
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
-        let uncalibrated = listening.transit(StateDecision::RecommendedSlave(parent_port_identity));
+        let uncalibrated = listening.apply(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(uncalibrated, PortState::Uncalibrated(_)));
     }
@@ -418,7 +418,7 @@ mod tests {
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
-        let uncalibrated = master.transit(StateDecision::RecommendedSlave(parent_port_identity));
+        let uncalibrated = master.apply(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(uncalibrated, PortState::Uncalibrated(_)));
     }
@@ -441,7 +441,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let pre_master = listening.transit(StateDecision::RecommendedMaster);
+        let pre_master = listening.apply(StateDecision::RecommendedMaster);
 
         assert!(matches!(pre_master, PortState::PreMaster(_)));
     }
@@ -464,7 +464,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let listening = initializing.transit(StateDecision::Initialized);
+        let listening = initializing.apply(StateDecision::Initialized);
 
         assert!(matches!(listening, PortState::Listening(_)));
     }
@@ -489,7 +489,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = initializing.transit(StateDecision::AnnounceReceiptTimeoutExpired);
+        let result = initializing.apply(StateDecision::AnnounceReceiptTimeoutExpired);
         // TODO:: do we need to check for all possible transition types from illegal to faulty?
 
         assert!(matches!(result, PortState::Faulty(_)));
@@ -513,7 +513,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = master.transit(StateDecision::AnnounceReceiptTimeoutExpired);
+        let result = master.apply(StateDecision::AnnounceReceiptTimeoutExpired);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -539,7 +539,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let result = initializing.transit(StateDecision::MasterClockSelected(parent));
+        let result = initializing.apply(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -563,7 +563,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let result = listening.transit(StateDecision::MasterClockSelected(parent));
+        let result = listening.apply(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -588,7 +588,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let result = slave.transit(StateDecision::MasterClockSelected(parent));
+        let result = slave.apply(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -612,7 +612,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let result = master.transit(StateDecision::MasterClockSelected(parent));
+        let result = master.apply(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -636,7 +636,7 @@ mod tests {
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
-        let result = pre_master.transit(StateDecision::MasterClockSelected(parent));
+        let result = pre_master.apply(StateDecision::MasterClockSelected(parent));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -662,7 +662,7 @@ mod tests {
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
-        let result = initializing.transit(StateDecision::RecommendedSlave(parent_port_identity));
+        let result = initializing.apply(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -687,7 +687,7 @@ mod tests {
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
-        let result = slave.transit(StateDecision::RecommendedSlave(parent_port_identity));
+        let result = slave.apply(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(result, PortState::Unimplemented));
     }
@@ -711,7 +711,7 @@ mod tests {
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
-        let result = pre_master.transit(StateDecision::RecommendedSlave(parent_port_identity));
+        let result = pre_master.apply(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(result, PortState::Unimplemented));
     }
@@ -735,7 +735,7 @@ mod tests {
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
-        let result = uncalibrated.transit(StateDecision::RecommendedSlave(parent_port_identity));
+        let result = uncalibrated.apply(StateDecision::RecommendedSlave(parent_port_identity));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -760,7 +760,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = initializing.transit(StateDecision::RecommendedMaster);
+        let result = initializing.apply(StateDecision::RecommendedMaster);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -784,7 +784,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = slave.transit(StateDecision::RecommendedMaster);
+        let result = slave.apply(StateDecision::RecommendedMaster);
 
         assert!(matches!(result, PortState::Unimplemented));
     }
@@ -807,7 +807,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = master.transit(StateDecision::RecommendedMaster);
+        let result = master.apply(StateDecision::RecommendedMaster);
 
         assert!(matches!(result, PortState::Unimplemented));
     }
@@ -830,7 +830,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = pre_master.transit(StateDecision::RecommendedMaster);
+        let result = pre_master.apply(StateDecision::RecommendedMaster);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -853,7 +853,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = uncalibrated.transit(StateDecision::RecommendedMaster);
+        let result = uncalibrated.apply(StateDecision::RecommendedMaster);
 
         assert!(matches!(result, PortState::Unimplemented));
     }
@@ -878,7 +878,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = listening.transit(StateDecision::Initialized);
+        let result = listening.apply(StateDecision::Initialized);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -902,7 +902,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = slave.transit(StateDecision::Initialized);
+        let result = slave.apply(StateDecision::Initialized);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -925,7 +925,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = master.transit(StateDecision::Initialized);
+        let result = master.apply(StateDecision::Initialized);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -948,7 +948,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = pre_master.transit(StateDecision::Initialized);
+        let result = pre_master.apply(StateDecision::Initialized);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -973,7 +973,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = initializing.transit(StateDecision::FaultDetected);
+        let result = initializing.apply(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -996,7 +996,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = listening.transit(StateDecision::FaultDetected);
+        let result = listening.apply(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -1020,7 +1020,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = slave.transit(StateDecision::FaultDetected);
+        let result = slave.apply(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -1043,7 +1043,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = master.transit(StateDecision::FaultDetected);
+        let result = master.apply(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -1066,7 +1066,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = pre_master.transit(StateDecision::FaultDetected);
+        let result = pre_master.apply(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -1089,7 +1089,7 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = uncalibrated.transit(StateDecision::FaultDetected);
+        let result = uncalibrated.apply(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -1102,7 +1102,7 @@ mod tests {
             NoopPortLog,
         > = PortState::Faulty(FaultyPort::new());
 
-        let result = faulty.transit(StateDecision::FaultDetected);
+        let result = faulty.apply(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
     }

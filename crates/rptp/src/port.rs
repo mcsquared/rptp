@@ -274,24 +274,24 @@ impl<P: Port, B: Bmca, L: PortLog> PortIngress for Option<PortState<P, B, L>> {
         timestamp: TimeStamp,
     ) {
         if let Some(state) = self.as_mut() {
-            if let Some(transition) = state.dispatch_event(msg, source_port_identity, timestamp) {
-                *self = self.take().map(|state| state.transit(transition));
+            if let Some(decision) = state.dispatch_event(msg, source_port_identity, timestamp) {
+                *self = self.take().map(|state| state.apply(decision));
             }
         }
     }
 
     fn process_general_message(&mut self, source_port_identity: PortIdentity, msg: GeneralMessage) {
         if let Some(state) = self.as_mut() {
-            if let Some(transition) = state.dispatch_general(msg, source_port_identity) {
-                *self = self.take().map(|state| state.transit(transition));
+            if let Some(decision) = state.dispatch_general(msg, source_port_identity) {
+                *self = self.take().map(|state| state.apply(decision));
             }
         }
     }
 
     fn process_system_message(&mut self, msg: SystemMessage) {
         if let Some(state) = self.as_mut() {
-            if let Some(transition) = state.dispatch_system(msg) {
-                *self = self.take().map(|state| state.transit(transition));
+            if let Some(decision) = state.dispatch_system(msg) {
+                *self = self.take().map(|state| state.apply(decision));
             }
         }
     }
