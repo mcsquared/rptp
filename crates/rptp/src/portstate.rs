@@ -31,6 +31,7 @@ pub enum PortState<P: Port, B: Bmca, L: PortLog> {
     PreMaster(PreMasterPort<P, B, L>),
     Uncalibrated(UncalibratedPort<P, B, L>),
     Faulty(FaultyPort<P, B, L>),
+    Unimplemented, // Placeholder for unimplemented transitions, to be removed once all transitions are implemented
 }
 
 impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
@@ -145,10 +146,15 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
             StateDecision::RecommendedSlave(parent) => match self {
                 PortState::Listening(listening) => listening.recommended_slave(parent),
                 PortState::Master(master) => master.recommended_slave(parent),
+                PortState::PreMaster(_) => PortState::Unimplemented,
+                PortState::Slave(_) => PortState::Unimplemented,
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateDecision::RecommendedMaster => match self {
                 PortState::Listening(listening) => listening.recommended_master(),
+                PortState::Uncalibrated(_) => PortState::Unimplemented,
+                PortState::Master(_) => PortState::Unimplemented,
+                PortState::Slave(_) => PortState::Unimplemented,
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateDecision::Initialized => match self {
@@ -512,10 +518,10 @@ mod tests {
         assert!(matches!(result, PortState::Faulty(_)));
     }
 
-    // Tests for unimplemented/illegal ToSlave transitions
+    // Tests for illegal ToSlave transitions
 
     #[test]
-    fn portstate_initializing_to_slave_unimplemented_transition_goes_to_faulty() {
+    fn portstate_initializing_to_slave_illegal_transition_goes_to_faulty() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
@@ -612,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_pre_master_to_slave_unimplemented_transition_goes_to_faulty() {
+    fn portstate_pre_master_to_slave_illegal_transition_goes_to_faulty() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
@@ -638,7 +644,7 @@ mod tests {
     // Tests for unimplemented/illegal ToUncalibrated transitions
 
     #[test]
-    fn portstate_initializing_to_uncalibrated_unimplemented_transition_goes_to_faulty() {
+    fn portstate_initializing_to_uncalibrated_illegal_transition_goes_to_faulty() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
@@ -662,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_slave_to_uncalibrated_unimplemented_transition_goes_to_faulty() {
+    fn portstate_slave_to_uncalibrated_unimplemented_transition() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
@@ -683,11 +689,11 @@ mod tests {
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         let result = slave.transit(StateDecision::RecommendedSlave(parent_port_identity));
 
-        assert!(matches!(result, PortState::Faulty(_)));
+        assert!(matches!(result, PortState::Unimplemented));
     }
 
     #[test]
-    fn portstate_pre_master_to_uncalibrated_unimplemented_transition_goes_to_faulty() {
+    fn portstate_pre_master_to_uncalibrated_unimplemented_transition() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
@@ -707,7 +713,7 @@ mod tests {
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         let result = pre_master.transit(StateDecision::RecommendedSlave(parent_port_identity));
 
-        assert!(matches!(result, PortState::Faulty(_)));
+        assert!(matches!(result, PortState::Unimplemented));
     }
 
     #[test]
@@ -737,7 +743,7 @@ mod tests {
     // Tests for unimplemented/illegal ToPreMaster transitions
 
     #[test]
-    fn portstate_initializing_to_pre_master_unimplemented_transition_goes_to_faulty() {
+    fn portstate_initializing_to_pre_master_illegal_transition_goes_to_faulty() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
@@ -760,7 +766,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_slave_to_pre_master_unimplemented_transition_goes_to_faulty() {
+    fn portstate_slave_to_pre_master_unimplemented_transition() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
@@ -780,11 +786,11 @@ mod tests {
 
         let result = slave.transit(StateDecision::RecommendedMaster);
 
-        assert!(matches!(result, PortState::Faulty(_)));
+        assert!(matches!(result, PortState::Unimplemented));
     }
 
     #[test]
-    fn portstate_master_to_pre_master_illegal_transition_goes_to_faulty() {
+    fn portstate_master_to_pre_master_unimplemented_transition() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
@@ -803,7 +809,7 @@ mod tests {
 
         let result = master.transit(StateDecision::RecommendedMaster);
 
-        assert!(matches!(result, PortState::Faulty(_)));
+        assert!(matches!(result, PortState::Unimplemented));
     }
 
     #[test]
@@ -830,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_uncalibrated_to_pre_master_unimplemented_transition_goes_to_faulty() {
+    fn portstate_uncalibrated_to_pre_master_unimplemented_transition() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
@@ -849,7 +855,7 @@ mod tests {
 
         let result = uncalibrated.transit(StateDecision::RecommendedMaster);
 
-        assert!(matches!(result, PortState::Faulty(_)));
+        assert!(matches!(result, PortState::Unimplemented));
     }
 
     // Tests for unimplemented/illegal ToListening transitions
@@ -878,7 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_slave_to_listening_unimplemented_transition_goes_to_faulty() {
+    fn portstate_slave_to_listening_illegal_transition_goes_to_faulty() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
 
@@ -902,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_master_to_listening_unimplemented_transition_goes_to_faulty() {
+    fn portstate_master_to_listening_illegal_transition_goes_to_faulty() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
@@ -925,7 +931,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_pre_master_to_listening_unimplemented_transition_goes_to_faulty() {
+    fn portstate_pre_master_to_listening_illegal_transition_goes_to_faulty() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
 
