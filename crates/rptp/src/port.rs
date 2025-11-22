@@ -379,7 +379,7 @@ mod tests {
 
     use self::test_support::FakeTimerHost;
 
-    use crate::bmca::LocalClockDS;
+    use crate::bmca::DefaultDS;
     use crate::clock::{ClockQuality, FakeClock, StepsRemoved};
     use crate::message::{DelayRequestMessage, FollowUpMessage};
 
@@ -408,13 +408,13 @@ mod tests {
         let identity = ClockIdentity::new(&[1, 2, 3, 4, 5, 6, 7, 8]);
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            LocalClockDS::new(
+            DefaultDS::new(
                 identity,
                 crate::bmca::Priority1::new(127),
                 crate::bmca::Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
-                StepsRemoved::new(0),
             ),
+            StepsRemoved::new(0),
         );
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();
@@ -445,13 +445,13 @@ mod tests {
         let identity = ClockIdentity::new(&[8, 7, 6, 5, 4, 3, 2, 1]);
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            LocalClockDS::new(
+            DefaultDS::new(
                 identity,
                 crate::bmca::Priority1::new(127),
                 crate::bmca::Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
-                StepsRemoved::new(0),
             ),
+            StepsRemoved::new(0),
         );
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();

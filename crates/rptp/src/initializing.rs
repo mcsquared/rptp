@@ -32,8 +32,8 @@ impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{FullBmca, LocalClockDS};
-    use crate::clock::{FakeClock, LocalClock};
+    use crate::bmca::{DefaultDS, FullBmca};
+    use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
@@ -43,8 +43,11 @@ mod tests {
 
     #[test]
     fn initializing_port_to_listening_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut initializing = PortState::Initializing(InitializingPort::new(
             DomainPort::new(
                 &local_clock,

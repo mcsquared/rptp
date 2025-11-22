@@ -3,7 +3,7 @@ use std::cell::Cell;
 use std::ops::Range;
 
 use crate::{
-    bmca::{ForeignClockDS, LocalClockDS},
+    bmca::{DefaultDS, ForeignClockDS},
     message::{AnnounceMessage, SequenceId},
     time::TimeStamp,
 };
@@ -118,16 +118,21 @@ pub trait SynchronizableClock: Clock {
 
 pub struct LocalClock<C: SynchronizableClock> {
     clock: C,
-    localds: LocalClockDS,
+    default_ds: DefaultDS,
+    steps_removed: StepsRemoved,
 }
 
 impl<C: SynchronizableClock> LocalClock<C> {
-    pub fn new(clock: C, localds: LocalClockDS) -> Self {
-        Self { clock, localds }
+    pub fn new(clock: C, default_ds: DefaultDS, steps_removed: StepsRemoved) -> Self {
+        Self {
+            clock,
+            default_ds,
+            steps_removed,
+        }
     }
 
     pub fn identity(&self) -> &ClockIdentity {
-        self.localds.identity()
+        self.default_ds.identity()
     }
 
     pub fn now(&self) -> TimeStamp {
@@ -135,15 +140,15 @@ impl<C: SynchronizableClock> LocalClock<C> {
     }
 
     pub fn announce(&self, sequence_id: SequenceId) -> AnnounceMessage {
-        self.localds.announce(sequence_id)
+        self.default_ds.announce(sequence_id, self.steps_removed)
     }
 
     pub fn is_grandmaster_capable(&self) -> bool {
-        self.localds.is_grandmaster_capable()
+        self.default_ds.is_grandmaster_capable()
     }
 
-    pub fn outranks_foreign(&self, other: &ForeignClockDS) -> bool {
-        self.localds.outranks_foreign(other)
+    pub fn better_than(&self, other: &ForeignClockDS) -> bool {
+        self.default_ds.better_than(other, &self.steps_removed)
     }
 
     pub fn discipline(&self, estimate: TimeStamp) {

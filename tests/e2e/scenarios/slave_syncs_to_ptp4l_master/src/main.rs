@@ -4,8 +4,8 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
-use rptp::bmca::{LocalClockDS, Priority1, Priority2};
-use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
+use rptp::bmca::{DefaultDS, Priority1, Priority2};
+use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock, StepsRemoved};
 use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
 use rptp::time::TimeStamp;
 use rptp_daemon::net::MulticastSocket;
@@ -20,12 +20,13 @@ async fn main() -> std::io::Result<()> {
 
     let local_clock = LocalClock::new(
         FakeClock::new(TimeStamp::new(0, 0)),
-        LocalClockDS::new(
+        DefaultDS::new(
             ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
             Priority1::new(250),
             Priority2::new(255),
             ClockQuality::new(250, 0xFE, 0xFFFF),
         ),
+        StepsRemoved::new(0),
     );
     let event_socket = Rc::new(MulticastSocket::event().await?);
     let general_socket = Rc::new(MulticastSocket::general().await?);

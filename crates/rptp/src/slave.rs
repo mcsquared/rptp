@@ -182,8 +182,8 @@ impl<T: Timeout> DelayCycle<T> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{FullBmca, LocalClockDS};
-    use crate::clock::{ClockIdentity, FakeClock, LocalClock};
+    use crate::bmca::{DefaultDS, FullBmca};
+    use crate::clock::{ClockIdentity, FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
@@ -195,7 +195,8 @@ mod tests {
     fn slave_port_synchronizes_clock() {
         let local_clock = LocalClock::new(
             FakeClock::new(TimeStamp::new(0, 0)),
-            LocalClockDS::mid_grade_test_clock(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
         );
         let domain_port = DomainPort::new(
             &local_clock,
@@ -238,8 +239,11 @@ mod tests {
 
     #[test]
     fn slave_port_schedules_next_delay_request_timeout() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
             &local_clock,
@@ -267,8 +271,11 @@ mod tests {
 
     #[test]
     fn slave_port_answers_delay_request_timeout_with_delay_request() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let port = FakePort::new();
         let domain_port = DomainPort::new(
             &local_clock,
@@ -294,8 +301,11 @@ mod tests {
 
     #[test]
     fn slave_port_to_master_transition_on_announce_receipt_timeout() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -324,7 +334,8 @@ mod tests {
     fn slave_port_ignores_general_messages_from_non_parent() {
         let local_clock = LocalClock::new(
             FakeClock::new(TimeStamp::new(0, 0)),
-            LocalClockDS::mid_grade_test_clock(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
         );
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let domain_port = DomainPort::new(
@@ -397,7 +408,8 @@ mod tests {
     fn slave_port_ignores_event_messages_from_non_parent() {
         let local_clock = LocalClock::new(
             FakeClock::new(TimeStamp::new(0, 0)),
-            LocalClockDS::mid_grade_test_clock(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
         );
         let domain_port = DomainPort::new(
             &local_clock,
@@ -468,7 +480,8 @@ mod tests {
     fn slave_port_disciplines_on_matching_conversation() {
         let local_clock = LocalClock::new(
             FakeClock::new(TimeStamp::new(0, 0)),
-            LocalClockDS::mid_grade_test_clock(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
         );
         let domain_port = DomainPort::new(
             &local_clock,

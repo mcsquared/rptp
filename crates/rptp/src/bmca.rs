@@ -33,6 +33,38 @@ impl From<u8> for Priority1 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct BmcaRank<'a> {
+    identity: &'a ClockIdentity,
+    priority1: &'a Priority1,
+    quality: &'a ClockQuality,
+    priority2: &'a Priority2,
+    steps_removed: &'a StepsRemoved,
+}
+
+impl BmcaRank<'_> {
+    pub fn better_than(&self, other: &BmcaRank) -> bool {
+        if self.identity == other.identity {
+            return self.steps_removed < other.steps_removed;
+        }
+
+        let a = (
+            &self.priority1,
+            &self.quality,
+            &self.priority2,
+            &self.identity,
+        );
+        let b = (
+            &other.priority1,
+            &other.quality,
+            &other.priority2,
+            &other.identity,
+        );
+
+        a < b
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Priority2(u8);
 
 impl Priority2 {
@@ -114,25 +146,35 @@ impl ForeignClockDS {
         }
     }
 
-    pub fn outranks_other(&self, other: &ForeignClockDS) -> bool {
-        if self.identity == other.identity {
-            return self.steps_removed < other.steps_removed;
-        }
+    pub fn better_than(&self, other: &ForeignClockDS) -> bool {
+        let a = BmcaRank {
+            identity: &self.identity,
+            priority1: &self.priority1,
+            quality: &self.quality,
+            priority2: &self.priority2,
+            steps_removed: &self.steps_removed,
+        };
+        let b = BmcaRank {
+            identity: &other.identity,
+            priority1: &other.priority1,
+            quality: &other.quality,
+            priority2: &other.priority2,
+            steps_removed: &other.steps_removed,
+        };
 
-        let a = (
-            &self.priority1,
-            &self.quality,
-            &self.priority2,
-            &self.identity,
-        );
-        let b = (
-            &other.priority1,
-            &other.quality,
-            &other.priority2,
-            &other.identity,
-        );
+        a.better_than(&b)
+    }
 
-        a < b
+    fn worse_than(&self, other: &BmcaRank) -> bool {
+        let own_rank = BmcaRank {
+            identity: &self.identity,
+            priority1: &self.priority1,
+            quality: &self.quality,
+            priority2: &self.priority2,
+            steps_removed: &self.steps_removed,
+        };
+
+        other.better_than(&own_rank)
     }
 
     pub fn to_bytes(&self) -> [u8; 16] {
@@ -147,37 +189,61 @@ impl ForeignClockDS {
     }
 }
 
-pub struct LocalClockDS {
-    ds: ForeignClockDS,
+pub struct DefaultDS {
+    identity: ClockIdentity,
+    priority1: Priority1,
+    priority2: Priority2,
+    quality: ClockQuality,
 }
 
-impl LocalClockDS {
+impl DefaultDS {
     pub fn new(
         identity: ClockIdentity,
         priority1: Priority1,
         priority2: Priority2,
         quality: ClockQuality,
-        steps_removed: StepsRemoved,
     ) -> Self {
         Self {
-            ds: ForeignClockDS::new(identity, priority1, priority2, quality, steps_removed),
+            identity,
+            priority1,
+            priority2,
+            quality,
         }
     }
 
     pub fn identity(&self) -> &ClockIdentity {
-        &self.ds.identity
+        &self.identity
     }
 
     pub fn is_grandmaster_capable(&self) -> bool {
-        self.ds.is_grandmaster_capable()
+        self.quality.is_grandmaster_capable()
     }
 
-    pub fn outranks_foreign(&self, foreign: &ForeignClockDS) -> bool {
-        self.ds.outranks_other(foreign)
+    pub fn better_than(&self, foreign: &ForeignClockDS, steps_removed: &StepsRemoved) -> bool {
+        foreign.worse_than(&BmcaRank {
+            identity: &self.identity,
+            priority1: &self.priority1,
+            priority2: &self.priority2,
+            quality: &self.quality,
+            steps_removed,
+        })
     }
 
-    pub fn announce(&self, sequence_id: SequenceId) -> AnnounceMessage {
-        AnnounceMessage::new(sequence_id, self.ds)
+    pub fn announce(
+        &self,
+        sequence_id: SequenceId,
+        steps_removed: StepsRemoved,
+    ) -> AnnounceMessage {
+        AnnounceMessage::new(
+            sequence_id,
+            ForeignClockDS::new(
+                self.identity,
+                self.priority1,
+                self.priority2,
+                self.quality,
+                steps_removed,
+            ),
+        )
     }
 }
 
@@ -227,9 +293,9 @@ impl Ord for ForeignClockRecord {
 
         let ord = match (self.clock(), other.clock()) {
             (Some(&clock1), Some(&clock2)) => {
-                if clock1.outranks_other(&clock2) {
+                if clock1.better_than(&clock2) {
                     Less
-                } else if clock2.outranks_other(&clock1) {
+                } else if clock2.better_than(&clock1) {
                     Greater
                 } else {
                     Equal
@@ -337,7 +403,7 @@ fn d0_better_or_better_by_topology_than_e_rbest<C: SynchronizableClock>(
     d_0: &LocalClock<C>,
     e_rbest: &ForeignClockDS,
 ) -> BmcaRecommendation {
-    if d_0.outranks_foreign(e_rbest) {
+    if d_0.better_than(e_rbest) {
         BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0), // TODO get steps removed from local clock
@@ -353,7 +419,7 @@ fn d0_better_or_better_by_topology_than_e_best<C: SynchronizableClock>(
     _e_rbest: &ForeignClockDS,
     source_port_identity: PortIdentity,
 ) -> BmcaRecommendation {
-    if d_0.outranks_foreign(e_best) {
+    if d_0.better_than(e_best) {
         BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
             BmcaMasterDecisionPoint::M2,
             StepsRemoved::new(0), // TODO get steps removed from local clock
@@ -470,44 +536,40 @@ pub(crate) mod tests {
         }
     }
 
-    impl LocalClockDS {
-        pub(crate) fn high_grade_test_clock() -> LocalClockDS {
-            LocalClockDS::new(
+    impl DefaultDS {
+        pub(crate) fn high_grade_test_clock() -> DefaultDS {
+            DefaultDS::new(
                 CLK_ID_HIGH,
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_HIGH,
-                StepsRemoved::new(0),
             )
         }
 
-        pub(crate) fn mid_grade_test_clock() -> LocalClockDS {
-            LocalClockDS::new(
+        pub(crate) fn mid_grade_test_clock() -> DefaultDS {
+            DefaultDS::new(
                 CLK_ID_MID,
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_MID,
-                StepsRemoved::new(0),
             )
         }
 
-        pub(crate) fn low_grade_test_clock() -> LocalClockDS {
-            LocalClockDS::new(
+        pub(crate) fn low_grade_test_clock() -> DefaultDS {
+            DefaultDS::new(
                 CLK_ID_LOW,
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_LOW,
-                StepsRemoved::new(0),
             )
         }
 
-        pub(crate) fn gm_grade_test_clock() -> LocalClockDS {
-            LocalClockDS::new(
+        pub(crate) fn gm_grade_test_clock() -> DefaultDS {
+            DefaultDS::new(
                 CLK_ID_GM,
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_GM,
-                StepsRemoved::new(0),
             )
         }
     }
@@ -528,14 +590,14 @@ pub(crate) mod tests {
         let mid = ForeignClockDS::mid_grade_test_clock();
         let low = ForeignClockDS::low_grade_test_clock();
 
-        assert!(high.outranks_other(&mid));
-        assert!(!mid.outranks_other(&high));
+        assert!(high.better_than(&mid));
+        assert!(!mid.better_than(&high));
 
-        assert!(high.outranks_other(&low));
-        assert!(!low.outranks_other(&high));
+        assert!(high.better_than(&low));
+        assert!(!low.better_than(&high));
 
-        assert!(mid.outranks_other(&low));
-        assert!(!low.outranks_other(&mid));
+        assert!(mid.better_than(&low));
+        assert!(!low.better_than(&mid));
     }
 
     #[test]
@@ -543,14 +605,14 @@ pub(crate) mod tests {
         let c1 = ForeignClockDS::high_grade_test_clock();
         let c2 = ForeignClockDS::high_grade_test_clock();
 
-        assert!(!c1.outranks_other(&c2));
-        assert!(!c2.outranks_other(&c1));
+        assert!(!c1.better_than(&c2));
+        assert!(!c2.better_than(&c1));
         assert_eq!(c1, c2);
     }
 
     #[test]
     fn foreign_clock_ds_compares_priority1_before_quality() {
-        // a has lower priority1 but worse quality; still outranks b.
+        // a has lower priority1 but worse quality; still better than b.
         let a = ForeignClockDS::new(
             CLK_ID_LOW,
             Priority1::new(10),
@@ -566,8 +628,8 @@ pub(crate) mod tests {
             StepsRemoved::new(0),
         );
 
-        assert!(a.outranks_other(&b));
-        assert!(!b.outranks_other(&a));
+        assert!(a.better_than(&b));
+        assert!(!b.better_than(&a));
     }
 
     #[test]
@@ -588,13 +650,13 @@ pub(crate) mod tests {
             StepsRemoved::new(0),
         );
 
-        assert!(a.outranks_other(&b));
-        assert!(!b.outranks_other(&a));
+        assert!(a.better_than(&b));
+        assert!(!b.better_than(&a));
     }
 
     #[test]
     fn foreign_clock_ds_tiebreaks_on_identity_last() {
-        // All fields equal except identity; lower identity outranks higher.
+        // All fields equal except identity; lower identity better than higher.
         let a = ForeignClockDS::new(
             CLK_ID_HIGH,
             Priority1::new(127),
@@ -610,8 +672,8 @@ pub(crate) mod tests {
             StepsRemoved::new(0),
         );
 
-        assert!(a.outranks_other(&b));
-        assert!(!b.outranks_other(&a));
+        assert!(a.better_than(&b));
+        assert!(!b.better_than(&a));
     }
 
     #[test]
@@ -631,14 +693,17 @@ pub(crate) mod tests {
             StepsRemoved::new(3),
         );
 
-        assert!(a.outranks_other(&b));
-        assert!(!b.outranks_other(&a));
+        assert!(a.better_than(&b));
+        assert!(!b.better_than(&a));
     }
 
     #[test]
     fn full_bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::gm_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::gm_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         assert_eq!(
@@ -649,11 +714,14 @@ pub(crate) mod tests {
 
     #[test]
     fn full_bmca_gm_capable_local_loses_tuple_returns_passive() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::gm_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::gm_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
-        // Foreign uses lower priority1 so it outranks, even though clock class is worse.
+        // Foreign uses lower priority1 so it is better, even though clock class is worse.
         let foreign_strong = ForeignClockDS::new(
             CLK_ID_HIGH,
             Priority1::new(1),
@@ -673,9 +741,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_gm_capable_local_outranks_foreign_returns_master_m1() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::gm_grade_test_clock());
+    fn full_bmca_gm_capable_local_better_than_foreign_returns_master_m1() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::gm_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         // Foreign is worse (higher priority1), so local GM-capable should become Master(M1).
@@ -695,12 +766,15 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_non_gm_local_outranks_foreign_returns_master_m2() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+    fn full_bmca_non_gm_local_better_than_foreign_returns_master_m2() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
-        // Foreign is slightly worse quality; local should outrank and take M2.
+        // Foreign is slightly worse quality; local should be better and take M2.
         let foreign = ForeignClockDS::low_grade_test_clock();
         let port_id = PortIdentity::new(CLK_ID_LOW, PortNumber::new(1));
 
@@ -718,8 +792,11 @@ pub(crate) mod tests {
 
     #[test]
     fn full_bmca_non_gm_local_loses_tuple_returns_slave() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign = ForeignClockDS::high_grade_test_clock();
@@ -736,8 +813,11 @@ pub(crate) mod tests {
 
     #[test]
     fn full_bmca_recommends_slave_from_interleaved_announce_sequence() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::low_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::low_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
@@ -767,8 +847,11 @@ pub(crate) mod tests {
 
     #[test]
     fn full_bmca_recommends_slave_from_non_interleaved_announce_sequence() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::low_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::low_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
@@ -798,8 +881,11 @@ pub(crate) mod tests {
 
     #[test]
     fn full_bmca_undecided_when_no_announces_yet() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         assert_eq!(
@@ -810,8 +896,11 @@ pub(crate) mod tests {
 
     #[test]
     fn full_bmca_undecided_when_no_qualified_clock_records_yet() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
@@ -829,8 +918,11 @@ pub(crate) mod tests {
 
     #[test]
     fn full_bmca_undecided_when_only_single_announces_each() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
@@ -858,8 +950,11 @@ pub(crate) mod tests {
 
     #[test]
     fn full_bmca_undecided_on_sequence_gap() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
@@ -881,8 +976,11 @@ pub(crate) mod tests {
 
     #[test]
     fn full_bmca_undecided_on_sequence_gap_after_being_qualified_before() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 

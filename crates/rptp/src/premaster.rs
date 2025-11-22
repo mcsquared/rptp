@@ -42,8 +42,8 @@ mod tests {
 
     use std::time::Duration;
 
-    use crate::bmca::{FullBmca, LocalClockDS};
-    use crate::clock::{FakeClock, LocalClock};
+    use crate::bmca::{DefaultDS, FullBmca};
+    use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
@@ -54,8 +54,11 @@ mod tests {
 
     #[test]
     fn pre_master_port_schedules_qualification_timeout() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
             &local_clock,
@@ -81,8 +84,11 @@ mod tests {
 
     #[test]
     fn pre_master_port_to_master_transition_on_qualification_timeout() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),

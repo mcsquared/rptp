@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use tokio::sync::mpsc;
 
-use rptp::bmca::{LocalClockDS, Priority1, Priority2};
+use rptp::bmca::{DefaultDS, Priority1, Priority2};
 use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock, StepsRemoved};
 use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
 
@@ -23,13 +23,13 @@ async fn main() -> std::io::Result<()> {
 
     let local_clock = LocalClock::new(
         FakeClock::default(),
-        LocalClockDS::new(
+        DefaultDS::new(
             ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             Priority1::new(127),
             Priority2::new(127),
             ClockQuality::new(248, 0xFE, 0xFFFF),
-            StepsRemoved::new(0),
         ),
+        StepsRemoved::new(0),
     );
 
     let event_socket = Rc::new(MulticastSocket::event().await?);

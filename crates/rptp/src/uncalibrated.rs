@@ -82,8 +82,8 @@ mod tests {
 
     use std::time::Duration;
 
-    use crate::bmca::{ForeignClockDS, ForeignClockRecord, FullBmca, LocalClockDS};
-    use crate::clock::{FakeClock, LocalClock};
+    use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, FullBmca};
+    use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
@@ -93,8 +93,11 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_to_slave_transition_on_following_announce() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
         let prior_records = [ForeignClockRecord::new(
             PortIdentity::fake(),
@@ -134,8 +137,11 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_to_master_on_announce_receipt_timeout() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),

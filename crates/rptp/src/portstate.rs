@@ -263,7 +263,7 @@ mod tests {
     use super::*;
 
     use crate::bmca::BmcaMasterDecisionPoint;
-    use crate::bmca::{FullBmca, LocalClockDS};
+    use crate::bmca::{DefaultDS, FullBmca};
     use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
@@ -272,8 +272,11 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_master_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let listening = PortState::listening(
             DomainPort::new(
@@ -295,8 +298,11 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_master_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let slave = PortState::slave(
             DomainPort::new(
@@ -319,8 +325,11 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_master_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let pre_master = PortState::pre_master(
             DomainPort::new(
@@ -343,8 +352,11 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_master_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let uncalibrated = PortState::uncalibrated(
             DomainPort::new(
@@ -366,8 +378,11 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_slave_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let uncalibrated = PortState::uncalibrated(
             DomainPort::new(
@@ -390,8 +405,11 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_uncalibrated_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let listening = PortState::listening(
             DomainPort::new(
@@ -414,8 +432,11 @@ mod tests {
 
     #[test]
     fn portstate_master_to_uncalibrated_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let master = PortState::master(
             DomainPort::new(
@@ -438,8 +459,11 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_pre_master_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let listening = PortState::listening(
             DomainPort::new(
@@ -463,8 +487,11 @@ mod tests {
 
     #[test]
     fn portstate_initializing_to_listening_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let initializing = PortState::initializing(
             DomainPort::new(
@@ -488,8 +515,11 @@ mod tests {
 
     #[test]
     fn portstate_initializing_to_master_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let initializing = PortState::initializing(
             DomainPort::new(
@@ -512,8 +542,11 @@ mod tests {
 
     #[test]
     fn portstate_master_to_master_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let master = PortState::master(
             DomainPort::new(
@@ -537,8 +570,11 @@ mod tests {
 
     #[test]
     fn portstate_initializing_to_slave_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let initializing = PortState::initializing(
             DomainPort::new(
@@ -561,8 +597,11 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_slave_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let listening = PortState::listening(
             DomainPort::new(
@@ -585,8 +624,11 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_slave_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let slave = PortState::slave(
             DomainPort::new(
@@ -610,8 +652,11 @@ mod tests {
 
     #[test]
     fn portstate_master_to_slave_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let master = PortState::master(
             DomainPort::new(
@@ -634,8 +679,11 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_slave_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let pre_master = PortState::pre_master(
             DomainPort::new(
@@ -661,8 +709,11 @@ mod tests {
 
     #[test]
     fn portstate_initializing_to_uncalibrated_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let initializing = PortState::initializing(
             DomainPort::new(
@@ -685,8 +736,11 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_uncalibrated_unimplemented_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let slave = PortState::slave(
             DomainPort::new(
@@ -710,8 +764,11 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_uncalibrated_unimplemented_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let pre_master = PortState::pre_master(
             DomainPort::new(
@@ -735,8 +792,11 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_uncalibrated_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let uncalibrated = PortState::uncalibrated(
             DomainPort::new(
@@ -761,8 +821,11 @@ mod tests {
 
     #[test]
     fn portstate_initializing_to_pre_master_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let initializing = PortState::initializing(
             DomainPort::new(
@@ -786,8 +849,11 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_pre_master_unimplemented_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let slave = PortState::slave(
             DomainPort::new(
@@ -812,8 +878,11 @@ mod tests {
 
     #[test]
     fn portstate_master_to_pre_master_unimplemented_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let master = PortState::master(
             DomainPort::new(
@@ -837,8 +906,11 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_pre_master_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let pre_master = PortState::pre_master(
             DomainPort::new(
@@ -863,8 +935,11 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_pre_master_unimplemented_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let uncalibrated = PortState::uncalibrated(
             DomainPort::new(
@@ -890,8 +965,11 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_listening_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let listening = PortState::listening(
             DomainPort::new(
@@ -913,8 +991,11 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_listening_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let slave = PortState::slave(
             DomainPort::new(
@@ -937,8 +1018,11 @@ mod tests {
 
     #[test]
     fn portstate_master_to_listening_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let master = PortState::master(
             DomainPort::new(
@@ -960,8 +1044,11 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_listening_illegal_transition_goes_to_faulty() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let pre_master = PortState::pre_master(
             DomainPort::new(
@@ -986,8 +1073,11 @@ mod tests {
 
     #[test]
     fn portstate_initializing_to_faulty_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let initializing = PortState::initializing(
             DomainPort::new(
@@ -1009,8 +1099,11 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_faulty_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let listening = PortState::listening(
             DomainPort::new(
@@ -1032,8 +1125,11 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_faulty_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let slave = PortState::slave(
             DomainPort::new(
@@ -1056,8 +1152,11 @@ mod tests {
 
     #[test]
     fn portstate_master_to_faulty_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let master = PortState::master(
             DomainPort::new(
@@ -1079,8 +1178,11 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_faulty_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::high_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let pre_master = PortState::pre_master(
             DomainPort::new(
@@ -1103,8 +1205,11 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_faulty_transition() {
-        let local_clock =
-            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
 
         let uncalibrated = PortState::uncalibrated(
             DomainPort::new(
