@@ -80,6 +80,7 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
                 StateDecision::RecommendedMaster(qualification_timeout_policy),
             ),
             BmcaRecommendation::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
+            BmcaRecommendation::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
             BmcaRecommendation::Undecided => None,
         }
     }

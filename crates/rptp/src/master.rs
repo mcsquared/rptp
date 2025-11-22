@@ -60,6 +60,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
             BmcaRecommendation::Undecided => None,
             BmcaRecommendation::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
             BmcaRecommendation::Master(_decision_point) => None,
+            BmcaRecommendation::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
         }
     }
 

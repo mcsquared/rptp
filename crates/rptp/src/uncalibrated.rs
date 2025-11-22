@@ -44,6 +44,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
                 StateDecision::RecommendedMaster(qualification_timeout_policy),
             ),
             BmcaRecommendation::Slave(parent) => Some(StateDecision::MasterClockSelected(parent)),
+            BmcaRecommendation::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
             BmcaRecommendation::Undecided => None,
         }
     }

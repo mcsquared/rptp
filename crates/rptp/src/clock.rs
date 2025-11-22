@@ -60,6 +60,10 @@ impl ClockQuality {
         }
     }
 
+    pub fn is_grandmaster_capable(&self) -> bool {
+        self.clock_class >= 1 && self.clock_class <= 127
+    }
+
     pub fn from_slice(buf: &[u8; 4]) -> Self {
         Self {
             clock_class: buf[Self::CLOCK_CLASS_OFFSET],
@@ -132,6 +136,10 @@ impl<C: SynchronizableClock> LocalClock<C> {
 
     pub fn announce(&self, sequence_id: SequenceId) -> AnnounceMessage {
         self.localds.announce(sequence_id)
+    }
+
+    pub fn is_grandmaster_capable(&self) -> bool {
+        self.localds.is_grandmaster_capable()
     }
 
     pub fn outranks_foreign(&self, other: &ForeignClockDS) -> bool {

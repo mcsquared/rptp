@@ -62,6 +62,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
                 self.parent_port_identity = parent;
                 None
             }
+            BmcaRecommendation::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
             BmcaRecommendation::Undecided => None,
         }
     }

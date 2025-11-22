@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::ops::Range;
 use std::time::Duration;
 
@@ -80,6 +79,10 @@ impl ForeignClockDS {
         }
     }
 
+    pub fn is_grandmaster_capable(&self) -> bool {
+        self.quality.is_grandmaster_capable()
+    }
+
     pub fn from_slice(buf: &[u8; 14]) -> Self {
         Self {
             identity: ClockIdentity::new(&[
@@ -152,6 +155,10 @@ impl LocalClockDS {
 
     pub fn identity(&self) -> &ClockIdentity {
         &self.ds.identity
+    }
+
+    pub fn is_grandmaster_capable(&self) -> bool {
+        self.ds.is_grandmaster_capable()
     }
 
     pub fn outranks_foreign(&self, foreign: &ForeignClockDS) -> bool {
@@ -249,11 +256,11 @@ pub enum BmcaRecommendation {
     Undecided,
     Master(QualificationTimeoutPolicy),
     Slave(ParentPortIdentity),
-    // TODO: Passive,
+    Passive,
 }
 
 pub trait Bmca {
-    fn consider(&self, source_port_identity: PortIdentity, announce: AnnounceMessage);
+    fn consider(&mut self, source_port_identity: PortIdentity, announce: AnnounceMessage);
     fn recommendation<C: SynchronizableClock>(
         &self,
         local_clock: &LocalClock<C>,
@@ -261,60 +268,93 @@ pub trait Bmca {
 }
 
 pub struct FullBmca<S: SortedForeignClockRecords> {
-    sorted_clock_records: RefCell<S>,
+    sorted_clock_records: S,
 }
 
 impl<S: SortedForeignClockRecords> FullBmca<S> {
     pub fn new(sorted_clock_records: S) -> Self {
         Self {
-            sorted_clock_records: RefCell::new(sorted_clock_records),
+            sorted_clock_records,
         }
     }
 }
 
 impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
-    fn consider(&self, source_port_identity: PortIdentity, announce: AnnounceMessage) {
-        let updated =
-            self.sorted_clock_records
-                .borrow_mut()
-                .update_record(&source_port_identity, |record| {
-                    record.consider(announce);
-                });
+    fn consider(&mut self, source_port_identity: PortIdentity, announce: AnnounceMessage) {
+        let updated = self
+            .sorted_clock_records
+            .update_record(&source_port_identity, |record| {
+                record.consider(announce);
+            });
 
         if !updated {
             self.sorted_clock_records
-                .borrow_mut()
                 .insert(ForeignClockRecord::new(source_port_identity, announce));
         }
     }
 
+    // IEEE 1588-2019 Section 9.3.3 - BMCA State Decision Algorithm
+    // Note: variable names correspond to those in the spec for easier reference.
     fn recommendation<C: SynchronizableClock>(
         &self,
         local_clock: &LocalClock<C>,
     ) -> BmcaRecommendation {
-        let recommendation = self
-            .sorted_clock_records
-            .borrow()
-            .first()
-            .map(|foreign_record| {
-                if let Some(foreign_clock) = foreign_record.clock() {
-                    if local_clock.outranks_foreign(foreign_clock) {
-                        BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
-                            BmcaMasterDecisionPoint::M1, // TODO differentiate between M1, M2, M3
-                            StepsRemoved::new(0),        // TODO get steps removed from local clock
-                        ))
-                    } else {
-                        BmcaRecommendation::Slave(ParentPortIdentity::new(
-                            foreign_record.source_port_identity(),
-                        ))
-                    }
-                } else {
-                    BmcaRecommendation::Undecided
-                }
-            })
-            .unwrap_or(BmcaRecommendation::Undecided);
+        let d_0 = local_clock;
 
-        recommendation
+        let Some(e_rbest_record) = self.sorted_clock_records.first() else {
+            return BmcaRecommendation::Undecided;
+        };
+
+        let Some(e_rbest) = e_rbest_record.clock() else {
+            return BmcaRecommendation::Undecided;
+        };
+
+        if d_0.is_grandmaster_capable() {
+            d0_better_or_better_by_topology_than_e_rbest(d_0, e_rbest)
+        } else {
+            d0_better_or_better_by_topology_than_e_best(
+                d_0,
+                e_rbest, // TODO: once multi-port is supported, introduce e_best here
+                e_rbest,
+                e_rbest_record.source_port_identity(),
+            )
+        }
+    }
+}
+
+fn d0_better_or_better_by_topology_than_e_rbest<C: SynchronizableClock>(
+    d_0: &LocalClock<C>,
+    e_rbest: &ForeignClockDS,
+) -> BmcaRecommendation {
+    if d_0.outranks_foreign(e_rbest) {
+        BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
+            BmcaMasterDecisionPoint::M1,
+            StepsRemoved::new(0), // TODO get steps removed from local clock
+        ))
+    } else {
+        BmcaRecommendation::Passive // Passive decision point P1
+    }
+}
+
+fn d0_better_or_better_by_topology_than_e_best<C: SynchronizableClock>(
+    d_0: &LocalClock<C>,
+    e_best: &ForeignClockDS,
+    _e_rbest: &ForeignClockDS,
+    source_port_identity: PortIdentity,
+) -> BmcaRecommendation {
+    if d_0.outranks_foreign(e_best) {
+        BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
+            BmcaMasterDecisionPoint::M2,
+            StepsRemoved::new(0), // TODO get steps removed from local clock
+        ))
+    } else {
+        // TODO: as the implementation supports only a single port at the
+        // moment, we can directly recommend slave here, which corresponds to
+        // slave decision point S1. In a multi-port implementation, we would
+        // need to compare against e_best. When e_rbest == e_best, we'd had
+        // slave decision point S1, we'd compare e_best against e_rbest and
+        // decide between master decision point M3 and passive decision point P2.
+        BmcaRecommendation::Slave(ParentPortIdentity::new(source_port_identity))
     }
 }
 
@@ -322,7 +362,7 @@ pub struct NoopBmca;
 
 impl Bmca for NoopBmca {
     fn consider(
-        &self,
+        &mut self,
         _source_port_identity: crate::port::PortIdentity,
         _announce: crate::message::AnnounceMessage,
     ) {
@@ -379,10 +419,13 @@ pub(crate) mod tests {
         ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]);
     const CLK_ID_LOW: ClockIdentity =
         ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x03]);
+    const CLK_ID_GM: ClockIdentity =
+        ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x04]);
 
     const CLK_QUALITY_HIGH: ClockQuality = ClockQuality::new(248, 0xFE, 0xFFFF);
     const CLK_QUALITY_MID: ClockQuality = ClockQuality::new(250, 0xFE, 0xFFFF);
     const CLK_QUALITY_LOW: ClockQuality = ClockQuality::new(255, 0xFF, 0xFFFF);
+    const CLK_QUALITY_GM: ClockQuality = ClockQuality::new(100, 0xFE, 0xFFFF);
 
     impl ForeignClockDS {
         pub(crate) fn high_grade_test_clock() -> ForeignClockDS {
@@ -438,6 +481,15 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_LOW,
+            )
+        }
+
+        pub(crate) fn gm_grade_test_clock() -> LocalClockDS {
+            LocalClockDS::new(
+                CLK_ID_GM,
+                Priority1::new(127),
+                Priority2::new(127),
+                CLK_QUALITY_GM,
             )
         }
     }
@@ -539,10 +591,108 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn full_bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::gm_grade_test_clock());
+        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+
+        assert_eq!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Undecided
+        );
+    }
+
+    #[test]
+    fn full_bmca_gm_capable_local_loses_tuple_returns_passive() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::gm_grade_test_clock());
+        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+
+        // Foreign uses lower priority1 so it outranks, even though clock class is worse.
+        let foreign_strong = ForeignClockDS::new(
+            CLK_ID_HIGH,
+            Priority1::new(1),
+            Priority2::new(127),
+            CLK_QUALITY_HIGH,
+        );
+        let port_id = PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1));
+
+        bmca.consider(port_id, AnnounceMessage::new(0.into(), foreign_strong));
+        bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign_strong));
+
+        assert_eq!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Passive
+        );
+    }
+
+    #[test]
+    fn full_bmca_gm_capable_local_outranks_foreign_returns_master_m1() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::gm_grade_test_clock());
+        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+
+        // Foreign is worse (higher priority1), so local GM-capable should become Master(M1).
+        let foreign = ForeignClockDS::mid_grade_test_clock();
+        let port_id = PortIdentity::new(CLK_ID_MID, PortNumber::new(1));
+
+        bmca.consider(port_id, AnnounceMessage::new(0.into(), foreign));
+        bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign));
+
+        assert_eq!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
+                BmcaMasterDecisionPoint::M1,
+                StepsRemoved::new(0)
+            ))
+        );
+    }
+
+    #[test]
+    fn full_bmca_non_gm_local_outranks_foreign_returns_master_m2() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+
+        // Foreign is slightly worse quality; local should outrank and take M2.
+        let foreign = ForeignClockDS::low_grade_test_clock();
+        let port_id = PortIdentity::new(CLK_ID_LOW, PortNumber::new(1));
+
+        bmca.consider(port_id, AnnounceMessage::new(0.into(), foreign));
+        bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign));
+
+        assert_eq!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
+                BmcaMasterDecisionPoint::M2,
+                StepsRemoved::new(0)
+            ))
+        );
+    }
+
+    #[test]
+    fn full_bmca_non_gm_local_loses_tuple_returns_slave() {
+        let local_clock =
+            LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
+        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+
+        let foreign = ForeignClockDS::high_grade_test_clock();
+        let port_id = PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1));
+
+        bmca.consider(port_id, AnnounceMessage::new(0.into(), foreign));
+        bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign));
+
+        assert_eq!(
+            bmca.recommendation(&local_clock),
+            BmcaRecommendation::Slave(ParentPortIdentity::new(port_id))
+        );
+    }
+
+    #[test]
     fn full_bmca_recommends_slave_from_interleaved_announce_sequence() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::low_grade_test_clock());
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -573,7 +723,7 @@ pub(crate) mod tests {
     fn full_bmca_recommends_slave_from_non_interleaved_announce_sequence() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::low_grade_test_clock());
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -616,7 +766,7 @@ pub(crate) mod tests {
     fn full_bmca_undecided_when_no_qualified_clock_records_yet() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
@@ -635,7 +785,7 @@ pub(crate) mod tests {
     fn full_bmca_undecided_when_only_single_announces_each() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -661,10 +811,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_undecided_on_sequence_gap() {
+    fn full_bmca_undecided_on_sequence_gap() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
@@ -684,10 +834,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_undecided_on_sequence_gap_after_being_qualified_before() {
+    fn full_bmca_undecided_on_sequence_gap_after_being_qualified_before() {
         let local_clock =
             LocalClock::new(FakeClock::default(), LocalClockDS::mid_grade_test_clock());
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
         bmca.consider(
