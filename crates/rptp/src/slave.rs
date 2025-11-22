@@ -55,7 +55,9 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         self.bmca.consider(source_port_identity, msg);
 
         match self.bmca.recommendation(self.port.local_clock()) {
-            BmcaRecommendation::Master => Some(StateDecision::RecommendedMaster),
+            BmcaRecommendation::Master(qualification_timeout_policy) => Some(
+                StateDecision::RecommendedMaster(qualification_timeout_policy),
+            ),
             BmcaRecommendation::Slave(parent) => {
                 self.parent_port_identity = parent;
                 None

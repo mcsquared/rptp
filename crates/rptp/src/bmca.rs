@@ -1,9 +1,10 @@
 use std::cell::RefCell;
 use std::ops::Range;
+use std::time::Duration;
 
-use crate::clock::{ClockIdentity, ClockQuality, LocalClock, SynchronizableClock};
+use crate::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
 use crate::message::{AnnounceMessage, SequenceId};
-use crate::port::{ParentPortIdentity, PortIdentity};
+use crate::port::{LogInterval, ParentPortIdentity, PortIdentity};
 
 pub trait SortedForeignClockRecords {
     fn insert(&mut self, record: ForeignClockRecord);
@@ -235,10 +236,18 @@ impl PartialOrd for ForeignClockRecord {
     }
 }
 
+// Master decision point as defined in IEEE 1588-2019 Section 9.3.1 and Figure 26
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BmcaMasterDecisionPoint {
+    M1,
+    M2,
+    M3,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BmcaRecommendation {
     Undecided,
-    Master,
+    Master(QualificationTimeoutPolicy),
     Slave(ParentPortIdentity),
     // TODO: Passive,
 }
@@ -290,7 +299,10 @@ impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
             .map(|foreign_record| {
                 if let Some(foreign_clock) = foreign_record.clock() {
                     if local_clock.outranks_foreign(foreign_clock) {
-                        BmcaRecommendation::Master
+                        BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
+                            BmcaMasterDecisionPoint::M1, // TODO differentiate between M1, M2, M3
+                            StepsRemoved::new(0),        // TODO get steps removed from local clock
+                        ))
                     } else {
                         BmcaRecommendation::Slave(ParentPortIdentity::new(
                             foreign_record.source_port_identity(),
@@ -320,6 +332,36 @@ impl Bmca for NoopBmca {
         _local_clock: &LocalClock<C>,
     ) -> BmcaRecommendation {
         BmcaRecommendation::Undecided
+    }
+}
+
+// Qualification timeout policy as defined in IEEE 1588-2019 Section 9.2.6.10
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QualificationTimeoutPolicy {
+    master_decision_point: BmcaMasterDecisionPoint,
+    steps_removed: StepsRemoved,
+}
+
+impl QualificationTimeoutPolicy {
+    pub fn new(
+        master_decision_point: BmcaMasterDecisionPoint,
+        steps_removed: StepsRemoved,
+    ) -> Self {
+        Self {
+            master_decision_point,
+            steps_removed,
+        }
+    }
+
+    pub fn duration(&self, log_announce_interval: LogInterval) -> Duration {
+        match self.master_decision_point {
+            BmcaMasterDecisionPoint::M1 => Duration::from_secs(0),
+            BmcaMasterDecisionPoint::M2 => Duration::from_secs(0),
+            BmcaMasterDecisionPoint::M3 => {
+                let n = self.steps_removed.as_u16() as u32 + 1;
+                log_announce_interval.duration() * n
+            }
+        }
     }
 }
 
@@ -523,7 +565,7 @@ pub(crate) mod tests {
 
         assert_eq!(
             recommendation,
-            BmcaRecommendation::Slave(ParentPortIdentity::new(port_id_high))
+            BmcaRecommendation::Slave(ParentPortIdentity::new(port_id_high),)
         );
     }
 
@@ -554,7 +596,7 @@ pub(crate) mod tests {
 
         assert_eq!(
             recommendation,
-            BmcaRecommendation::Slave(ParentPortIdentity::new(port_id_high))
+            BmcaRecommendation::Slave(ParentPortIdentity::new(port_id_high),)
         );
     }
 
@@ -670,6 +712,64 @@ pub(crate) mod tests {
         assert_eq!(
             bmca.recommendation(&local_clock),
             BmcaRecommendation::Undecided
+        );
+    }
+
+    #[test]
+    fn qualification_timeout_policy_duration_m1_is_zero() {
+        let policy =
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(5));
+
+        let qualification_timeout_interval = policy.duration(LogInterval::new(4));
+
+        assert_eq!(qualification_timeout_interval, Duration::from_secs(0));
+    }
+
+    #[test]
+    fn qualification_timeout_policy_duration_m2_is_zero() {
+        let policy =
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M2, StepsRemoved::new(5));
+
+        let qualification_timeout_interval = policy.duration(LogInterval::new(4));
+
+        assert_eq!(qualification_timeout_interval, Duration::from_secs(0));
+    }
+
+    #[test]
+    fn qualification_timeout_policy_duration_m3_scales_with_steps_removed() {
+        let policy =
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M3, StepsRemoved::new(0));
+        let qualification_timeout_interval = policy.duration(LogInterval::new(0));
+        assert_eq!(qualification_timeout_interval, Duration::from_secs(1));
+
+        let policy =
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M3, StepsRemoved::new(1));
+        let qualification_timeout_interval = policy.duration(LogInterval::new(0));
+        assert_eq!(qualification_timeout_interval, Duration::from_secs(2));
+
+        let policy =
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M3, StepsRemoved::new(2));
+        let qualification_timeout_interval = policy.duration(LogInterval::new(1));
+        assert_eq!(qualification_timeout_interval, Duration::from_secs(6));
+
+        let policy =
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M3, StepsRemoved::new(3));
+        let qualification_timeout_interval = policy.duration(LogInterval::new(2));
+        assert_eq!(qualification_timeout_interval, Duration::from_secs(16));
+    }
+
+    #[test]
+    fn qualification_timeout_policy_duration_m3_large_inputs() {
+        let policy = QualificationTimeoutPolicy::new(
+            BmcaMasterDecisionPoint::M3,
+            StepsRemoved::new(u16::MAX),
+        );
+
+        let qualification_timeout_interval = policy.duration(LogInterval::new(10));
+
+        assert_eq!(
+            qualification_timeout_interval,
+            Duration::from_secs(67_108_864)
         );
     }
 }

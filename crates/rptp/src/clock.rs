@@ -150,6 +150,23 @@ impl<C: SynchronizableClock> Clock for LocalClock<C> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StepsRemoved(u16);
+
+impl StepsRemoved {
+    pub fn new(steps_removed: u16) -> Self {
+        Self(steps_removed)
+    }
+
+    pub fn as_u16(&self) -> u16 {
+        self.0
+    }
+
+    pub fn to_be_bytes(&self) -> [u8; 2] {
+        self.0.to_be_bytes()
+    }
+}
+
 pub struct FakeClock {
     now: Cell<TimeStamp>,
 }

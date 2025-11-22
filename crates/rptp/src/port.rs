@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
-use crate::bmca::Bmca;
+use crate::bmca::{Bmca, QualificationTimeoutPolicy};
 use crate::buffer::{LogMessageInterval, MessageBuffer, PtpVersion, TransportSpecific};
 use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
 use crate::log::PortLog;
@@ -306,6 +306,8 @@ pub struct LogInterval {
 
 impl LogInterval {
     pub const fn new(log_value: i8) -> Self {
+        assert!(log_value >= -10 && log_value <= 10);
+
         Self { log_value }
     }
 
@@ -319,7 +321,6 @@ pub struct PortTimingPolicy {
     log_sync_interval: LogInterval,
     log_min_delay_request_interval: LogInterval,
     announce_receipt_timeout_interval: Duration,
-    qualification_interval: Duration,
 }
 
 impl PortTimingPolicy {
@@ -328,14 +329,12 @@ impl PortTimingPolicy {
         log_sync_interval: LogInterval,
         log_min_delay_request_interval: LogInterval,
         announce_receipt_timeout_interval: Duration,
-        qualification_interval: Duration,
     ) -> Self {
         Self {
             log_announce_interval,
             log_sync_interval,
             log_min_delay_request_interval,
             announce_receipt_timeout_interval,
-            qualification_interval,
         }
     }
 
@@ -355,8 +354,8 @@ impl PortTimingPolicy {
         self.announce_receipt_timeout_interval
     }
 
-    pub fn qualification_interval(&self) -> Duration {
-        self.qualification_interval
+    pub fn qualification_interval(&self, policy: QualificationTimeoutPolicy) -> Duration {
+        policy.duration(self.log_announce_interval)
     }
 }
 
@@ -367,7 +366,6 @@ impl Default for PortTimingPolicy {
             LogInterval::new(0),
             LogInterval::new(0),
             Duration::from_secs(5),
-            Duration::from_secs(3),
         )
     }
 }
@@ -476,6 +474,36 @@ mod tests {
             &bytes[20..30],
             &crate::port::PortIdentity::new(identity, port_number).to_bytes()
         );
+    }
+
+    #[test]
+    fn log_interval_duration() {
+        let li = LogInterval::new(0);
+        assert_eq!(li.duration(), Duration::from_secs(1));
+
+        let li = LogInterval::new(1);
+        assert_eq!(li.duration(), Duration::from_secs(2));
+
+        let li = LogInterval::new(2);
+        assert_eq!(li.duration(), Duration::from_secs(4));
+
+        let li = LogInterval::new(-1);
+        assert_eq!(li.duration(), Duration::from_millis(500));
+
+        let li = LogInterval::new(-2);
+        assert_eq!(li.duration(), Duration::from_millis(250));
+    }
+
+    #[test]
+    #[should_panic]
+    fn log_interval_new_panics_on_out_of_range_positive() {
+        let _ = LogInterval::new(11);
+    }
+
+    #[test]
+    #[should_panic]
+    fn log_interval_new_panics_on_out_of_range_negative() {
+        let _ = LogInterval::new(-11);
     }
 }
 

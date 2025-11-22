@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::bmca::Bmca;
+use crate::bmca::{Bmca, QualificationTimeoutPolicy};
 use crate::faulty::FaultyPort;
 use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
@@ -13,16 +13,19 @@ use crate::slave::{DelayCycle, SlavePort};
 use crate::time::TimeStamp;
 use crate::uncalibrated::UncalibratedPort;
 
+// Possible decisions that move the port state machine from one state
+// to another as defined in IEEE 1588 Section 9.2.5, figure 24
 pub enum StateDecision {
     Initialized,
     MasterClockSelected(ParentPortIdentity),
     RecommendedSlave(ParentPortIdentity),
-    RecommendedMaster,
+    RecommendedMaster(QualificationTimeoutPolicy),
     FaultDetected,
     QualificationTimeoutExpired,
     AnnounceReceiptTimeoutExpired,
 }
 
+// Port states as defined in IEEE 1588 Section 9.2.5, figure 24
 pub enum PortState<P: Port, B: Bmca, L: PortLog> {
     Initializing(InitializingPort<P, B, L>),
     Listening(ListeningPort<P, B, L>),
@@ -84,10 +87,16 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         ))
     }
 
-    pub fn pre_master(port: P, bmca: B, log: L, timing_policy: PortTimingPolicy) -> Self {
+    pub fn pre_master(
+        port: P,
+        bmca: B,
+        log: L,
+        timing_policy: PortTimingPolicy,
+        qualification_timeout_policy: QualificationTimeoutPolicy,
+    ) -> Self {
         let qualification_timeout = port.timeout(
             SystemMessage::QualificationTimeout,
-            timing_policy.qualification_interval(),
+            timing_policy.qualification_interval(qualification_timeout_policy),
         );
 
         PortState::PreMaster(PreMasterPort::new(
@@ -150,8 +159,10 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
                 PortState::Slave(_) => PortState::Unimplemented,
                 _ => PortState::Faulty(FaultyPort::new()),
             },
-            StateDecision::RecommendedMaster => match self {
-                PortState::Listening(listening) => listening.recommended_master(),
+            StateDecision::RecommendedMaster(qualification_timeout_policy) => match self {
+                PortState::Listening(listening) => {
+                    listening.recommended_master(qualification_timeout_policy)
+                }
                 PortState::Uncalibrated(_) => PortState::Unimplemented,
                 PortState::Master(_) => PortState::Unimplemented,
                 PortState::Slave(_) => PortState::Unimplemented,
@@ -251,8 +262,9 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
 mod tests {
     use super::*;
 
+    use crate::bmca::BmcaMasterDecisionPoint;
     use crate::bmca::{FullBmca, LocalClockDS};
-    use crate::clock::{FakeClock, LocalClock};
+    use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
     use crate::port::test_support::{FakePort, FakeTimerHost};
@@ -321,6 +333,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
         );
 
         let master = pre_master.apply(StateDecision::QualificationTimeoutExpired);
@@ -441,7 +454,9 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let pre_master = listening.apply(StateDecision::RecommendedMaster);
+        let pre_master = listening.apply(StateDecision::RecommendedMaster(
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
+        ));
 
         assert!(matches!(pre_master, PortState::PreMaster(_)));
     }
@@ -633,6 +648,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
         );
 
         let parent = ParentPortIdentity::new(PortIdentity::fake());
@@ -708,6 +724,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
@@ -760,7 +777,9 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = initializing.apply(StateDecision::RecommendedMaster);
+        let result = initializing.apply(StateDecision::RecommendedMaster(
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
+        ));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -784,7 +803,9 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = slave.apply(StateDecision::RecommendedMaster);
+        let result = slave.apply(StateDecision::RecommendedMaster(
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
+        ));
 
         assert!(matches!(result, PortState::Unimplemented));
     }
@@ -807,7 +828,9 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = master.apply(StateDecision::RecommendedMaster);
+        let result = master.apply(StateDecision::RecommendedMaster(
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
+        ));
 
         assert!(matches!(result, PortState::Unimplemented));
     }
@@ -828,9 +851,12 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
         );
 
-        let result = pre_master.apply(StateDecision::RecommendedMaster);
+        let result = pre_master.apply(StateDecision::RecommendedMaster(
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
+        ));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -853,7 +879,9 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = uncalibrated.apply(StateDecision::RecommendedMaster);
+        let result = uncalibrated.apply(StateDecision::RecommendedMaster(
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
+        ));
 
         assert!(matches!(result, PortState::Unimplemented));
     }
@@ -946,6 +974,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
         );
 
         let result = pre_master.apply(StateDecision::Initialized);
@@ -1064,6 +1093,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
+            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
         );
 
         let result = pre_master.apply(StateDecision::FaultDetected);

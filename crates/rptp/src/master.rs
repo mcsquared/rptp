@@ -59,7 +59,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         match self.bmca.recommendation(self.port.local_clock()) {
             BmcaRecommendation::Undecided => None,
             BmcaRecommendation::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
-            BmcaRecommendation::Master => None,
+            BmcaRecommendation::Master(_decision_point) => None,
         }
     }
 
