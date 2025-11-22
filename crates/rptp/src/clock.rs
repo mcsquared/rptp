@@ -158,7 +158,7 @@ impl<C: SynchronizableClock> Clock for LocalClock<C> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StepsRemoved(u16);
 
 impl StepsRemoved {

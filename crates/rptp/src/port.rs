@@ -380,7 +380,7 @@ mod tests {
     use self::test_support::FakeTimerHost;
 
     use crate::bmca::LocalClockDS;
-    use crate::clock::{ClockQuality, FakeClock};
+    use crate::clock::{ClockQuality, FakeClock, StepsRemoved};
     use crate::message::{DelayRequestMessage, FollowUpMessage};
 
     struct CapturePort {
@@ -413,6 +413,7 @@ mod tests {
                 crate::bmca::Priority1::new(127),
                 crate::bmca::Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                StepsRemoved::new(0),
             ),
         );
         let (cap_port, sent) = CapturePort::new();
@@ -449,6 +450,7 @@ mod tests {
                 crate::bmca::Priority1::new(127),
                 crate::bmca::Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                StepsRemoved::new(0),
             ),
         );
         let (cap_port, sent) = CapturePort::new();

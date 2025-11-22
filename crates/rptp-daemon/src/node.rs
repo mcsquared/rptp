@@ -262,7 +262,7 @@ mod tests {
     use tokio::time;
 
     use rptp::bmca::{LocalClockDS, Priority1, Priority2};
-    use rptp::clock::{ClockIdentity, ClockQuality, FakeClock};
+    use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, StepsRemoved};
     use rptp::message::{EventMessage, GeneralMessage};
     use rptp::port::{
         DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber, PortTimingPolicy,
@@ -310,6 +310,7 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                StepsRemoved::new(0),
             ),
         );
 
@@ -397,6 +398,7 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                StepsRemoved::new(0),
             ),
         );
 

@@ -57,6 +57,7 @@ pub struct ForeignClockDS {
     priority1: Priority1,
     priority2: Priority2,
     quality: ClockQuality,
+    steps_removed: StepsRemoved,
 }
 
 impl ForeignClockDS {
@@ -64,18 +65,21 @@ impl ForeignClockDS {
     const QUALITY_RANGE: Range<usize> = 1..5;
     const PRIORITY2_OFFSET: usize = 5;
     const IDENTITY_RANGE: Range<usize> = 6..14;
+    const STEPS_REMOVED_OFFSET: Range<usize> = 14..16;
 
     pub fn new(
         identity: ClockIdentity,
         priority1: Priority1,
         priority2: Priority2,
         quality: ClockQuality,
+        steps_removed: StepsRemoved,
     ) -> Self {
         Self {
             identity,
             priority1,
             priority2,
             quality,
+            steps_removed,
         }
     }
 
@@ -83,7 +87,7 @@ impl ForeignClockDS {
         self.quality.is_grandmaster_capable()
     }
 
-    pub fn from_slice(buf: &[u8; 14]) -> Self {
+    pub fn from_slice(buf: &[u8; 16]) -> Self {
         Self {
             identity: ClockIdentity::new(&[
                 buf[Self::IDENTITY_RANGE.start],
@@ -103,12 +107,16 @@ impl ForeignClockDS {
                 buf[ForeignClockDS::QUALITY_RANGE.start + 2],
                 buf[ForeignClockDS::QUALITY_RANGE.start + 3],
             ]),
+            steps_removed: StepsRemoved::new(u16::from_be_bytes([
+                buf[ForeignClockDS::STEPS_REMOVED_OFFSET.start],
+                buf[ForeignClockDS::STEPS_REMOVED_OFFSET.start + 1],
+            ])),
         }
     }
 
     pub fn outranks_other(&self, other: &ForeignClockDS) -> bool {
         if self.identity == other.identity {
-            return false;
+            return self.steps_removed < other.steps_removed;
         }
 
         let a = (
@@ -127,12 +135,14 @@ impl ForeignClockDS {
         a < b
     }
 
-    pub fn to_bytes(&self) -> [u8; 14] {
-        let mut bytes = [0u8; 14];
+    pub fn to_bytes(&self) -> [u8; 16] {
+        let mut bytes = [0u8; 16];
         bytes[Self::PRIORITY1_OFFSET] = self.priority1.as_u8();
         bytes[Self::QUALITY_RANGE].copy_from_slice(&self.quality.to_bytes());
         bytes[Self::PRIORITY2_OFFSET] = self.priority2.as_u8();
         bytes[Self::IDENTITY_RANGE].copy_from_slice(self.identity.as_bytes());
+        bytes[Self::STEPS_REMOVED_OFFSET.start..Self::STEPS_REMOVED_OFFSET.end]
+            .copy_from_slice(&self.steps_removed.to_be_bytes());
         bytes
     }
 }
@@ -147,9 +157,10 @@ impl LocalClockDS {
         priority1: Priority1,
         priority2: Priority2,
         quality: ClockQuality,
+        steps_removed: StepsRemoved,
     ) -> Self {
         Self {
-            ds: ForeignClockDS::new(identity, priority1, priority2, quality),
+            ds: ForeignClockDS::new(identity, priority1, priority2, quality, steps_removed),
         }
     }
 
@@ -434,6 +445,7 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_HIGH,
+                StepsRemoved::new(0),
             )
         }
 
@@ -443,6 +455,7 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_MID,
+                StepsRemoved::new(0),
             )
         }
 
@@ -452,6 +465,7 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_LOW,
+                StepsRemoved::new(0),
             )
         }
     }
@@ -463,6 +477,7 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_HIGH,
+                StepsRemoved::new(0),
             )
         }
 
@@ -472,6 +487,7 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_MID,
+                StepsRemoved::new(0),
             )
         }
 
@@ -481,6 +497,7 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_LOW,
+                StepsRemoved::new(0),
             )
         }
 
@@ -490,6 +507,7 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_GM,
+                StepsRemoved::new(0),
             )
         }
     }
@@ -538,12 +556,14 @@ pub(crate) mod tests {
             Priority1::new(10),
             Priority2::new(127),
             CLK_QUALITY_LOW,
+            StepsRemoved::new(0),
         );
         let b = ForeignClockDS::new(
             CLK_ID_HIGH,
             Priority1::new(100),
             Priority2::new(127),
             CLK_QUALITY_HIGH,
+            StepsRemoved::new(0),
         );
 
         assert!(a.outranks_other(&b));
@@ -558,12 +578,14 @@ pub(crate) mod tests {
             Priority1::new(127),
             Priority2::new(10),
             CLK_QUALITY_HIGH,
+            StepsRemoved::new(0),
         );
         let b = ForeignClockDS::new(
             CLK_ID_HIGH,
             Priority1::new(127),
             Priority2::new(20),
             CLK_QUALITY_HIGH,
+            StepsRemoved::new(0),
         );
 
         assert!(a.outranks_other(&b));
@@ -578,12 +600,35 @@ pub(crate) mod tests {
             Priority1::new(127),
             Priority2::new(127),
             CLK_QUALITY_HIGH,
+            StepsRemoved::new(0),
         );
         let b = ForeignClockDS::new(
             CLK_ID_MID,
             Priority1::new(127),
             Priority2::new(127),
             CLK_QUALITY_HIGH,
+            StepsRemoved::new(0),
+        );
+
+        assert!(a.outranks_other(&b));
+        assert!(!b.outranks_other(&a));
+    }
+
+    #[test]
+    fn foreign_clock_ds_prefers_lower_steps_removed_when_identity_equal() {
+        let a = ForeignClockDS::new(
+            CLK_ID_HIGH,
+            Priority1::new(127),
+            Priority2::new(127),
+            CLK_QUALITY_HIGH,
+            StepsRemoved::new(1),
+        );
+        let b = ForeignClockDS::new(
+            CLK_ID_HIGH,
+            Priority1::new(127),
+            Priority2::new(127),
+            CLK_QUALITY_HIGH,
+            StepsRemoved::new(3),
         );
 
         assert!(a.outranks_other(&b));
@@ -614,6 +659,7 @@ pub(crate) mod tests {
             Priority1::new(1),
             Priority2::new(127),
             CLK_QUALITY_HIGH,
+            StepsRemoved::new(0),
         );
         let port_id = PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1));
 

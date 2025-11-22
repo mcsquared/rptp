@@ -8,7 +8,7 @@ use std::rc::Rc;
 use tokio::sync::mpsc;
 
 use rptp::bmca::{LocalClockDS, Priority1, Priority2};
-use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock};
+use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock, StepsRemoved};
 use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
 
 use crate::net::MulticastSocket;
@@ -28,6 +28,7 @@ async fn main() -> std::io::Result<()> {
             Priority1::new(127),
             Priority2::new(127),
             ClockQuality::new(248, 0xFE, 0xFFFF),
+            StepsRemoved::new(0),
         ),
     );
 

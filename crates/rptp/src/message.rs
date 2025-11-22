@@ -202,7 +202,7 @@ impl AnnounceMessage {
     pub fn from_slice(buf: &[u8]) -> Result<Self> {
         let sequence_id = SequenceId::try_from(&buf[30..32])?;
         let foreign_clock =
-            ForeignClockDS::from_slice(&buf[47..61].try_into().map_err(|_| ParseError::BadLength)?);
+            ForeignClockDS::from_slice(&buf[47..63].try_into().map_err(|_| ParseError::BadLength)?);
 
         Ok(Self {
             sequence_id,
@@ -228,7 +228,7 @@ impl AnnounceMessage {
             .payload();
 
         let payload_buf = payload.buf();
-        payload_buf[13..27].copy_from_slice(&self.foreign_clock.to_bytes());
+        payload_buf[13..29].copy_from_slice(&self.foreign_clock.to_bytes());
 
         payload.finalize(30)
     }
@@ -492,7 +492,7 @@ mod tests {
 
     use crate::bmca::{Priority1, Priority2};
     use crate::buffer::{LogMessageInterval, PtpVersion, TransportSpecific};
-    use crate::clock::{ClockIdentity, ClockQuality};
+    use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved};
     use crate::port::PortNumber;
 
     #[test]
@@ -504,6 +504,7 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                StepsRemoved::new(42),
             ),
         );
 
