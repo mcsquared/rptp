@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::bmca::{Bmca, BmcaDecision};
+use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision};
 use crate::log::PortLog;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
@@ -148,6 +148,20 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
 
         PortState::master(self.port, self.bmca, self.log, self.timing_policy)
     }
+
+    pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
+        self.log.state_transition(
+            "Slave",
+            "Uncalibrated",
+            format!(
+                "Recommended Slave, parent {}",
+                decision.parent_port_identity()
+            )
+            .as_str(),
+        );
+
+        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -178,7 +192,7 @@ impl<T: Timeout> DelayCycle<T> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{DefaultDS, FullBmca};
+    use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, FullBmca};
     use crate::clock::{ClockIdentity, FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
@@ -538,6 +552,128 @@ mod tests {
 
         // Local clock disciplined to the estimate
         assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
+    }
+
+    #[test]
+    fn slave_port_produces_slave_recommendation_on_updated_same_parent() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::low_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+        let parent_port = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            PortNumber::new(1),
+        );
+        let foreign_clock_ds = ForeignClockDS::mid_grade_test_clock();
+        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds)
+            .with_qualified_clock(foreign_clock_ds)];
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+        let delay_timeout =
+            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+
+        let mut slave = SlavePort::new(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+            ParentPortIdentity::new(parent_port),
+            announce_receipt_timeout,
+            delay_cycle,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        // Receive a better announce from the same parent port
+        let decision = slave.process_announce(
+            AnnounceMessage::new(42.into(), ForeignClockDS::high_grade_test_clock()),
+            parent_port,
+        );
+
+        // expect a slave recommendation
+        assert_eq!(
+            decision,
+            Some(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
+                ParentPortIdentity::new(parent_port),
+                StepsRemoved::new(1)
+            )))
+        );
+    }
+
+    #[test]
+    fn slave_port_produces_slave_recommendation_with_new_parent() {
+        use crate::bmca::{ForeignClockDS, ForeignClockRecord};
+
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::low_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+        let parent_port = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            PortNumber::new(1),
+        );
+        let foreign_clock_ds = ForeignClockDS::mid_grade_test_clock();
+        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds)
+            .with_qualified_clock(foreign_clock_ds)];
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+        let delay_timeout =
+            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+
+        let mut slave = SlavePort::new(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+            ParentPortIdentity::new(parent_port),
+            announce_receipt_timeout,
+            delay_cycle,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        // Receive two better announces from another parent port
+        let new_parent = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
+            PortNumber::new(1),
+        );
+        let decision = slave.process_announce(
+            AnnounceMessage::new(42.into(), ForeignClockDS::high_grade_test_clock()),
+            new_parent,
+        );
+        assert!(matches!(decision, None)); // first announce from new parent is ignored
+
+        let decision = slave.process_announce(
+            AnnounceMessage::new(43.into(), ForeignClockDS::high_grade_test_clock()),
+            new_parent,
+        );
+
+        // expect a slave recommendation
+        assert_eq!(
+            decision,
+            Some(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
+                ParentPortIdentity::new(new_parent),
+                StepsRemoved::new(1),
+            )))
+        );
     }
 
     #[test]

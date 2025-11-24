@@ -164,7 +164,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
                 PortState::Listening(listening) => listening.recommended_slave(decision),
                 PortState::Master(master) => master.recommended_slave(decision),
                 PortState::PreMaster(_) => PortState::Unimplemented,
-                PortState::Slave(_) => PortState::Unimplemented,
+                PortState::Slave(slave) => slave.recommended_slave(decision),
                 PortState::Uncalibrated(uncalibrated) => uncalibrated.recommended_slave(decision),
                 _ => PortState::Faulty(FaultyPort::new()),
             },
@@ -746,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_slave_to_uncalibrated_unimplemented_transition() {
+    fn portstate_slave_to_uncalibrated_transition() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
@@ -773,7 +773,7 @@ mod tests {
             StepsRemoved::new(0),
         )));
 
-        assert!(matches!(result, PortState::Unimplemented));
+        assert!(matches!(result, PortState::Uncalibrated(_)));
     }
 
     #[test]
