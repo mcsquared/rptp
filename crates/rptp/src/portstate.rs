@@ -15,6 +15,7 @@ use crate::uncalibrated::UncalibratedPort;
 
 // Possible decisions that move the port state machine from one state
 // to another as defined in IEEE 1588 Section 9.2.5, figure 24
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StateDecision {
     Initialized,
     MasterClockSelected,
@@ -164,6 +165,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
                 PortState::Master(master) => master.recommended_slave(decision),
                 PortState::PreMaster(_) => PortState::Unimplemented,
                 PortState::Slave(_) => PortState::Unimplemented,
+                PortState::Uncalibrated(uncalibrated) => uncalibrated.recommended_slave(decision),
                 _ => PortState::Faulty(FaultyPort::new()),
             },
             StateDecision::RecommendedMaster(decision) => match self {
@@ -806,7 +808,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_uncalibrated_to_uncalibrated_illegal_transition_goes_to_faulty() {
+    fn portstate_uncalibrated_to_uncalibrated_transition() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
@@ -832,7 +834,7 @@ mod tests {
             StepsRemoved::new(0),
         )));
 
-        assert!(matches!(result, PortState::Faulty(_)));
+        assert!(matches!(result, PortState::Uncalibrated(_)));
     }
 
     // Tests for unimplemented/illegal ToPreMaster transitions
