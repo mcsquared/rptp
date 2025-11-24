@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::bmca::{Bmca, BmcaRecommendation};
+use crate::bmca::{Bmca, BmcaDecision};
 use crate::log::PortLog;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
@@ -54,16 +54,17 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             .restart(self.timing_policy.announce_receipt_timeout_interval());
         self.bmca.consider(source_port_identity, msg);
 
-        match self.bmca.recommendation(self.port.local_clock()) {
-            BmcaRecommendation::Master(qualification_timeout_policy) => Some(
-                StateDecision::RecommendedMaster(qualification_timeout_policy),
-            ),
-            BmcaRecommendation::Slave(parent) => {
-                self.parent_port_identity = parent;
-                None
+        match self.bmca.decision(self.port.local_clock()) {
+            BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
+            BmcaDecision::Slave(decision) => {
+                if self.parent_port_identity != *decision.parent_port_identity() {
+                    Some(StateDecision::RecommendedSlave(decision))
+                } else {
+                    None
+                }
             }
-            BmcaRecommendation::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
-            BmcaRecommendation::Undecided => None,
+            BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
+            BmcaDecision::Undecided => None,
         }
     }
 

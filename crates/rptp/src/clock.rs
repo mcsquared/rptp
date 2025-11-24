@@ -138,6 +138,9 @@ impl<C: SynchronizableClock> LocalClock<C> {
     pub fn now(&self) -> TimeStamp {
         self.clock.now()
     }
+    pub fn steps_removed(&self) -> StepsRemoved {
+        self.steps_removed
+    }
 
     pub fn announce(&self, sequence_id: SequenceId) -> AnnounceMessage {
         self.default_ds.announce(sequence_id, self.steps_removed)
@@ -169,6 +172,10 @@ pub struct StepsRemoved(u16);
 impl StepsRemoved {
     pub fn new(steps_removed: u16) -> Self {
         Self(steps_removed)
+    }
+
+    pub fn increment(self) -> Self {
+        Self(self.0.saturating_add(1))
     }
 
     pub fn as_u16(&self) -> u16 {

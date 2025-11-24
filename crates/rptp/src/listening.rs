@@ -1,7 +1,7 @@
-use crate::bmca::{Bmca, BmcaRecommendation, QualificationTimeoutPolicy};
+use crate::bmca::{Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision};
 use crate::log::PortLog;
 use crate::message::AnnounceMessage;
-use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy, Timeout};
+use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
 use crate::portstate::{PortState, StateDecision};
 
 pub struct ListeningPort<P: Port, B: Bmca, L: PortLog> {
@@ -29,30 +29,25 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
         }
     }
 
-    pub fn recommended_slave(self, parent_port_identity: ParentPortIdentity) -> PortState<P, B, L> {
+    pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
         self.log.state_transition(
             "Listening",
             "Uncalibrated",
-            format!("Recommended Slave, parent {}", parent_port_identity).as_str(),
+            format!(
+                "Recommended Slave, parent {}",
+                decision.parent_port_identity()
+            )
+            .as_str(),
         );
 
-        PortState::uncalibrated(self.port, self.bmca, self.log, self.timing_policy)
+        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
     }
 
-    pub fn recommended_master(
-        self,
-        qualification_timeout_policy: QualificationTimeoutPolicy,
-    ) -> PortState<P, B, L> {
+    pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log
             .state_transition("Listening", "Pre-Master", "Recommended Master");
 
-        PortState::pre_master(
-            self.port,
-            self.bmca,
-            self.log,
-            self.timing_policy,
-            qualification_timeout_policy,
-        )
+        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
     }
 
     pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
@@ -75,13 +70,11 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
             .restart(self.timing_policy.announce_receipt_timeout_interval());
         self.bmca.consider(source_port_identity, msg);
 
-        match self.bmca.recommendation(self.port.local_clock()) {
-            BmcaRecommendation::Master(qualification_timeout_policy) => Some(
-                StateDecision::RecommendedMaster(qualification_timeout_policy),
-            ),
-            BmcaRecommendation::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
-            BmcaRecommendation::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
-            BmcaRecommendation::Undecided => None,
+        match self.bmca.decision(self.port.local_clock()) {
+            BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
+            BmcaDecision::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
+            BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
+            BmcaDecision::Undecided => None,
         }
     }
 }

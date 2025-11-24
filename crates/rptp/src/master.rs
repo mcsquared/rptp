@@ -1,13 +1,13 @@
 use std::time::Duration;
 
-use crate::bmca::{Bmca, BmcaRecommendation};
+use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId,
     TwoStepSyncMessage,
 };
-use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy, Timeout};
+use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
 use crate::portstate::{PortState, StateDecision};
 use crate::time::TimeStamp;
 
@@ -56,11 +56,11 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         self.log.message_received("Announce");
         self.bmca.consider(source_port_identity, msg);
 
-        match self.bmca.recommendation(self.port.local_clock()) {
-            BmcaRecommendation::Undecided => None,
-            BmcaRecommendation::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
-            BmcaRecommendation::Master(_decision_point) => None,
-            BmcaRecommendation::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
+        match self.bmca.decision(self.port.local_clock()) {
+            BmcaDecision::Undecided => None,
+            BmcaDecision::Slave(decision) => Some(StateDecision::RecommendedSlave(decision)),
+            BmcaDecision::Master(_decision) => None,
+            BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
         }
     }
 
@@ -95,14 +95,18 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         None
     }
 
-    pub fn recommended_slave(self, parent_port_identity: ParentPortIdentity) -> PortState<P, B, L> {
+    pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
         self.log.state_transition(
             "Master",
             "Uncalibrated",
-            format!("Recommended Slave, parent {}", parent_port_identity).as_str(),
+            format!(
+                "Recommended Slave, parent {}",
+                decision.parent_port_identity()
+            )
+            .as_str(),
         );
 
-        PortState::uncalibrated(self.port, self.bmca, self.log, self.timing_policy)
+        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
     }
 }
 
@@ -494,12 +498,12 @@ mod tests {
         // Drain any setup timers
         timer_host.take_system_messages();
 
-        let transition = master.process_announce(
+        let decision = master.process_announce(
             AnnounceMessage::new(42.into(), foreign_clock_ds),
             PortIdentity::fake(),
         );
 
-        assert!(matches!(transition, None));
+        assert!(matches!(decision, None));
         assert!(timer_host.take_system_messages().is_empty());
     }
 

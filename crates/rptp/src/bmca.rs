@@ -2,8 +2,10 @@ use std::ops::Range;
 use std::time::Duration;
 
 use crate::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
+use crate::log::PortLog;
 use crate::message::{AnnounceMessage, SequenceId};
-use crate::port::{LogInterval, ParentPortIdentity, PortIdentity};
+use crate::port::{LogInterval, ParentPortIdentity, Port, PortIdentity, PortTimingPolicy};
+use crate::portstate::PortState;
 
 pub trait SortedForeignClockRecords {
     fn insert(&mut self, record: ForeignClockRecord);
@@ -117,6 +119,10 @@ impl ForeignClockDS {
 
     pub fn is_grandmaster_capable(&self) -> bool {
         self.quality.is_grandmaster_capable()
+    }
+
+    pub fn steps_removed(&self) -> StepsRemoved {
+        self.steps_removed
     }
 
     pub fn from_slice(buf: &[u8; 16]) -> Self {
@@ -329,19 +335,73 @@ pub enum BmcaMasterDecisionPoint {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BmcaRecommendation {
+pub enum BmcaDecision {
     Undecided,
-    Master(QualificationTimeoutPolicy),
-    Slave(ParentPortIdentity),
+    Master(BmcaMasterDecision),
+    Slave(BmcaSlaveDecision),
     Passive,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BmcaMasterDecision {
+    decision_point: BmcaMasterDecisionPoint,
+    steps_removed: StepsRemoved,
+}
+
+impl BmcaMasterDecision {
+    pub fn new(decision_point: BmcaMasterDecisionPoint, steps_removed: StepsRemoved) -> Self {
+        Self {
+            decision_point,
+            steps_removed,
+        }
+    }
+
+    pub fn apply<P: Port, B: Bmca, L: PortLog>(
+        &self,
+        port: P,
+        bmca: B,
+        log: L,
+        timing_policy: PortTimingPolicy,
+    ) -> PortState<P, B, L> {
+        let qualification_timeout_policy =
+            QualificationTimeoutPolicy::new(self.decision_point, self.steps_removed);
+
+        PortState::pre_master(port, bmca, log, timing_policy, qualification_timeout_policy)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BmcaSlaveDecision {
+    parent_port_identity: ParentPortIdentity,
+    steps_removed: StepsRemoved,
+}
+
+impl BmcaSlaveDecision {
+    pub fn new(parent_port_identity: ParentPortIdentity, steps_removed: StepsRemoved) -> Self {
+        Self {
+            parent_port_identity,
+            steps_removed,
+        }
+    }
+
+    pub fn parent_port_identity(&self) -> &ParentPortIdentity {
+        &self.parent_port_identity
+    }
+
+    pub fn apply<P: Port, B: Bmca, L: PortLog>(
+        self,
+        port: P,
+        bmca: B,
+        log: L,
+        timing_policy: PortTimingPolicy,
+    ) -> PortState<P, B, L> {
+        PortState::uncalibrated(port, bmca, log, self.parent_port_identity, timing_policy)
+    }
 }
 
 pub trait Bmca {
     fn consider(&mut self, source_port_identity: PortIdentity, announce: AnnounceMessage);
-    fn recommendation<C: SynchronizableClock>(
-        &self,
-        local_clock: &LocalClock<C>,
-    ) -> BmcaRecommendation;
+    fn decision<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> BmcaDecision;
 }
 
 pub struct FullBmca<S: SortedForeignClockRecords> {
@@ -372,18 +432,15 @@ impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
 
     // IEEE 1588-2019 Section 9.3.3 - BMCA State Decision Algorithm
     // Note: variable names correspond to those in the spec for easier reference.
-    fn recommendation<C: SynchronizableClock>(
-        &self,
-        local_clock: &LocalClock<C>,
-    ) -> BmcaRecommendation {
+    fn decision<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> BmcaDecision {
         let d_0 = local_clock;
 
         let Some(e_rbest_record) = self.sorted_clock_records.first() else {
-            return BmcaRecommendation::Undecided;
+            return BmcaDecision::Undecided;
         };
 
         let Some(e_rbest) = e_rbest_record.clock() else {
-            return BmcaRecommendation::Undecided;
+            return BmcaDecision::Undecided;
         };
 
         if d_0.is_grandmaster_capable() {
@@ -402,14 +459,14 @@ impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
 fn d0_better_or_better_by_topology_than_e_rbest<C: SynchronizableClock>(
     d_0: &LocalClock<C>,
     e_rbest: &ForeignClockDS,
-) -> BmcaRecommendation {
+) -> BmcaDecision {
     if d_0.better_than(e_rbest) {
-        BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
+        BmcaDecision::Master(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
-            StepsRemoved::new(0), // TODO get steps removed from local clock
+            StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
         ))
     } else {
-        BmcaRecommendation::Passive // Passive decision point P1
+        BmcaDecision::Passive // Passive decision point P1
     }
 }
 
@@ -418,11 +475,11 @@ fn d0_better_or_better_by_topology_than_e_best<C: SynchronizableClock>(
     e_best: &ForeignClockDS,
     _e_rbest: &ForeignClockDS,
     source_port_identity: PortIdentity,
-) -> BmcaRecommendation {
+) -> BmcaDecision {
     if d_0.better_than(e_best) {
-        BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
+        BmcaDecision::Master(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M2,
-            StepsRemoved::new(0), // TODO get steps removed from local clock
+            StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
         ))
     } else {
         // TODO: as the implementation supports only a single port at the
@@ -431,7 +488,10 @@ fn d0_better_or_better_by_topology_than_e_best<C: SynchronizableClock>(
         // need to compare against e_best. When e_rbest == e_best, we'd had
         // slave decision point S1, we'd compare e_best against e_rbest and
         // decide between master decision point M3 and passive decision point P2.
-        BmcaRecommendation::Slave(ParentPortIdentity::new(source_port_identity))
+        BmcaDecision::Slave(BmcaSlaveDecision::new(
+            ParentPortIdentity::new(source_port_identity),
+            e_best.steps_removed().increment(),
+        ))
     }
 }
 
@@ -444,11 +504,11 @@ impl Bmca for NoopBmca {
         _announce: crate::message::AnnounceMessage,
     ) {
     }
-    fn recommendation<C: crate::clock::SynchronizableClock>(
+    fn decision<C: crate::clock::SynchronizableClock>(
         &self,
         _local_clock: &LocalClock<C>,
-    ) -> BmcaRecommendation {
-        BmcaRecommendation::Undecided
+    ) -> BmcaDecision {
+        BmcaDecision::Undecided
     }
 }
 
@@ -706,10 +766,7 @@ pub(crate) mod tests {
         );
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
-        assert_eq!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Undecided
-        );
+        assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
 
     #[test]
@@ -734,10 +791,7 @@ pub(crate) mod tests {
         bmca.consider(port_id, AnnounceMessage::new(0.into(), foreign_strong));
         bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign_strong));
 
-        assert_eq!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Passive
-        );
+        assert_eq!(bmca.decision(&local_clock), BmcaDecision::Passive);
     }
 
     #[test]
@@ -757,8 +811,8 @@ pub(crate) mod tests {
         bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign));
 
         assert_eq!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
+            bmca.decision(&local_clock),
+            BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M1,
                 StepsRemoved::new(0)
             ))
@@ -782,8 +836,8 @@ pub(crate) mod tests {
         bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign));
 
         assert_eq!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Master(QualificationTimeoutPolicy::new(
+            bmca.decision(&local_clock),
+            BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M2,
                 StepsRemoved::new(0)
             ))
@@ -806,8 +860,11 @@ pub(crate) mod tests {
         bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign));
 
         assert_eq!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Slave(ParentPortIdentity::new(port_id))
+            bmca.decision(&local_clock),
+            BmcaDecision::Slave(BmcaSlaveDecision::new(
+                ParentPortIdentity::new(port_id),
+                foreign.steps_removed().increment()
+            )),
         );
     }
 
@@ -837,11 +894,14 @@ pub(crate) mod tests {
         bmca.consider(port_id_high, AnnounceMessage::new(1.into(), foreign_high));
         bmca.consider(port_id_mid, AnnounceMessage::new(1.into(), foreign_mid));
 
-        let recommendation = bmca.recommendation(&local_clock);
+        let decision = bmca.decision(&local_clock);
 
         assert_eq!(
-            recommendation,
-            BmcaRecommendation::Slave(ParentPortIdentity::new(port_id_high),)
+            decision,
+            BmcaDecision::Slave(BmcaSlaveDecision::new(
+                ParentPortIdentity::new(port_id_high),
+                foreign_high.steps_removed().increment()
+            )),
         );
     }
 
@@ -871,11 +931,14 @@ pub(crate) mod tests {
         bmca.consider(port_id_mid, AnnounceMessage::new(0.into(), foreign_mid));
         bmca.consider(port_id_mid, AnnounceMessage::new(1.into(), foreign_mid));
 
-        let recommendation = bmca.recommendation(&local_clock);
+        let decision = bmca.decision(&local_clock);
 
         assert_eq!(
-            recommendation,
-            BmcaRecommendation::Slave(ParentPortIdentity::new(port_id_high),)
+            decision,
+            BmcaDecision::Slave(BmcaSlaveDecision::new(
+                ParentPortIdentity::new(port_id_high),
+                foreign_high.steps_removed().increment()
+            ))
         );
     }
 
@@ -888,10 +951,7 @@ pub(crate) mod tests {
         );
         let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
 
-        assert_eq!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Undecided
-        );
+        assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
 
     #[test]
@@ -910,10 +970,7 @@ pub(crate) mod tests {
             AnnounceMessage::new(0.into(), foreign_high),
         );
 
-        assert_eq!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Undecided
-        );
+        assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
 
     #[test]
@@ -942,10 +999,7 @@ pub(crate) mod tests {
             AnnounceMessage::new(10.into(), foreign_low),
         );
 
-        assert_eq!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Undecided
-        );
+        assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
 
     #[test]
@@ -968,10 +1022,7 @@ pub(crate) mod tests {
             AnnounceMessage::new(2.into(), foreign_high),
         );
 
-        assert_eq!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Undecided
-        );
+        assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
 
     #[test]
@@ -994,8 +1045,8 @@ pub(crate) mod tests {
         );
 
         assert!(matches!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Slave(_)
+            bmca.decision(&local_clock),
+            BmcaDecision::Slave(_)
         ));
 
         bmca.consider(
@@ -1003,10 +1054,7 @@ pub(crate) mod tests {
             AnnounceMessage::new(3.into(), foreign_high),
         );
 
-        assert_eq!(
-            bmca.recommendation(&local_clock),
-            BmcaRecommendation::Undecided
-        );
+        assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
 
     #[test]

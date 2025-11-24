@@ -1,4 +1,4 @@
-use crate::bmca::{Bmca, BmcaRecommendation};
+use crate::bmca::{Bmca, BmcaDecision};
 use crate::log::PortLog;
 use crate::message::AnnounceMessage;
 use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy, Timeout};
@@ -9,6 +9,7 @@ pub struct UncalibratedPort<P: Port, B: Bmca, L: PortLog> {
     bmca: B,
     announce_receipt_timeout: P::Timeout,
     log: L,
+    parent_port_identity: ParentPortIdentity,
     timing_policy: PortTimingPolicy,
 }
 
@@ -18,6 +19,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         bmca: B,
         announce_receipt_timeout: P::Timeout,
         log: L,
+        parent_port_identity: ParentPortIdentity,
         timing_policy: PortTimingPolicy,
     ) -> Self {
         Self {
@@ -25,6 +27,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
             bmca,
             announce_receipt_timeout,
             log,
+            parent_port_identity,
             timing_policy,
         }
     }
@@ -39,30 +42,29 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
             .restart(self.timing_policy.announce_receipt_timeout_interval());
         self.bmca.consider(source_port_identity, msg);
 
-        match self.bmca.recommendation(self.port.local_clock()) {
-            BmcaRecommendation::Master(qualification_timeout_policy) => Some(
-                StateDecision::RecommendedMaster(qualification_timeout_policy),
-            ),
-            BmcaRecommendation::Slave(parent) => Some(StateDecision::MasterClockSelected(parent)),
-            BmcaRecommendation::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
-            BmcaRecommendation::Undecided => None,
+        match self.bmca.decision(self.port.local_clock()) {
+            BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
+            BmcaDecision::Slave(_) => Some(StateDecision::MasterClockSelected),
+            BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
+            BmcaDecision::Undecided => None,
         }
     }
 
-    pub fn master_clock_selected(
-        self,
-        parent_port_identity: ParentPortIdentity,
-    ) -> PortState<P, B, L> {
+    pub fn master_clock_selected(self) -> PortState<P, B, L> {
         self.log.state_transition(
             "Uncalibrated",
             "Slave",
-            format!("Master clock selected, parent {}", parent_port_identity).as_str(),
+            format!(
+                "Master clock selected, parent {}",
+                self.parent_port_identity
+            )
+            .as_str(),
         );
 
         PortState::slave(
             self.port,
             self.bmca,
-            parent_port_identity,
+            self.parent_port_identity,
             self.log,
             self.timing_policy,
         )
@@ -121,6 +123,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
             announce_receipt_timeout,
             NoopPortLog,
+            ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
         );
 
@@ -131,7 +134,7 @@ mod tests {
 
         assert!(matches!(
             transition,
-            Some(StateDecision::MasterClockSelected(_))
+            Some(StateDecision::MasterClockSelected)
         ));
     }
 
@@ -159,6 +162,7 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
+            ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
         ));
 
