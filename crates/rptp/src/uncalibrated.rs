@@ -71,13 +71,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
             .as_str(),
         );
 
-        PortState::slave(
-            self.port,
-            self.bmca,
-            self.parent_port_identity,
-            self.log,
-            self.timing_policy,
-        )
+        PortState::slave(self.port, self.bmca, self.log, self.timing_policy)
     }
 
     pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {

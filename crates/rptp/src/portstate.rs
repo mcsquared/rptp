@@ -65,7 +65,6 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
     pub fn slave(
         port: P,
         bmca: ParentTrackingBmca<B>,
-        parent_port_identity: ParentPortIdentity,
         log: L,
         timing_policy: PortTimingPolicy,
     ) -> Self {
@@ -82,7 +81,6 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         PortState::Slave(SlavePort::new(
             port,
             bmca,
-            parent_port_identity,
             announce_receipt_timeout,
             delay_cycle,
             log,
@@ -326,7 +324,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -665,7 +662,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -780,7 +776,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -909,7 +904,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1062,7 +1056,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1199,7 +1192,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );

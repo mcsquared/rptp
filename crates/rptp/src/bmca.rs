@@ -489,6 +489,10 @@ impl<B: Bmca> ParentTrackingBmca<B> {
         }
     }
 
+    pub fn matches_parent(&self, source: &PortIdentity) -> bool {
+        self.parent_port_identity.get().matches(source)
+    }
+
     pub fn into_inner(self) -> B {
         self.inner
     }

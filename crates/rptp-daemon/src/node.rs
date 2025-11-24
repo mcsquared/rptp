@@ -439,7 +439,6 @@ mod tests {
         let port_state = PortState::Slave(SlavePort::new(
             domain_port,
             bmca,
-            parent_port_identity,
             announce_receipt_timeout,
             delay_cycle,
             log,

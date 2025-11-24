@@ -6,7 +6,7 @@ use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
     SequenceId, TwoStepSyncMessage,
 };
-use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy, Timeout};
+use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
 use crate::portstate::{PortState, StateDecision};
 use crate::sync::MasterEstimate;
 use crate::time::TimeStamp;
@@ -17,7 +17,6 @@ pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
     announce_receipt_timeout: P::Timeout,
     delay_cycle: DelayCycle<P::Timeout>,
     master_estimate: MasterEstimate,
-    parent_port_identity: ParentPortIdentity,
     log: L,
     timing_policy: PortTimingPolicy,
 }
@@ -26,7 +25,6 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
     pub fn new(
         port: P,
         bmca: ParentTrackingBmca<B>,
-        parent_port_identity: ParentPortIdentity,
         announce_receipt_timeout: P::Timeout,
         delay_cycle: DelayCycle<P::Timeout>,
         log: L,
@@ -35,7 +33,6 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         Self {
             port,
             bmca,
-            parent_port_identity,
             announce_receipt_timeout,
             delay_cycle,
             master_estimate: MasterEstimate::new(),
@@ -70,7 +67,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         ingress_timestamp: TimeStamp,
     ) -> Option<StateDecision> {
         self.log.message_received("Sync");
-        if !self.parent_port_identity.matches(&source_port_identity) {
+        if !self.bmca.matches_parent(&source_port_identity) {
             return None;
         }
 
@@ -90,7 +87,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         source_port_identity: PortIdentity,
     ) -> Option<StateDecision> {
         self.log.message_received("FollowUp");
-        if !self.parent_port_identity.matches(&source_port_identity) {
+        if !self.bmca.matches_parent(&source_port_identity) {
             return None;
         }
 
@@ -123,7 +120,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         source_port_identity: PortIdentity,
     ) -> Option<StateDecision> {
         self.log.message_received("DelayResp");
-        if !self.parent_port_identity.matches(&source_port_identity) {
+        if !self.bmca.matches_parent(&source_port_identity) {
             return None;
         }
 
@@ -220,7 +217,7 @@ mod tests {
     use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
     use crate::port::test_support::{FakePort, FakeTimeout, FakeTimerHost};
-    use crate::port::{DomainNumber, DomainPort, PortNumber};
+    use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::portstate::PortState;
 
     #[test]
@@ -244,7 +241,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            ParentPortIdentity::new(PortIdentity::fake()),
             FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
             DelayCycle::new(
                 0.into(),
@@ -294,7 +290,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -329,7 +324,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -361,7 +355,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -413,7 +406,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(parent),
             ),
-            ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
@@ -489,7 +481,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(parent),
             ),
-            ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
@@ -559,7 +550,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(parent),
             ),
-            ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
@@ -628,7 +618,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
                 ParentPortIdentity::new(parent_port),
             ),
-            ParentPortIdentity::new(parent_port),
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
@@ -681,7 +670,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
                 ParentPortIdentity::new(parent_port),
             ),
-            ParentPortIdentity::new(parent_port),
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
@@ -748,7 +736,6 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
                 ParentPortIdentity::new(parent_port),
             ),
-            ParentPortIdentity::new(parent_port),
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
