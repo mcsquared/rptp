@@ -163,7 +163,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
             StateDecision::RecommendedSlave(decision) => match self {
                 PortState::Listening(listening) => listening.recommended_slave(decision),
                 PortState::Master(master) => master.recommended_slave(decision),
-                PortState::PreMaster(_) => PortState::Unimplemented,
+                PortState::PreMaster(pre_master) => pre_master.recommended_slave(decision),
                 PortState::Slave(slave) => slave.recommended_slave(decision),
                 PortState::Uncalibrated(uncalibrated) => uncalibrated.recommended_slave(decision),
                 _ => PortState::Faulty(FaultyPort::new()),
@@ -217,6 +217,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
             (Listening(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
             (Slave(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
             (Master(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
+            (PreMaster(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
             (Uncalibrated(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
             (Slave(port), FollowUp(msg)) => port.process_follow_up(msg, source_port_identity),
             (Slave(port), DelayResp(msg)) => port.process_delay_response(msg, source_port_identity),
@@ -804,7 +805,7 @@ mod tests {
             StepsRemoved::new(0),
         )));
 
-        assert!(matches!(result, PortState::Unimplemented));
+        assert!(matches!(result, PortState::Uncalibrated(_)));
     }
 
     #[test]

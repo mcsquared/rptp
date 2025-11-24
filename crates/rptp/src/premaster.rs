@@ -1,7 +1,8 @@
-use crate::bmca::Bmca;
+use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision};
 use crate::log::PortLog;
-use crate::port::{Port, PortTimingPolicy};
-use crate::portstate::PortState;
+use crate::message::AnnounceMessage;
+use crate::port::{Port, PortIdentity, PortTimingPolicy};
+use crate::portstate::{PortState, StateDecision};
 
 pub struct PreMasterPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
@@ -28,11 +29,42 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
         }
     }
 
+    pub fn process_announce(
+        &mut self,
+        msg: AnnounceMessage,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateDecision> {
+        self.log.message_received("Announce");
+
+        msg.feed_bmca(&mut self.bmca, source_port_identity);
+
+        match self.bmca.decision(self.port.local_clock()) {
+            BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
+            BmcaDecision::Slave(decision) => Some(StateDecision::RecommendedSlave(decision)),
+            BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
+            BmcaDecision::Undecided => None,
+        }
+    }
+
     pub fn qualified(self) -> PortState<P, B, L> {
         self.log
             .state_transition("Pre-Master", "Master", "Port has qualified as Master");
 
         PortState::master(self.port, self.bmca, self.log, self.timing_policy)
+    }
+
+    pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
+        self.log.state_transition(
+            "Pre-Master",
+            "Uncalibrated",
+            format!(
+                "Recommended Slave, parent {}",
+                decision.parent_port_identity()
+            )
+            .as_str(),
+        );
+
+        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
     }
 }
 
@@ -113,5 +145,62 @@ mod tests {
             transition,
             Some(StateDecision::QualificationTimeoutExpired)
         ));
+    }
+
+    #[test]
+    fn pre_master_port_produces_slave_recommendation_on_two_better_announces() {
+        use crate::bmca::{BmcaSlaveDecision, ForeignClockDS};
+        use crate::clock::ClockIdentity;
+        use crate::message::AnnounceMessage;
+        use crate::port::{ParentPortIdentity, PortIdentity, PortNumber};
+
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::low_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+        let better_port = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            PortNumber::new(1),
+        );
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let qualification_timeout =
+            domain_port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+
+        let mut pre_master = PreMasterPort::new(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            qualification_timeout,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        // Receive first better announce
+        let decision = pre_master.process_announce(
+            AnnounceMessage::new(42.into(), ForeignClockDS::high_grade_test_clock()),
+            better_port,
+        );
+        assert!(matches!(decision, None)); // first announce is not yet qualified
+
+        // Receive second better announce
+        let decision = pre_master.process_announce(
+            AnnounceMessage::new(43.into(), ForeignClockDS::high_grade_test_clock()),
+            better_port,
+        );
+
+        // expect a slave recommendation
+        assert_eq!(
+            decision,
+            Some(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
+                ParentPortIdentity::new(better_port),
+                StepsRemoved::new(1)
+            )))
+        );
     }
 }
