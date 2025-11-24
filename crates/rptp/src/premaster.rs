@@ -74,7 +74,7 @@ mod tests {
 
     use std::time::Duration;
 
-    use crate::bmca::{DefaultDS, FullBmca};
+    use crate::bmca::{DefaultDS, IncrementalBmca};
     use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
@@ -104,7 +104,7 @@ mod tests {
 
         let _ = PreMasterPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             qualification_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -133,7 +133,7 @@ mod tests {
 
         let mut pre_master = PortState::PreMaster(PreMasterPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             qualification_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -175,7 +175,7 @@ mod tests {
 
         let mut pre_master = PreMasterPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             qualification_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),

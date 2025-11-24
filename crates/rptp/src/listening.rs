@@ -86,7 +86,7 @@ mod tests {
 
     use std::time::Duration;
 
-    use crate::bmca::{DefaultDS, ForeignClockDS, FullBmca};
+    use crate::bmca::{DefaultDS, ForeignClockDS, IncrementalBmca};
     use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
@@ -116,7 +116,7 @@ mod tests {
 
         let mut listening = PortState::Listening(ListeningPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -152,7 +152,7 @@ mod tests {
 
         let mut listening = ListeningPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -194,7 +194,7 @@ mod tests {
         );
         let mut listening = ListeningPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -240,7 +240,7 @@ mod tests {
 
         let mut listening = ListeningPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),

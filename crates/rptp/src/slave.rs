@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::bmca::{Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision};
+use crate::bmca::{Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, ParentTrackingBmca};
 use crate::log::PortLog;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
@@ -13,7 +13,7 @@ use crate::time::TimeStamp;
 
 pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
     port: P,
-    bmca: B,
+    bmca: ParentTrackingBmca<B>,
     announce_receipt_timeout: P::Timeout,
     delay_cycle: DelayCycle<P::Timeout>,
     master_estimate: MasterEstimate,
@@ -25,7 +25,7 @@ pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
 impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
     pub fn new(
         port: P,
-        bmca: B,
+        bmca: ParentTrackingBmca<B>,
         parent_port_identity: ParentPortIdentity,
         announce_receipt_timeout: P::Timeout,
         delay_cycle: DelayCycle<P::Timeout>,
@@ -146,7 +146,12 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         self.log
             .state_transition("Slave", "Master", "Announce receipt timeout expired");
 
-        PortState::master(self.port, self.bmca, self.log, self.timing_policy)
+        PortState::master(
+            self.port,
+            self.bmca.into_inner(),
+            self.log,
+            self.timing_policy,
+        )
     }
 
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
@@ -160,14 +165,24 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             .as_str(),
         );
 
-        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
+        decision.apply(
+            self.port,
+            self.bmca.into_inner(),
+            self.log,
+            self.timing_policy,
+        )
     }
 
     pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log
             .state_transition("Slave", "Pre-Master", "Recommended Master");
 
-        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
+        decision.apply(
+            self.port,
+            self.bmca.into_inner(),
+            self.log,
+            self.timing_policy,
+        )
     }
 }
 
@@ -199,7 +214,7 @@ impl<T: Timeout> DelayCycle<T> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, FullBmca};
+    use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, IncrementalBmca};
     use crate::clock::{ClockIdentity, FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
@@ -225,7 +240,10 @@ mod tests {
 
         let mut slave = SlavePort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             ParentPortIdentity::new(PortIdentity::fake()),
             FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
             DelayCycle::new(
@@ -272,7 +290,10 @@ mod tests {
 
         let mut slave = PortState::slave(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -304,7 +325,10 @@ mod tests {
 
         let mut slave = PortState::slave(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -333,7 +357,10 @@ mod tests {
 
         let mut slave = PortState::slave(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -354,7 +381,6 @@ mod tests {
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
         );
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -383,7 +409,10 @@ mod tests {
         // Create slave with a chosen parent
         let mut slave = SlavePort::new(
             domain_port,
-            bmca,
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(parent),
+            ),
             ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
@@ -435,7 +464,6 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -457,7 +485,10 @@ mod tests {
         // Create slave with chosen parent
         let mut slave = SlavePort::new(
             domain_port,
-            bmca,
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(parent),
+            ),
             ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
@@ -507,7 +538,6 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
         let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(5),
@@ -525,7 +555,10 @@ mod tests {
         // Create slave with parent
         let mut slave = SlavePort::new(
             domain_port,
-            bmca,
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(parent),
+            ),
             ParentPortIdentity::new(parent),
             announce_receipt_timeout,
             delay_cycle,
@@ -562,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn slave_port_produces_slave_recommendation_on_updated_same_parent() {
+    fn slave_port_produces_no_decision_on_updated_same_parent() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::low_grade_test_clock(),
@@ -591,7 +624,10 @@ mod tests {
 
         let mut slave = SlavePort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+                ParentPortIdentity::new(parent_port),
+            ),
             ParentPortIdentity::new(parent_port),
             announce_receipt_timeout,
             delay_cycle,
@@ -605,14 +641,8 @@ mod tests {
             parent_port,
         );
 
-        // expect a slave recommendation
-        assert_eq!(
-            decision,
-            Some(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
-                ParentPortIdentity::new(parent_port),
-                StepsRemoved::new(1)
-            )))
-        );
+        // expect a no decision since parent is unchanged
+        assert_eq!(decision, None);
     }
 
     #[test]
@@ -647,7 +677,10 @@ mod tests {
 
         let mut slave = SlavePort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+                ParentPortIdentity::new(parent_port),
+            ),
             ParentPortIdentity::new(parent_port),
             announce_receipt_timeout,
             delay_cycle,
@@ -711,7 +744,10 @@ mod tests {
 
         let mut slave = SlavePort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+                ParentPortIdentity::new(parent_port),
+            ),
             ParentPortIdentity::new(parent_port),
             announce_receipt_timeout,
             delay_cycle,

@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use tokio::sync::mpsc;
 
-use rptp::bmca::FullBmca;
+use rptp::bmca::IncrementalBmca;
 use rptp::clock::{LocalClock, SynchronizableClock};
 use rptp::infra::infra_support::SortedForeignClockRecordsVec;
 use rptp::message::SystemMessage;
@@ -22,7 +22,7 @@ pub fn ordinary_clock_port<'a, C, N>(
     port_number: PortNumber,
 ) -> PortState<
     Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
-    FullBmca<SortedForeignClockRecordsVec>,
+    IncrementalBmca<SortedForeignClockRecordsVec>,
     TracingPortLog,
 >
 where
@@ -37,7 +37,7 @@ where
         system_tx.clone(),
     );
 
-    let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+    let bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
     let timer_host = TokioTimerHost::new(domain_number, system_tx);
 
     let domain_port = Box::new(DomainPort::new(

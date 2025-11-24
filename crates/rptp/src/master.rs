@@ -163,7 +163,7 @@ impl<T: Timeout> SyncCycle<T> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, FullBmca};
+    use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, IncrementalBmca};
     use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
@@ -202,7 +202,7 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -243,7 +243,7 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -277,7 +277,7 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -318,7 +318,7 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -359,7 +359,7 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -391,7 +391,7 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -433,7 +433,7 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -484,7 +484,7 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -531,7 +531,7 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_cycle,
             sync_cycle,
             NoopPortLog,

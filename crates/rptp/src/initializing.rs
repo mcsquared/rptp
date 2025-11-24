@@ -32,7 +32,7 @@ impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{DefaultDS, FullBmca};
+    use crate::bmca::{DefaultDS, IncrementalBmca};
     use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
@@ -56,7 +56,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         ));

@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rptp::bmca::FullBmca;
+use rptp::bmca::IncrementalBmca;
 use rptp::clock::SynchronizableClock;
 use rptp::port::TimerHost;
 use tokio::sync::mpsc;
@@ -158,7 +158,7 @@ pub struct TokioPortsLoop<'a, C: SynchronizableClock, N: NetworkSocket> {
     local_clock: &'a LocalClock<C>,
     portmap: SingleDomainPortMap<
         Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
-        FullBmca<SortedForeignClockRecordsVec>,
+        IncrementalBmca<SortedForeignClockRecordsVec>,
         TracingPortLog,
     >,
     event_socket: Rc<N>,
@@ -171,7 +171,7 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
         local_clock: &'a LocalClock<C>,
         portmap: SingleDomainPortMap<
             Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
-            FullBmca<SortedForeignClockRecordsVec>,
+            IncrementalBmca<SortedForeignClockRecordsVec>,
             TracingPortLog,
         >,
         event_socket: Rc<N>,
@@ -261,7 +261,7 @@ mod tests {
     use futures::FutureExt;
     use tokio::time;
 
-    use rptp::bmca::{DefaultDS, Priority1, Priority2};
+    use rptp::bmca::{DefaultDS, ParentTrackingBmca, Priority1, Priority2};
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, StepsRemoved};
     use rptp::message::{EventMessage, GeneralMessage};
     use rptp::port::{
@@ -286,7 +286,7 @@ mod tests {
                         TokioTimerHost,
                     >,
                 >,
-                FullBmca<SortedForeignClockRecordsVec>,
+                IncrementalBmca<SortedForeignClockRecordsVec>,
                 TracingPortLog,
             >,
         >();
@@ -330,7 +330,7 @@ mod tests {
             domain_number,
             port_number,
         ));
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
         let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
         let log = TracingPortLog::new(port_identity);
         let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
@@ -418,7 +418,14 @@ mod tests {
             domain_number,
             port_number,
         ));
-        let bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
+        let parent_port_identity = ParentPortIdentity::new(PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+            PortNumber::new(1),
+        ));
+        let bmca = ParentTrackingBmca::new(
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            parent_port_identity,
+        );
         let announce_receipt_timeout = domain_port.timeout(
             SystemMessage::AnnounceReceiptTimeout,
             Duration::from_secs(10),
@@ -432,10 +439,7 @@ mod tests {
         let port_state = PortState::Slave(SlavePort::new(
             domain_port,
             bmca,
-            ParentPortIdentity::new(PortIdentity::new(
-                ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
-                PortNumber::new(1),
-            )),
+            parent_port_identity,
             announce_receipt_timeout,
             delay_cycle,
             log,

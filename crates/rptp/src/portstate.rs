@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use crate::bmca::{Bmca, BmcaMasterDecision, BmcaSlaveDecision, QualificationTimeoutPolicy};
+use crate::bmca::{
+    Bmca, BmcaMasterDecision, BmcaSlaveDecision, ParentTrackingBmca, QualificationTimeoutPolicy,
+};
 use crate::faulty::FaultyPort;
 use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
@@ -62,7 +64,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
 
     pub fn slave(
         port: P,
-        bmca: B,
+        bmca: ParentTrackingBmca<B>,
         parent_port_identity: ParentPortIdentity,
         log: L,
         timing_policy: PortTimingPolicy,
@@ -126,7 +128,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
 
     pub fn uncalibrated(
         port: P,
-        bmca: B,
+        bmca: ParentTrackingBmca<B>,
         log: L,
         parent_port_identity: ParentPortIdentity,
         timing_policy: PortTimingPolicy,
@@ -271,7 +273,7 @@ mod tests {
     use super::*;
 
     use crate::bmca::BmcaMasterDecisionPoint;
-    use crate::bmca::{DefaultDS, FullBmca};
+    use crate::bmca::{DefaultDS, IncrementalBmca};
     use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
@@ -294,7 +296,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -320,7 +322,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -347,7 +352,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -374,7 +379,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             NoopPortLog,
             ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
@@ -401,7 +409,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             NoopPortLog,
             ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
@@ -428,7 +439,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -457,7 +468,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -487,7 +498,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -515,7 +526,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -543,7 +554,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -570,7 +581,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -598,7 +609,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -624,7 +635,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -650,7 +661,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -677,7 +691,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -703,7 +717,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -732,7 +746,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -762,7 +776,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -793,7 +810,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -824,7 +841,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             NoopPortLog,
             ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
@@ -856,7 +876,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -885,7 +905,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -915,7 +938,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -944,7 +967,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -974,7 +997,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             NoopPortLog,
             ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
@@ -1006,7 +1032,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1032,7 +1058,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -1059,7 +1088,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1085,7 +1114,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -1114,7 +1143,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1140,7 +1169,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1166,7 +1195,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             ParentPortIdentity::new(PortIdentity::fake()),
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -1193,7 +1225,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1219,7 +1251,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -1246,7 +1278,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            FullBmca::new(SortedForeignClockRecordsVec::new()),
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
             NoopPortLog,
             ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
@@ -1261,7 +1296,7 @@ mod tests {
     fn portstate_faulty_to_faulty_transition() {
         let faulty: PortState<
             DomainPort<FakeClock, FakePort, FakeTimerHost>,
-            FullBmca<SortedForeignClockRecordsVec>,
+            IncrementalBmca<SortedForeignClockRecordsVec>,
             NoopPortLog,
         > = PortState::Faulty(FaultyPort::new());
 
