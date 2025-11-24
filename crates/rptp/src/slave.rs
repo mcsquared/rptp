@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision};
+use crate::bmca::{Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision};
 use crate::log::PortLog;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
@@ -159,6 +159,13 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             )
             .as_str(),
         );
+
+        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
+    }
+
+    pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
+        self.log
+            .state_transition("Slave", "Pre-Master", "Recommended Master");
 
         decision.apply(self.port, self.bmca, self.log, self.timing_policy)
     }
@@ -566,8 +573,7 @@ mod tests {
             PortNumber::new(1),
         );
         let foreign_clock_ds = ForeignClockDS::mid_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds)
-            .with_qualified_clock(foreign_clock_ds)];
+        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds).qualify()];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -623,8 +629,7 @@ mod tests {
             PortNumber::new(1),
         );
         let foreign_clock_ds = ForeignClockDS::mid_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds)
-            .with_qualified_clock(foreign_clock_ds)];
+        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds).qualify()];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -674,6 +679,57 @@ mod tests {
                 StepsRemoved::new(1),
             )))
         );
+    }
+
+    #[test]
+    fn slave_port_produces_master_recommendation_on_worse_announces() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+        let parent_port = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            PortNumber::new(1),
+        );
+        let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
+        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds).qualify()];
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+        let delay_timeout =
+            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+
+        let mut slave = SlavePort::new(
+            domain_port,
+            FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+            ParentPortIdentity::new(parent_port),
+            announce_receipt_timeout,
+            delay_cycle,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        // Receive a worse announce from the current parent
+        let decision = slave.process_announce(
+            AnnounceMessage::new(42.into(), ForeignClockDS::low_grade_test_clock()),
+            parent_port,
+        );
+
+        // expect a master recommendation since local clock is better
+        assert!(matches!(
+            decision,
+            Some(StateDecision::RecommendedMaster(_))
+        ));
     }
 
     #[test]

@@ -684,11 +684,10 @@ pub(crate) mod tests {
     }
 
     impl ForeignClockRecord {
-        pub(crate) fn with_qualified_clock(self, foreign_clock_ds: ForeignClockDS) -> Self {
+        pub(crate) fn qualify(self) -> Self {
             Self {
-                source_port_identity: self.source_port_identity,
-                foreign_clock_ds,
                 validation_cnt: Self::FOREIGN_MASTER_THRESHOLD,
+                ..self
             }
         }
     }

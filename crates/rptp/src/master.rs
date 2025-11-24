@@ -462,10 +462,8 @@ mod tests {
             StepsRemoved::new(0),
         );
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
-        let prior_records = [
-            ForeignClockRecord::new(PortIdentity::fake(), foreign_clock_ds)
-                .with_qualified_clock(foreign_clock_ds),
-        ];
+        let prior_records =
+            [ForeignClockRecord::new(PortIdentity::fake(), foreign_clock_ds).qualify()];
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
