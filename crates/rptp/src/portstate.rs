@@ -9,7 +9,7 @@ use crate::listening::ListeningPort;
 use crate::log::PortLog;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy};
+use crate::port::{Port, PortIdentity, PortTimingPolicy};
 use crate::premaster::PreMasterPort;
 use crate::slave::{DelayCycle, SlavePort};
 use crate::time::TimeStamp;
@@ -128,7 +128,6 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         port: P,
         bmca: ParentTrackingBmca<B>,
         log: L,
-        parent_port_identity: ParentPortIdentity,
         timing_policy: PortTimingPolicy,
     ) -> Self {
         let announce_receipt_timeout = port.timeout(
@@ -141,7 +140,6 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
             bmca,
             announce_receipt_timeout,
             log,
-            parent_port_identity,
             timing_policy,
         ))
     }
@@ -276,7 +274,7 @@ mod tests {
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
     use crate::port::test_support::{FakePort, FakeTimerHost};
-    use crate::port::{DomainNumber, DomainPort, PortNumber};
+    use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
 
     #[test]
     fn portstate_listening_to_master_transition() {
@@ -381,7 +379,6 @@ mod tests {
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
             NoopPortLog,
-            ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
         );
 
@@ -411,7 +408,6 @@ mod tests {
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
             NoopPortLog,
-            ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
         );
 
@@ -841,7 +837,6 @@ mod tests {
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
             NoopPortLog,
-            ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
         );
 
@@ -996,7 +991,6 @@ mod tests {
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
             NoopPortLog,
-            ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
         );
 
@@ -1275,7 +1269,6 @@ mod tests {
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
             NoopPortLog,
-            ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
         );
 

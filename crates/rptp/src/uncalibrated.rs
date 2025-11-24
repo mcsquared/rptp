@@ -1,7 +1,7 @@
 use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision, ParentTrackingBmca};
 use crate::log::PortLog;
 use crate::message::AnnounceMessage;
-use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy, Timeout};
+use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
 use crate::portstate::{PortState, StateDecision};
 
 pub struct UncalibratedPort<P: Port, B: Bmca, L: PortLog> {
@@ -9,7 +9,6 @@ pub struct UncalibratedPort<P: Port, B: Bmca, L: PortLog> {
     bmca: ParentTrackingBmca<B>,
     announce_receipt_timeout: P::Timeout,
     log: L,
-    parent_port_identity: ParentPortIdentity,
     timing_policy: PortTimingPolicy,
 }
 
@@ -19,7 +18,6 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         bmca: ParentTrackingBmca<B>,
         announce_receipt_timeout: P::Timeout,
         log: L,
-        parent_port_identity: ParentPortIdentity,
         timing_policy: PortTimingPolicy,
     ) -> Self {
         Self {
@@ -27,7 +25,6 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
             bmca,
             announce_receipt_timeout,
             log,
-            parent_port_identity,
             timing_policy,
         }
     }
@@ -51,7 +48,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
             BmcaDecision::Slave(decision) => Some(StateDecision::RecommendedSlave(decision)),
             BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
             BmcaDecision::Undecided => {
-                if self.parent_port_identity.matches(&source_port_identity) {
+                if self.bmca.matches_parent(&source_port_identity) {
                     Some(StateDecision::MasterClockSelected)
                 } else {
                     None
@@ -64,11 +61,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         self.log.state_transition(
             "Uncalibrated",
             "Slave",
-            format!(
-                "Master clock selected, parent {}",
-                self.parent_port_identity
-            )
-            .as_str(),
+            format!("Master clock selected, parent {}", self.bmca.parent()).as_str(),
         );
 
         PortState::slave(self.port, self.bmca, self.log, self.timing_policy)
@@ -118,7 +111,7 @@ mod tests {
     use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
     use crate::port::test_support::{FakePort, FakeTimerHost};
-    use crate::port::{DomainNumber, DomainPort, PortNumber};
+    use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::portstate::PortState;
 
     #[test]
@@ -154,7 +147,6 @@ mod tests {
             ),
             announce_receipt_timeout,
             NoopPortLog,
-            ParentPortIdentity::new(parent_port),
             PortTimingPolicy::default(),
         );
 
@@ -214,7 +206,6 @@ mod tests {
             ),
             announce_receipt_timeout,
             NoopPortLog,
-            ParentPortIdentity::new(parent_port),
             PortTimingPolicy::default(),
         );
 
@@ -253,7 +244,6 @@ mod tests {
             ),
             announce_receipt_timeout,
             NoopPortLog,
-            ParentPortIdentity::new(PortIdentity::fake()),
             PortTimingPolicy::default(),
         ));
 

@@ -429,13 +429,7 @@ impl BmcaSlaveDecision {
     ) -> PortState<P, B, L> {
         let parent_tracking_bmca = ParentTrackingBmca::new(bmca, self.parent_port_identity);
 
-        PortState::uncalibrated(
-            port,
-            parent_tracking_bmca,
-            log,
-            self.parent_port_identity,
-            timing_policy,
-        )
+        PortState::uncalibrated(port, parent_tracking_bmca, log, timing_policy)
     }
 }
 
@@ -487,6 +481,10 @@ impl<B: Bmca> ParentTrackingBmca<B> {
             inner,
             parent_port_identity: Cell::new(parent_port_identity),
         }
+    }
+
+    pub fn parent(&self) -> ParentPortIdentity {
+        self.parent_port_identity.get()
     }
 
     pub fn matches_parent(&self, source: &PortIdentity) -> bool {
