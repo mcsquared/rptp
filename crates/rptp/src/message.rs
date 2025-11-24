@@ -1,5 +1,5 @@
 use crate::{
-    bmca::ForeignClockDS,
+    bmca::{Bmca, ForeignClockDS},
     buffer::{ControlField, FinalizedBuffer, MessageBuffer, MessageFlags, MessageType},
     port::{DomainNumber, PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
@@ -188,36 +188,30 @@ impl TryFrom<&[u8]> for SequenceId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnnounceMessage {
     sequence_id: SequenceId,
-    foreign_clock: ForeignClockDS,
+    foreign_clock_ds: ForeignClockDS,
 }
 
 impl AnnounceMessage {
-    pub fn new(sequence_id: SequenceId, foreign_clock: ForeignClockDS) -> Self {
+    pub fn new(sequence_id: SequenceId, foreign_clock_ds: ForeignClockDS) -> Self {
         Self {
             sequence_id,
-            foreign_clock,
+            foreign_clock_ds,
         }
     }
 
     pub fn from_slice(buf: &[u8]) -> Result<Self> {
         let sequence_id = SequenceId::try_from(&buf[30..32])?;
-        let foreign_clock =
+        let foreign_clock_ds =
             ForeignClockDS::from_slice(&buf[47..63].try_into().map_err(|_| ParseError::BadLength)?);
 
         Ok(Self {
             sequence_id,
-            foreign_clock,
+            foreign_clock_ds,
         })
     }
 
-    pub fn follows(&self, previous: AnnounceMessage) -> Option<ForeignClockDS> {
-        if self.sequence_id.follows(previous.sequence_id)
-            && self.foreign_clock == previous.foreign_clock
-        {
-            Some(self.foreign_clock)
-        } else {
-            None
-        }
+    pub fn feed_bmca(self, bmca: &mut impl Bmca, source_port_identity: PortIdentity) {
+        bmca.consider(source_port_identity, self.foreign_clock_ds)
     }
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
@@ -228,7 +222,7 @@ impl AnnounceMessage {
             .payload();
 
         let payload_buf = payload.buf();
-        payload_buf[13..29].copy_from_slice(&self.foreign_clock.to_bytes());
+        payload_buf[13..29].copy_from_slice(&self.foreign_clock_ds.to_bytes());
 
         payload.finalize(30)
     }

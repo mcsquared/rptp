@@ -1,7 +1,9 @@
 pub mod infra_support {
     use std::rc::Rc;
 
-    use crate::bmca::{ForeignClockRecord, SortedForeignClockRecords};
+    use crate::bmca::{
+        ForeignClockRecord, ForeignClockResult, ForeignClockStatus, SortedForeignClockRecords,
+    };
     use crate::clock::{Clock, FakeClock, LocalClock, SynchronizableClock};
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
     use crate::port::{Port, PortIdentity};
@@ -83,20 +85,26 @@ pub mod infra_support {
             self.sort_records();
         }
 
-        fn update_record<F>(&mut self, source_port_identity: &PortIdentity, update: F) -> bool
+        fn update_record<F>(
+            &mut self,
+            source_port_identity: &PortIdentity,
+            update: F,
+        ) -> ForeignClockResult
         where
-            F: FnOnce(&mut ForeignClockRecord),
+            F: FnOnce(&mut ForeignClockRecord) -> ForeignClockStatus,
         {
             if let Some(record) = self
                 .records
                 .iter_mut()
                 .find(|r| r.same_source_as(source_port_identity))
             {
-                update(record);
-                self.sort_records();
-                true
+                let status = update(record);
+                if let ForeignClockStatus::Updated = status {
+                    self.sort_records();
+                }
+                ForeignClockResult::Status(status)
             } else {
-                false
+                ForeignClockResult::NotFound
             }
         }
 
@@ -110,9 +118,13 @@ pub mod infra_support {
             self.as_mut().insert(record);
         }
 
-        fn update_record<F>(&mut self, source_port_identity: &PortIdentity, update: F) -> bool
+        fn update_record<F>(
+            &mut self,
+            source_port_identity: &PortIdentity,
+            update: F,
+        ) -> ForeignClockResult
         where
-            F: FnOnce(&mut ForeignClockRecord),
+            F: FnOnce(&mut ForeignClockRecord) -> ForeignClockStatus,
         {
             self.as_mut().update_record(source_port_identity, update)
         }
@@ -127,7 +139,6 @@ pub mod infra_support {
         use super::*;
         use crate::bmca::ForeignClockDS;
         use crate::clock::ClockIdentity;
-        use crate::message::AnnounceMessage;
         use crate::port::{PortIdentity, PortNumber};
 
         #[test]
@@ -151,30 +162,15 @@ pub mod infra_support {
                 PortNumber::new(1),
             );
 
-            records.insert(ForeignClockRecord::new(
-                high_port_id,
-                AnnounceMessage::new(0.into(), high_clock),
-            ));
-            records.insert(ForeignClockRecord::new(
-                low_port_id,
-                AnnounceMessage::new(0.into(), low_clock),
-            ));
-            records.insert(ForeignClockRecord::new(
-                mid_port_id,
-                AnnounceMessage::new(0.into(), mid_clock),
-            ));
+            records.insert(ForeignClockRecord::new(high_port_id, high_clock));
+            records.insert(ForeignClockRecord::new(low_port_id, low_clock));
+            records.insert(ForeignClockRecord::new(mid_port_id, mid_clock));
 
-            records.update_record(&high_port_id, |record| {
-                record.consider(AnnounceMessage::new(1.into(), high_clock));
-            });
-            records.update_record(&low_port_id, |record| {
-                record.consider(AnnounceMessage::new(1.into(), low_clock));
-            });
-            records.update_record(&mid_port_id, |record| {
-                record.consider(AnnounceMessage::new(1.into(), mid_clock));
-            });
+            records.update_record(&high_port_id, |record| record.consider(high_clock));
+            records.update_record(&low_port_id, |record| record.consider(low_clock));
+            records.update_record(&mid_port_id, |record| record.consider(mid_clock));
 
-            let best_clock = records.first().and_then(|record| record.clock());
+            let best_clock = records.first().and_then(|record| record.dataset());
             assert_eq!(best_clock, Some(&high_clock));
         }
     }

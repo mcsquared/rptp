@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::ops::Range;
 use std::time::Duration;
 
@@ -9,9 +10,13 @@ use crate::portstate::PortState;
 
 pub trait SortedForeignClockRecords {
     fn insert(&mut self, record: ForeignClockRecord);
-    fn update_record<F>(&mut self, source_port_identity: &PortIdentity, update: F) -> bool
+    fn update_record<F>(
+        &mut self,
+        source_port_identity: &PortIdentity,
+        update: F,
+    ) -> ForeignClockResult
     where
-        F: FnOnce(&mut ForeignClockRecord);
+        F: FnOnce(&mut ForeignClockRecord) -> ForeignClockStatus;
     fn first(&self) -> Option<&ForeignClockRecord>;
 }
 
@@ -254,18 +259,31 @@ impl DefaultDS {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForeignClockStatus {
+    Unchanged,
+    Updated,
+}
+
+pub enum ForeignClockResult {
+    NotFound,
+    Status(ForeignClockStatus),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ForeignClockRecord {
     source_port_identity: PortIdentity,
-    last_announce: AnnounceMessage,
-    foreign_clock: Option<ForeignClockDS>,
+    foreign_clock_ds: ForeignClockDS,
+    validation_cnt: u8,
 }
 
 impl ForeignClockRecord {
-    pub fn new(source_port_identity: PortIdentity, announce: AnnounceMessage) -> Self {
+    const FOREIGN_MASTER_THRESHOLD: u8 = 2; // IEEE 1588-2019 Section 9.3.2.4.4
+
+    pub fn new(source_port_identity: PortIdentity, foreign_clock_ds: ForeignClockDS) -> Self {
         Self {
             source_port_identity,
-            last_announce: announce,
-            foreign_clock: None,
+            foreign_clock_ds,
+            validation_cnt: 1,
         }
     }
 
@@ -273,23 +291,37 @@ impl ForeignClockRecord {
         self.source_port_identity == *source_port_identity
     }
 
-    pub fn consider(&mut self, announce: AnnounceMessage) -> Option<&ForeignClockDS> {
-        if let Some(clock) = announce.follows(self.last_announce) {
-            self.foreign_clock = Some(clock);
-        } else {
-            self.foreign_clock = None;
+    pub fn consider(&mut self, foreign_clock_ds: ForeignClockDS) -> ForeignClockStatus {
+        let was_qualified = self.is_qualified();
+        self.validation_cnt = self.validation_cnt.saturating_add(1);
+        let now_qualified = self.is_qualified();
+
+        let data_set_changed = self.foreign_clock_ds != foreign_clock_ds;
+        if data_set_changed {
+            self.foreign_clock_ds = foreign_clock_ds;
         }
 
-        self.last_announce = announce;
-        self.foreign_clock.as_ref()
+        if now_qualified && (!was_qualified || data_set_changed) {
+            ForeignClockStatus::Updated
+        } else {
+            ForeignClockStatus::Unchanged
+        }
     }
 
-    pub fn clock(&self) -> Option<&ForeignClockDS> {
-        self.foreign_clock.as_ref()
+    pub fn dataset(&self) -> Option<&ForeignClockDS> {
+        if self.validation_cnt >= Self::FOREIGN_MASTER_THRESHOLD {
+            Some(&self.foreign_clock_ds)
+        } else {
+            None
+        }
     }
 
     pub fn source_port_identity(&self) -> PortIdentity {
         self.source_port_identity
+    }
+
+    fn is_qualified(&self) -> bool {
+        self.validation_cnt >= Self::FOREIGN_MASTER_THRESHOLD
     }
 }
 
@@ -297,11 +329,11 @@ impl Ord for ForeignClockRecord {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering::*;
 
-        let ord = match (self.clock(), other.clock()) {
-            (Some(&clock1), Some(&clock2)) => {
-                if clock1.better_than(&clock2) {
+        let ord = match (self.dataset(), other.dataset()) {
+            (Some(&ds1), Some(&ds2)) => {
+                if ds1.better_than(&ds2) {
                     Less
-                } else if clock2.better_than(&clock1) {
+                } else if ds2.better_than(&ds1) {
                     Greater
                 } else {
                     Equal
@@ -400,46 +432,62 @@ impl BmcaSlaveDecision {
 }
 
 pub trait Bmca {
-    fn consider(&mut self, source_port_identity: PortIdentity, announce: AnnounceMessage);
+    fn consider(&mut self, source_port_identity: PortIdentity, foreign_clock_ds: ForeignClockDS);
     fn decision<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> BmcaDecision;
 }
 
 pub struct FullBmca<S: SortedForeignClockRecords> {
     sorted_clock_records: S,
+    dirty: Cell<bool>,
 }
 
 impl<S: SortedForeignClockRecords> FullBmca<S> {
     pub fn new(sorted_clock_records: S) -> Self {
         Self {
             sorted_clock_records,
+            dirty: Cell::new(false),
+        }
+    }
+
+    fn note_change(&self, status: ForeignClockStatus) {
+        if status == ForeignClockStatus::Updated {
+            self.dirty.set(true);
         }
     }
 }
 
 impl<S: SortedForeignClockRecords> Bmca for FullBmca<S> {
-    fn consider(&mut self, source_port_identity: PortIdentity, announce: AnnounceMessage) {
-        let updated = self
+    fn consider(&mut self, source_port_identity: PortIdentity, foreign_clock_ds: ForeignClockDS) {
+        let result = self
             .sorted_clock_records
             .update_record(&source_port_identity, |record| {
-                record.consider(announce);
+                record.consider(foreign_clock_ds)
             });
 
-        if !updated {
-            self.sorted_clock_records
-                .insert(ForeignClockRecord::new(source_port_identity, announce));
+        match result {
+            ForeignClockResult::NotFound => {
+                self.sorted_clock_records.insert(ForeignClockRecord::new(
+                    source_port_identity,
+                    foreign_clock_ds,
+                ));
+            }
+            ForeignClockResult::Status(status) => self.note_change(status),
         }
     }
 
     // IEEE 1588-2019 Section 9.3.3 - BMCA State Decision Algorithm
     // Note: variable names correspond to those in the spec for easier reference.
     fn decision<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> BmcaDecision {
-        let d_0 = local_clock;
+        let dirty = self.dirty.replace(false);
+        if !dirty {
+            return BmcaDecision::Undecided;
+        }
 
+        let d_0 = local_clock;
         let Some(e_rbest_record) = self.sorted_clock_records.first() else {
             return BmcaDecision::Undecided;
         };
-
-        let Some(e_rbest) = e_rbest_record.clock() else {
+        let Some(e_rbest) = e_rbest_record.dataset() else {
             return BmcaDecision::Undecided;
         };
 
@@ -501,9 +549,10 @@ impl Bmca for NoopBmca {
     fn consider(
         &mut self,
         _source_port_identity: crate::port::PortIdentity,
-        _announce: crate::message::AnnounceMessage,
+        _foreign_clock_ds: ForeignClockDS,
     ) {
     }
+
     fn decision<C: crate::clock::SynchronizableClock>(
         &self,
         _local_clock: &LocalClock<C>,
@@ -635,11 +684,11 @@ pub(crate) mod tests {
     }
 
     impl ForeignClockRecord {
-        pub(crate) fn with_resolved_clock(self, foreign_clock: ForeignClockDS) -> Self {
+        pub(crate) fn with_qualified_clock(self, foreign_clock_ds: ForeignClockDS) -> Self {
             Self {
                 source_port_identity: self.source_port_identity,
-                last_announce: self.last_announce,
-                foreign_clock: Some(foreign_clock),
+                foreign_clock_ds,
+                validation_cnt: Self::FOREIGN_MASTER_THRESHOLD,
             }
         }
     }
@@ -788,8 +837,8 @@ pub(crate) mod tests {
         );
         let port_id = PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1));
 
-        bmca.consider(port_id, AnnounceMessage::new(0.into(), foreign_strong));
-        bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign_strong));
+        bmca.consider(port_id, foreign_strong);
+        bmca.consider(port_id, foreign_strong);
 
         assert_eq!(bmca.decision(&local_clock), BmcaDecision::Passive);
     }
@@ -807,8 +856,8 @@ pub(crate) mod tests {
         let foreign = ForeignClockDS::mid_grade_test_clock();
         let port_id = PortIdentity::new(CLK_ID_MID, PortNumber::new(1));
 
-        bmca.consider(port_id, AnnounceMessage::new(0.into(), foreign));
-        bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign));
+        bmca.consider(port_id, foreign);
+        bmca.consider(port_id, foreign);
 
         assert_eq!(
             bmca.decision(&local_clock),
@@ -832,8 +881,8 @@ pub(crate) mod tests {
         let foreign = ForeignClockDS::low_grade_test_clock();
         let port_id = PortIdentity::new(CLK_ID_LOW, PortNumber::new(1));
 
-        bmca.consider(port_id, AnnounceMessage::new(0.into(), foreign));
-        bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign));
+        bmca.consider(port_id, foreign);
+        bmca.consider(port_id, foreign);
 
         assert_eq!(
             bmca.decision(&local_clock),
@@ -856,8 +905,8 @@ pub(crate) mod tests {
         let foreign = ForeignClockDS::high_grade_test_clock();
         let port_id = PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1));
 
-        bmca.consider(port_id, AnnounceMessage::new(0.into(), foreign));
-        bmca.consider(port_id, AnnounceMessage::new(1.into(), foreign));
+        bmca.consider(port_id, foreign);
+        bmca.consider(port_id, foreign);
 
         assert_eq!(
             bmca.decision(&local_clock),
@@ -889,10 +938,10 @@ pub(crate) mod tests {
             PortNumber::new(1),
         );
 
-        bmca.consider(port_id_high, AnnounceMessage::new(0.into(), foreign_high));
-        bmca.consider(port_id_mid, AnnounceMessage::new(0.into(), foreign_mid));
-        bmca.consider(port_id_high, AnnounceMessage::new(1.into(), foreign_high));
-        bmca.consider(port_id_mid, AnnounceMessage::new(1.into(), foreign_mid));
+        bmca.consider(port_id_high, foreign_high);
+        bmca.consider(port_id_mid, foreign_mid);
+        bmca.consider(port_id_high, foreign_high);
+        bmca.consider(port_id_mid, foreign_mid);
 
         let decision = bmca.decision(&local_clock);
 
@@ -926,10 +975,10 @@ pub(crate) mod tests {
             PortNumber::new(1),
         );
 
-        bmca.consider(port_id_high, AnnounceMessage::new(0.into(), foreign_high));
-        bmca.consider(port_id_high, AnnounceMessage::new(1.into(), foreign_high));
-        bmca.consider(port_id_mid, AnnounceMessage::new(0.into(), foreign_mid));
-        bmca.consider(port_id_mid, AnnounceMessage::new(1.into(), foreign_mid));
+        bmca.consider(port_id_high, foreign_high);
+        bmca.consider(port_id_high, foreign_high);
+        bmca.consider(port_id_mid, foreign_mid);
+        bmca.consider(port_id_mid, foreign_mid);
 
         let decision = bmca.decision(&local_clock);
 
@@ -965,10 +1014,7 @@ pub(crate) mod tests {
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        bmca.consider(
-            PortIdentity::fake(),
-            AnnounceMessage::new(0.into(), foreign_high),
-        );
+        bmca.consider(PortIdentity::fake(), foreign_high);
 
         assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
@@ -987,71 +1033,16 @@ pub(crate) mod tests {
         let foreign_low = ForeignClockDS::low_grade_test_clock();
 
         bmca.consider(
-            PortIdentity::fake(),
-            AnnounceMessage::new(0.into(), foreign_high),
+            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(0)),
+            foreign_high,
         );
         bmca.consider(
-            PortIdentity::fake(),
-            AnnounceMessage::new(5.into(), foreign_mid),
+            PortIdentity::new(CLK_ID_MID, PortNumber::new(0)),
+            foreign_mid,
         );
         bmca.consider(
-            PortIdentity::fake(),
-            AnnounceMessage::new(10.into(), foreign_low),
-        );
-
-        assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
-    }
-
-    #[test]
-    fn full_bmca_undecided_on_sequence_gap() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-        );
-        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
-
-        let foreign_high = ForeignClockDS::high_grade_test_clock();
-
-        bmca.consider(
-            PortIdentity::fake(),
-            AnnounceMessage::new(0.into(), foreign_high),
-        );
-        bmca.consider(
-            PortIdentity::fake(),
-            AnnounceMessage::new(2.into(), foreign_high),
-        );
-
-        assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
-    }
-
-    #[test]
-    fn full_bmca_undecided_on_sequence_gap_after_being_qualified_before() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-        );
-        let mut bmca = FullBmca::new(SortedForeignClockRecordsVec::new());
-        let foreign_high = ForeignClockDS::high_grade_test_clock();
-
-        bmca.consider(
-            PortIdentity::fake(),
-            AnnounceMessage::new(0.into(), foreign_high),
-        );
-        bmca.consider(
-            PortIdentity::fake(),
-            AnnounceMessage::new(1.into(), foreign_high),
-        );
-
-        assert!(matches!(
-            bmca.decision(&local_clock),
-            BmcaDecision::Slave(_)
-        ));
-
-        bmca.consider(
-            PortIdentity::fake(),
-            AnnounceMessage::new(3.into(), foreign_high),
+            PortIdentity::new(CLK_ID_LOW, PortNumber::new(0)),
+            foreign_low,
         );
 
         assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);

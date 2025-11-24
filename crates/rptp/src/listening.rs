@@ -54,7 +54,7 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
         self.log.state_transition(
             "Listening",
             "Master",
-            "Announce receipt timeout expired, becoming to Master",
+            "Announce receipt timeout expired, becoming Master",
         );
 
         PortState::master(self.port, self.bmca, self.log, self.timing_policy)
@@ -68,7 +68,8 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
         self.log.message_received("Announce");
         self.announce_receipt_timeout
             .restart(self.timing_policy.announce_receipt_timeout_interval());
-        self.bmca.consider(source_port_identity, msg);
+
+        msg.feed_bmca(&mut self.bmca, source_port_identity);
 
         match self.bmca.decision(self.port.local_clock()) {
             BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),

@@ -52,17 +52,12 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         self.log.message_received("Announce");
         self.announce_receipt_timeout
             .restart(self.timing_policy.announce_receipt_timeout_interval());
-        self.bmca.consider(source_port_identity, msg);
+
+        msg.feed_bmca(&mut self.bmca, source_port_identity);
 
         match self.bmca.decision(self.port.local_clock()) {
             BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
-            BmcaDecision::Slave(decision) => {
-                if self.parent_port_identity != *decision.parent_port_identity() {
-                    Some(StateDecision::RecommendedSlave(decision))
-                } else {
-                    None
-                }
-            }
+            BmcaDecision::Slave(decision) => Some(StateDecision::RecommendedSlave(decision)),
             BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
             BmcaDecision::Undecided => None,
         }

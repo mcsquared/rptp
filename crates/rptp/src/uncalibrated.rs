@@ -40,13 +40,23 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         self.log.message_received("Announce");
         self.announce_receipt_timeout
             .restart(self.timing_policy.announce_receipt_timeout_interval());
-        self.bmca.consider(source_port_identity, msg);
 
+        msg.feed_bmca(&mut self.bmca, source_port_identity);
+
+        // TODO: real calibration behaviour is yet to be implemented. For now, we just return
+        // MasterClockSelected on the first announce from the current parent, as long as the
+        // BMCA does not decide otherwise.
         match self.bmca.decision(self.port.local_clock()) {
             BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
-            BmcaDecision::Slave(_) => Some(StateDecision::MasterClockSelected),
+            BmcaDecision::Slave(decision) => Some(StateDecision::RecommendedSlave(decision)),
             BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
-            BmcaDecision::Undecided => None,
+            BmcaDecision::Undecided => {
+                if self.parent_port_identity.matches(&source_port_identity) {
+                    Some(StateDecision::MasterClockSelected)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -94,18 +104,16 @@ mod tests {
     use crate::portstate::PortState;
 
     #[test]
-    fn uncalibrated_port_to_slave_transition_on_following_announce() {
+    fn uncalibrated_port_becomes_slave_on_next_announce_from_parent() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
         );
+        let parent_port = PortIdentity::fake();
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(
-            PortIdentity::fake(),
-            AnnounceMessage::new(41.into(), foreign_clock_ds),
-        )
-        .with_resolved_clock(foreign_clock_ds)];
+        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds)
+            .with_qualified_clock(foreign_clock_ds)];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -123,19 +131,16 @@ mod tests {
             FullBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
             announce_receipt_timeout,
             NoopPortLog,
-            ParentPortIdentity::new(PortIdentity::fake()),
+            ParentPortIdentity::new(parent_port),
             PortTimingPolicy::default(),
         );
 
-        let transition = uncalibrated.process_announce(
+        let decision = uncalibrated.process_announce(
             AnnounceMessage::new(42.into(), foreign_clock_ds),
             PortIdentity::fake(),
         );
 
-        assert!(matches!(
-            transition,
-            Some(StateDecision::MasterClockSelected)
-        ));
+        assert!(matches!(decision, Some(StateDecision::MasterClockSelected)));
     }
 
     #[test]
