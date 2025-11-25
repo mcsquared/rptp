@@ -1,4 +1,4 @@
-use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision, ParentTrackingBmca};
+use crate::bmca::{Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, ParentTrackingBmca};
 use crate::log::PortLog;
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
@@ -79,6 +79,18 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         )
     }
 
+    pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
+        self.log
+            .state_transition("Uncalibrated", "Pre-Master", "Recommended Master");
+
+        decision.apply(
+            self.port,
+            self.bmca.into_inner(),
+            self.log,
+            self.timing_policy,
+        )
+    }
+
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
         self.log.state_transition(
             "Uncalibrated",
@@ -105,7 +117,10 @@ mod tests {
 
     use std::time::Duration;
 
-    use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, IncrementalBmca};
+    use crate::bmca::{
+        BmcaMasterDecision, BmcaMasterDecisionPoint, DefaultDS, ForeignClockDS, ForeignClockRecord,
+        IncrementalBmca,
+    };
     use crate::clock::{ClockIdentity, FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
@@ -253,5 +268,111 @@ mod tests {
             transition,
             Some(StateDecision::AnnounceReceiptTimeoutExpired)
         ));
+    }
+
+    #[test]
+    fn uncalibrated_port_produces_m1_master_recommendation_when_local_better_than_foreign() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::gm_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+        let parent_port = PortIdentity::fake();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+
+        let mut uncalibrated = UncalibratedPort::new(
+            domain_port,
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(parent_port),
+            ),
+            announce_receipt_timeout,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        let foreign_clock = ForeignClockDS::mid_grade_test_clock();
+        let foreign_port = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0xAA, 0xAA, 0xAA]),
+            PortNumber::new(1),
+        );
+
+        // First announce qualifies the foreign record but yields no decision yet.
+        let _ = uncalibrated
+            .process_announce(AnnounceMessage::new(42.into(), foreign_clock), foreign_port);
+
+        // Second announce from the same foreign clock drives BMCA to a Master(M1) decision.
+        let decision = uncalibrated
+            .process_announce(AnnounceMessage::new(43.into(), foreign_clock), foreign_port);
+
+        assert_eq!(
+            decision,
+            Some(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+                BmcaMasterDecisionPoint::M1,
+                StepsRemoved::new(0)
+            )))
+        );
+    }
+
+    #[test]
+    fn uncalibrated_port_produces_m2_master_recommendation_when_non_gm_local_better_than_foreign() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+        let parent_port = PortIdentity::fake();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+
+        let mut uncalibrated = UncalibratedPort::new(
+            domain_port,
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(parent_port),
+            ),
+            announce_receipt_timeout,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        let foreign_clock = ForeignClockDS::low_grade_test_clock();
+        let foreign_port = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0xBB, 0xBB, 0xBB]),
+            PortNumber::new(1),
+        );
+
+        let _ = uncalibrated
+            .process_announce(AnnounceMessage::new(42.into(), foreign_clock), foreign_port);
+
+        let decision = uncalibrated
+            .process_announce(AnnounceMessage::new(43.into(), foreign_clock), foreign_port);
+
+        assert_eq!(
+            decision,
+            Some(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+                BmcaMasterDecisionPoint::M2,
+                StepsRemoved::new(0)
+            )))
+        );
     }
 }

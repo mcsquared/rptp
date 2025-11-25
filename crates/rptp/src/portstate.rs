@@ -168,7 +168,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
             },
             StateDecision::RecommendedMaster(decision) => match self {
                 PortState::Listening(listening) => listening.recommended_master(decision),
-                PortState::Uncalibrated(_) => PortState::Unimplemented,
+                PortState::Uncalibrated(uncalibrated) => uncalibrated.recommended_master(decision),
                 PortState::Master(_) => PortState::Unimplemented,
                 PortState::Slave(slave) => slave.recommended_master(decision),
                 _ => PortState::Faulty(FaultyPort::new()),
@@ -971,7 +971,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_uncalibrated_to_pre_master_unimplemented_transition() {
+    fn portstate_uncalibrated_to_pre_master_transition() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
@@ -999,7 +999,7 @@ mod tests {
             StepsRemoved::new(0),
         )));
 
-        assert!(matches!(result, PortState::Unimplemented));
+        assert!(matches!(result, PortState::PreMaster(_)));
     }
 
     // Tests for unimplemented/illegal ToListening transitions
