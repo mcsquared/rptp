@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use crate::bmca::{Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, ParentTrackingBmca};
+use crate::bmca::{
+    Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
+    ParentTrackingBmca,
+};
 use crate::log::PortLog;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
@@ -143,12 +146,9 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         self.log
             .state_transition("Slave", "Master", "Announce receipt timeout expired");
 
-        PortState::master(
-            self.port,
-            self.bmca.into_inner(),
-            self.log,
-            self.timing_policy,
-        )
+        let bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
+
+        PortState::master(self.port, bmca, self.log, self.timing_policy)
     }
 
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {

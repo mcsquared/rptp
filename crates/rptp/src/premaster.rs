@@ -1,4 +1,4 @@
-use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision};
+use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision, LocalMasterTrackingBmca};
 use crate::log::PortLog;
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity, PortTimingPolicy};
@@ -6,7 +6,7 @@ use crate::portstate::{PortState, StateDecision};
 
 pub struct PreMasterPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
-    bmca: B,
+    bmca: LocalMasterTrackingBmca<B>,
     _qualification_timeout: P::Timeout,
     log: L,
     timing_policy: PortTimingPolicy,
@@ -15,7 +15,7 @@ pub struct PreMasterPort<P: Port, B: Bmca, L: PortLog> {
 impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
     pub fn new(
         port: P,
-        bmca: B,
+        bmca: LocalMasterTrackingBmca<B>,
         _qualification_timeout: P::Timeout,
         log: L,
         timing_policy: PortTimingPolicy,
@@ -64,7 +64,12 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
             .as_str(),
         );
 
-        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
+        decision.apply(
+            self.port,
+            self.bmca.into_inner(),
+            self.log,
+            self.timing_policy,
+        )
     }
 }
 
@@ -104,7 +109,9 @@ mod tests {
 
         let _ = PreMasterPort::new(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             qualification_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -133,7 +140,9 @@ mod tests {
 
         let mut pre_master = PortState::PreMaster(PreMasterPort::new(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             qualification_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -175,7 +184,9 @@ mod tests {
 
         let mut pre_master = PreMasterPort::new(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             qualification_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),

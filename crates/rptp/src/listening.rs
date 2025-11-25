@@ -1,4 +1,6 @@
-use crate::bmca::{Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision};
+use crate::bmca::{
+    Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
+};
 use crate::log::PortLog;
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
@@ -57,7 +59,9 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
             "Announce receipt timeout expired, becoming Master",
         );
 
-        PortState::master(self.port, self.bmca, self.log, self.timing_policy)
+        let bmca = LocalMasterTrackingBmca::new(self.bmca);
+
+        PortState::master(self.port, bmca, self.log, self.timing_policy)
     }
 
     pub fn process_announce(
@@ -86,9 +90,7 @@ mod tests {
 
     use std::time::Duration;
 
-    use crate::bmca::{
-        BmcaMasterDecisionPoint, DefaultDS, ForeignClockDS, IncrementalBmca,
-    };
+    use crate::bmca::{BmcaMasterDecisionPoint, DefaultDS, ForeignClockDS, IncrementalBmca};
     use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;

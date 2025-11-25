@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use crate::bmca::{
-    Bmca, BmcaMasterDecision, BmcaSlaveDecision, ParentTrackingBmca, QualificationTimeoutPolicy,
+    Bmca, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca, ParentTrackingBmca,
+    QualificationTimeoutPolicy,
 };
 use crate::faulty::FaultyPort;
 use crate::initializing::InitializingPort;
@@ -37,7 +38,6 @@ pub enum PortState<P: Port, B: Bmca, L: PortLog> {
     PreMaster(PreMasterPort<P, B, L>),
     Uncalibrated(UncalibratedPort<P, B, L>),
     Faulty(FaultyPort<P, B, L>),
-    Unimplemented, // Placeholder for unimplemented transitions, to be removed once all transitions are implemented
 }
 
 impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
@@ -45,7 +45,12 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         PortState::Initializing(InitializingPort::new(port, bmca, log, timing_policy))
     }
 
-    pub fn master(port: P, bmca: B, log: L, timing_policy: PortTimingPolicy) -> Self {
+    pub fn master(
+        port: P,
+        bmca: LocalMasterTrackingBmca<B>,
+        log: L,
+        timing_policy: PortTimingPolicy,
+    ) -> Self {
         let announce_send_timeout =
             port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
         let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
@@ -90,7 +95,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
 
     pub fn pre_master(
         port: P,
-        bmca: B,
+        bmca: LocalMasterTrackingBmca<B>,
         log: L,
         timing_policy: PortTimingPolicy,
         qualification_timeout_policy: QualificationTimeoutPolicy,
@@ -169,7 +174,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
             StateDecision::RecommendedMaster(decision) => match self {
                 PortState::Listening(listening) => listening.recommended_master(decision),
                 PortState::Uncalibrated(uncalibrated) => uncalibrated.recommended_master(decision),
-                PortState::Master(_) => PortState::Unimplemented,
+                PortState::Master(master) => master.recommended_master(decision),
                 PortState::Slave(slave) => slave.recommended_master(decision),
                 _ => PortState::Faulty(FaultyPort::new()),
             },
@@ -292,7 +297,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -347,7 +354,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -432,7 +441,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -461,7 +472,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -491,7 +504,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -528,8 +543,6 @@ mod tests {
 
         assert!(matches!(listening, PortState::Listening(_)));
     }
-
-    // Tests for unimplemented/illegal ToMaster transitions
 
     #[test]
     fn portstate_initializing_to_master_illegal_transition_goes_to_faulty() {
@@ -574,7 +587,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -628,7 +643,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -683,7 +700,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -709,7 +728,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -719,8 +740,6 @@ mod tests {
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
-
-    // Tests for unimplemented/illegal ToUncalibrated transitions
 
     #[test]
     fn portstate_initializing_to_uncalibrated_illegal_transition_goes_to_faulty() {
@@ -786,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_pre_master_to_uncalibrated_unimplemented_transition() {
+    fn portstate_pre_master_to_uncalibrated_transition() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
@@ -801,7 +820,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -847,8 +868,6 @@ mod tests {
 
         assert!(matches!(result, PortState::Uncalibrated(_)));
     }
-
-    // Tests for unimplemented/illegal ToPreMaster transitions
 
     #[test]
     fn portstate_initializing_to_pre_master_illegal_transition_goes_to_faulty() {
@@ -912,7 +931,7 @@ mod tests {
     }
 
     #[test]
-    fn portstate_master_to_pre_master_unimplemented_transition() {
+    fn portstate_master_to_pre_master_transition() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
@@ -927,7 +946,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -937,7 +958,7 @@ mod tests {
             StepsRemoved::new(0),
         )));
 
-        assert!(matches!(result, PortState::Unimplemented));
+        assert!(matches!(result, PortState::PreMaster(_)));
     }
 
     #[test]
@@ -956,7 +977,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -1001,8 +1024,6 @@ mod tests {
 
         assert!(matches!(result, PortState::PreMaster(_)));
     }
-
-    // Tests for unimplemented/illegal ToListening transitions
 
     #[test]
     fn portstate_listening_to_listening_illegal_transition_goes_to_faulty() {
@@ -1075,7 +1096,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1101,7 +1124,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -1211,7 +1236,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1237,7 +1264,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),

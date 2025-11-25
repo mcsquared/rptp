@@ -1,4 +1,7 @@
-use crate::bmca::{Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, ParentTrackingBmca};
+use crate::bmca::{
+    Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
+    ParentTrackingBmca,
+};
 use crate::log::PortLog;
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
@@ -71,12 +74,9 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         self.log
             .state_transition("Uncalibrated", "Master", "Announce receipt timeout expired");
 
-        PortState::master(
-            self.port,
-            self.bmca.into_inner(),
-            self.log,
-            self.timing_policy,
-        )
+        let local_tracking_bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
+
+        PortState::master(self.port, local_tracking_bmca, self.log, self.timing_policy)
     }
 
     pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {

@@ -261,7 +261,9 @@ mod tests {
     use futures::FutureExt;
     use tokio::time;
 
-    use rptp::bmca::{DefaultDS, ParentTrackingBmca, Priority1, Priority2};
+    use rptp::bmca::{
+        DefaultDS, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1, Priority2,
+    };
     use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, StepsRemoved};
     use rptp::message::{EventMessage, GeneralMessage};
     use rptp::port::{
@@ -330,7 +332,8 @@ mod tests {
             domain_number,
             port_number,
         ));
-        let bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let bmca =
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
         let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
         let log = TracingPortLog::new(port_identity);
         let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());

@@ -401,6 +401,8 @@ impl BmcaMasterDecision {
         // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 13
         port.update_steps_removed(self.steps_removed);
 
+        let bmca = LocalMasterTrackingBmca::new(bmca);
+
         PortState::pre_master(port, bmca, log, timing_policy, qualification_timeout_policy)
     }
 }
@@ -472,6 +474,35 @@ impl<S: SortedForeignClockRecords> Bmca for IncrementalBmca<S> {
             self.inner.decision(local_clock)
         } else {
             BmcaDecision::Undecided
+        }
+    }
+}
+
+pub struct LocalMasterTrackingBmca<B: Bmca> {
+    inner: B,
+}
+
+impl<B: Bmca> LocalMasterTrackingBmca<B> {
+    pub fn new(inner: B) -> Self {
+        Self { inner }
+    }
+
+    pub fn into_inner(self) -> B {
+        self.inner
+    }
+}
+
+impl<B: Bmca> Bmca for LocalMasterTrackingBmca<B> {
+    fn consider(&mut self, source_port_identity: PortIdentity, foreign_clock_ds: ForeignClockDS) {
+        self.inner.consider(source_port_identity, foreign_clock_ds);
+    }
+
+    fn decision<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> BmcaDecision {
+        let decision = self.inner.decision(local_clock);
+
+        match decision {
+            BmcaDecision::Master(_) => BmcaDecision::Undecided,
+            _ => decision,
         }
     }
 }

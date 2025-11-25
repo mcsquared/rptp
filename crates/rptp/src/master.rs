@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision};
+use crate::bmca::{
+    Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
+};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::{
@@ -13,7 +15,7 @@ use crate::time::TimeStamp;
 
 pub struct MasterPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
-    bmca: B,
+    bmca: LocalMasterTrackingBmca<B>,
     announce_cycle: AnnounceCycle<P::Timeout>,
     sync_cycle: SyncCycle<P::Timeout>,
     log: L,
@@ -23,7 +25,7 @@ pub struct MasterPort<P: Port, B: Bmca, L: PortLog> {
 impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
     pub fn new(
         port: P,
-        bmca: B,
+        bmca: LocalMasterTrackingBmca<B>,
         announce_cycle: AnnounceCycle<P::Timeout>,
         sync_cycle: SyncCycle<P::Timeout>,
         log: L,
@@ -60,7 +62,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         match self.bmca.decision(self.port.local_clock()) {
             BmcaDecision::Undecided => None,
             BmcaDecision::Slave(decision) => Some(StateDecision::RecommendedSlave(decision)),
-            BmcaDecision::Master(_decision) => None,
+            BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
             BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
         }
     }
@@ -96,6 +98,18 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         None
     }
 
+    pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
+        self.log
+            .state_transition("Master", "Pre-Master", "Recommended Master");
+
+        decision.apply(
+            self.port,
+            self.bmca.into_inner(),
+            self.log,
+            self.timing_policy,
+        )
+    }
+
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
         self.log.state_transition(
             "Master",
@@ -107,7 +121,12 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
             .as_str(),
         );
 
-        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
+        decision.apply(
+            self.port,
+            self.bmca.into_inner(),
+            self.log,
+            self.timing_policy,
+        )
     }
 }
 
@@ -202,7 +221,9 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -243,7 +264,9 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -277,7 +300,9 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -318,7 +343,9 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -359,7 +386,9 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -391,7 +420,9 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -433,7 +464,9 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -484,7 +517,9 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::from_records(&prior_records),
+            )),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -531,7 +566,9 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            )),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -548,6 +585,53 @@ mod tests {
 
         assert!(matches!(transition, None));
         assert!(timer_host.take_system_messages().is_empty());
+    }
+
+    #[test]
+    fn master_port_does_not_recommend_master_when_local_clock_unchanged_but_still_best() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+        let parent_port = PortIdentity::fake();
+        let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
+        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds).qualify()];
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+        );
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+        );
+
+        let mut master = MasterPort::new(
+            domain_port,
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::from_records(&prior_records),
+            )),
+            announce_cycle,
+            sync_cycle,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        // Receive a better announce (but still lower quality than local high-grade clock)
+        let decision = master.process_announce(
+            AnnounceMessage::new(42.into(), ForeignClockDS::mid_grade_test_clock()),
+            parent_port,
+        );
+
+        // expect no state change - master stays master when receiving worse announces
+        assert!(matches!(decision, None));
     }
 
     #[test]
