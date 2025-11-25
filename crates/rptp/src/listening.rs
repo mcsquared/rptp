@@ -86,7 +86,9 @@ mod tests {
 
     use std::time::Duration;
 
-    use crate::bmca::{DefaultDS, ForeignClockDS, IncrementalBmca};
+    use crate::bmca::{
+        BmcaMasterDecisionPoint, DefaultDS, ForeignClockDS, IncrementalBmca,
+    };
     use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
@@ -269,5 +271,166 @@ mod tests {
 
         let system_messages = timer_host.take_system_messages();
         assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
+    }
+
+    #[test]
+    fn listening_port_updates_steps_removed_on_m1_master_recommendation() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::gm_grade_test_clock(),
+            StepsRemoved::new(5),
+        );
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+
+        let mut listening = ListeningPort::new(
+            domain_port,
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            announce_receipt_timeout,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        let foreign_clock = ForeignClockDS::mid_grade_test_clock();
+
+        let _ = listening.process_announce(
+            AnnounceMessage::new(0.into(), foreign_clock),
+            PortIdentity::fake(),
+        );
+
+        let transition = listening.process_announce(
+            AnnounceMessage::new(1.into(), foreign_clock),
+            PortIdentity::fake(),
+        );
+
+        let decision = match transition {
+            Some(StateDecision::RecommendedMaster(decision)) => decision,
+            _ => panic!("expected RecommendedMaster decision"),
+        };
+
+        assert_eq!(
+            decision,
+            BmcaMasterDecision::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0))
+        );
+
+        let _state = listening.recommended_master(decision);
+
+        assert_eq!(local_clock.steps_removed(), StepsRemoved::new(0));
+    }
+
+    #[test]
+    fn listening_port_updates_steps_removed_on_m2_master_recommendation() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(5),
+        );
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+
+        let mut listening = ListeningPort::new(
+            domain_port,
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            announce_receipt_timeout,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        let foreign_clock = ForeignClockDS::low_grade_test_clock();
+
+        let _ = listening.process_announce(
+            AnnounceMessage::new(0.into(), foreign_clock),
+            PortIdentity::fake(),
+        );
+
+        let transition = listening.process_announce(
+            AnnounceMessage::new(1.into(), foreign_clock),
+            PortIdentity::fake(),
+        );
+
+        let decision = match transition {
+            Some(StateDecision::RecommendedMaster(decision)) => decision,
+            _ => panic!("expected RecommendedMaster decision"),
+        };
+
+        assert_eq!(
+            decision,
+            BmcaMasterDecision::new(BmcaMasterDecisionPoint::M2, StepsRemoved::new(0))
+        );
+
+        let _state = listening.recommended_master(decision);
+
+        assert_eq!(local_clock.steps_removed(), StepsRemoved::new(0));
+    }
+
+    #[test]
+    fn listening_port_updates_steps_removed_on_s1_slave_recommendation() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(5),
+        );
+        let timer_host = FakeTimerHost::new();
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            &timer_host,
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(5),
+        );
+
+        let mut listening = ListeningPort::new(
+            domain_port,
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            announce_receipt_timeout,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        let foreign_clock = ForeignClockDS::high_grade_test_clock();
+        let expected_steps_removed = foreign_clock.steps_removed().increment();
+
+        timer_host.take_system_messages();
+
+        let _ = listening.process_announce(
+            AnnounceMessage::new(0.into(), foreign_clock),
+            PortIdentity::fake(),
+        );
+
+        let transition = listening.process_announce(
+            AnnounceMessage::new(1.into(), foreign_clock),
+            PortIdentity::fake(),
+        );
+
+        let decision = match transition {
+            Some(StateDecision::RecommendedSlave(decision)) => decision,
+            _ => panic!("expected RecommendedSlave decision"),
+        };
+
+        let _state = listening.recommended_slave(decision);
+
+        assert_eq!(local_clock.steps_removed(), expected_steps_removed);
     }
 }

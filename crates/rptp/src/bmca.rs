@@ -398,6 +398,9 @@ impl BmcaMasterDecision {
         let qualification_timeout_policy =
             QualificationTimeoutPolicy::new(self.decision_point, self.steps_removed);
 
+        // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 13
+        port.update_steps_removed(self.steps_removed);
+
         PortState::pre_master(port, bmca, log, timing_policy, qualification_timeout_policy)
     }
 }
@@ -428,6 +431,9 @@ impl BmcaSlaveDecision {
         timing_policy: PortTimingPolicy,
     ) -> PortState<P, B, L> {
         let parent_tracking_bmca = ParentTrackingBmca::new(bmca, self.parent_port_identity);
+
+        // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
+        port.update_steps_removed(self.steps_removed);
 
         PortState::uncalibrated(port, parent_tracking_bmca, log, timing_policy)
     }

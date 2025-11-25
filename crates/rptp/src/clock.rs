@@ -119,7 +119,7 @@ pub trait SynchronizableClock: Clock {
 pub struct LocalClock<C: SynchronizableClock> {
     clock: C,
     default_ds: DefaultDS,
-    steps_removed: StepsRemoved,
+    steps_removed: Cell<StepsRemoved>,
 }
 
 impl<C: SynchronizableClock> LocalClock<C> {
@@ -127,7 +127,7 @@ impl<C: SynchronizableClock> LocalClock<C> {
         Self {
             clock,
             default_ds,
-            steps_removed,
+            steps_removed: Cell::new(steps_removed),
         }
     }
 
@@ -139,11 +139,15 @@ impl<C: SynchronizableClock> LocalClock<C> {
         self.clock.now()
     }
     pub fn steps_removed(&self) -> StepsRemoved {
-        self.steps_removed
+        self.steps_removed.get()
+    }
+
+    pub fn set_steps_removed(&self, steps_removed: StepsRemoved) {
+        self.steps_removed.set(steps_removed);
     }
 
     pub fn announce(&self, sequence_id: SequenceId) -> AnnounceMessage {
-        self.default_ds.announce(sequence_id, self.steps_removed)
+        self.default_ds.announce(sequence_id, self.steps_removed.get())
     }
 
     pub fn is_grandmaster_capable(&self) -> bool {
@@ -151,7 +155,7 @@ impl<C: SynchronizableClock> LocalClock<C> {
     }
 
     pub fn better_than(&self, other: &ForeignClockDS) -> bool {
-        self.default_ds.better_than(other, &self.steps_removed)
+        self.default_ds.better_than(other, &self.steps_removed.get())
     }
 
     pub fn discipline(&self, estimate: TimeStamp) {

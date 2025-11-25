@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use crate::bmca::{Bmca, QualificationTimeoutPolicy};
 use crate::buffer::{LogMessageInterval, MessageBuffer, PtpVersion, TransportSpecific};
-use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
+use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::PortState;
@@ -34,6 +34,10 @@ pub trait Port {
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
     fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
+
+    fn update_steps_removed(&self, steps_removed: StepsRemoved) {
+        self.local_clock().set_steps_removed(steps_removed);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
