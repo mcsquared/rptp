@@ -17,13 +17,13 @@
 
 use std::cell::Cell;
 use std::ops::Range;
-use std::time::Duration;
 
 use crate::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::{AnnounceMessage, SequenceId};
-use crate::port::{LogInterval, ParentPortIdentity, Port, PortIdentity, PortTimingPolicy};
+use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy};
 use crate::portstate::PortState;
+use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
 /// A collection of foreign clock records kept in BMCA order.
 ///
@@ -48,6 +48,9 @@ pub trait SortedForeignClockRecords {
     /// Return the best qualified foreign clock record in the collection, if
     /// any.
     fn first(&self) -> Option<&ForeignClockRecord>;
+
+    /// Prune stale foreign clock records from the collection.
+    fn prune_stale(&mut self, now: Instant);
 }
 
 /// `defaultDS.priority1` as defined in IEEE 1588.
@@ -315,10 +318,12 @@ impl DefaultDS {
     pub fn announce(
         &self,
         sequence_id: SequenceId,
+        log_message_interval: LogMessageInterval,
         steps_removed: StepsRemoved,
     ) -> AnnounceMessage {
         AnnounceMessage::new(
             sequence_id,
+            log_message_interval,
             ForeignClockDS::new(
                 self.identity,
                 self.priority1,
@@ -339,6 +344,65 @@ pub enum ForeignClockStatus {
     Updated,
 }
 
+struct ForeignMasterTimeWindow {
+    log_announce_interval: LogInterval,
+}
+
+impl ForeignMasterTimeWindow {
+    fn new(log_announce_interval: LogInterval) -> Self {
+        Self {
+            log_announce_interval,
+        }
+    }
+
+    fn duration(&self) -> Duration {
+        self.log_announce_interval.duration().saturating_mul(4)
+    }
+}
+
+// Simple sliding‑window based qualification state machine for foreign clocks. It implies
+// FOREIGN_MASTER_THRESHOLD = 2 as per IEEE 1588-2019. Support for higher thresholds needs
+// a different implementation, but the surface of SlidingWindowQualification should be quite
+// stable and future proof, so that a different implementation shall not ripple into
+// ForeignClockRecord or into other BMCA code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SlidingWindowQualification {
+    last: Instant,
+    prev: Option<Instant>,
+    window: Duration,
+}
+
+impl SlidingWindowQualification {
+    fn new_unqualified(first: Instant, window: Duration) -> Self {
+        Self {
+            last: first,
+            prev: None,
+            window,
+        }
+    }
+
+    fn qualify(&mut self, now: Instant, window: Duration) {
+        self.prev = Some(self.last);
+        self.last = now;
+        self.window = window;
+    }
+
+    fn is_qualified(&self) -> bool {
+        match self.prev {
+            Some(prev) => {
+                // Strict sliding window: both timestamps must lie
+                // within a window of length FOREIGN_MASTER_TIME_WINDOW.
+                (self.last - prev) < self.window
+            }
+            None => false,
+        }
+    }
+
+    fn is_stale(&self, now: Instant) -> bool {
+        (now - self.last) > self.window
+    }
+}
+
 /// Return value of [`SortedForeignClockRecords::update_record`].
 pub enum ForeignClockResult {
     /// No existing record matched the given source port identity.
@@ -352,19 +416,24 @@ pub enum ForeignClockResult {
 pub struct ForeignClockRecord {
     source_port_identity: PortIdentity,
     foreign_clock_ds: ForeignClockDS,
-    validation_cnt: u8,
+    qualification: SlidingWindowQualification,
 }
 
 impl ForeignClockRecord {
-    const FOREIGN_MASTER_THRESHOLD: u8 = 2; // IEEE 1588-2019 Section 9.3.2.4.4
-
     /// Create a record for a new foreign clock with an initial validation
     /// count of one Announce.
-    pub fn new(source_port_identity: PortIdentity, foreign_clock_ds: ForeignClockDS) -> Self {
+    pub fn new(
+        source_port_identity: PortIdentity,
+        foreign_clock_ds: ForeignClockDS,
+        log_announce_interval: LogInterval,
+        now: Instant,
+    ) -> Self {
+        let window = ForeignMasterTimeWindow::new(log_announce_interval).duration();
+
         Self {
             source_port_identity,
             foreign_clock_ds,
-            validation_cnt: 1,
+            qualification: SlidingWindowQualification::new_unqualified(now, window),
         }
     }
 
@@ -379,17 +448,24 @@ impl ForeignClockRecord {
     /// data set is updated when it changes.  The return value describes
     /// whether the record became qualified or changed in a way that may
     /// affect the overall BMCA outcome.
-    pub fn consider(&mut self, foreign_clock_ds: ForeignClockDS) -> ForeignClockStatus {
-        let was_qualified = self.is_qualified();
-        self.validation_cnt = self.validation_cnt.saturating_add(1);
-        let now_qualified = self.is_qualified();
+    pub fn consider(
+        &mut self,
+        foreign_clock_ds: ForeignClockDS,
+        log_announce_interval: LogInterval,
+        now: Instant,
+    ) -> ForeignClockStatus {
+        let window = ForeignMasterTimeWindow::new(log_announce_interval).duration();
+
+        let was_qualified = self.qualification.is_qualified();
+        self.qualification.qualify(now, window);
+        let is_qualified = self.qualification.is_qualified();
 
         let data_set_changed = self.foreign_clock_ds != foreign_clock_ds;
         if data_set_changed {
             self.foreign_clock_ds = foreign_clock_ds;
         }
 
-        if now_qualified && (!was_qualified || data_set_changed) {
+        if was_qualified != is_qualified || (is_qualified && data_set_changed) {
             ForeignClockStatus::Updated
         } else {
             ForeignClockStatus::Unchanged
@@ -399,7 +475,7 @@ impl ForeignClockRecord {
     /// Return the underlying data set if this record has become qualified as
     /// a foreign master candidate, or `None` otherwise.
     pub fn dataset(&self) -> Option<&ForeignClockDS> {
-        if self.validation_cnt >= Self::FOREIGN_MASTER_THRESHOLD {
+        if self.qualification.is_qualified() {
             Some(&self.foreign_clock_ds)
         } else {
             None
@@ -411,8 +487,9 @@ impl ForeignClockRecord {
         self.source_port_identity
     }
 
-    fn is_qualified(&self) -> bool {
-        self.validation_cnt >= Self::FOREIGN_MASTER_THRESHOLD
+    /// Return `true` if this record is stale at the given time.
+    pub fn is_stale(&self, now: Instant) -> bool {
+        self.qualification.is_stale(now)
     }
 }
 
@@ -558,7 +635,13 @@ impl BmcaSlaveDecision {
 pub trait Bmca {
     /// Feed a foreign clock data set obtained from an Announce message into
     /// the BMCA.
-    fn consider(&mut self, source_port_identity: PortIdentity, foreign_clock_ds: ForeignClockDS);
+    fn consider(
+        &mut self,
+        source_port_identity: PortIdentity,
+        foreign_clock_ds: ForeignClockDS,
+        log_announce_interval: LogInterval,
+        now: Instant,
+    );
     /// Return the current BMCA decision for the given local clock.
     ///
     /// Implementations may return [`BmcaDecision::Undecided`] when the
@@ -586,8 +669,19 @@ impl<S: SortedForeignClockRecords> IncrementalBmca<S> {
 }
 
 impl<S: SortedForeignClockRecords> Bmca for IncrementalBmca<S> {
-    fn consider(&mut self, source_port_identity: PortIdentity, foreign_clock_ds: ForeignClockDS) {
-        let status = self.inner.consider(source_port_identity, foreign_clock_ds);
+    fn consider(
+        &mut self,
+        source_port_identity: PortIdentity,
+        foreign_clock_ds: ForeignClockDS,
+        log_announce_interval: LogInterval,
+        now: Instant,
+    ) {
+        let status = self.inner.consider(
+            source_port_identity,
+            foreign_clock_ds,
+            log_announce_interval,
+            now,
+        );
         if status == ForeignClockStatus::Updated {
             self.dirty.set(true);
         }
@@ -623,8 +717,19 @@ impl<B: Bmca> LocalMasterTrackingBmca<B> {
 }
 
 impl<B: Bmca> Bmca for LocalMasterTrackingBmca<B> {
-    fn consider(&mut self, source_port_identity: PortIdentity, foreign_clock_ds: ForeignClockDS) {
-        self.inner.consider(source_port_identity, foreign_clock_ds);
+    fn consider(
+        &mut self,
+        source_port_identity: PortIdentity,
+        foreign_clock_ds: ForeignClockDS,
+        log_announce_interval: LogInterval,
+        now: Instant,
+    ) {
+        self.inner.consider(
+            source_port_identity,
+            foreign_clock_ds,
+            log_announce_interval,
+            now,
+        );
     }
 
     fn decision<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> BmcaDecision {
@@ -677,8 +782,19 @@ impl<B: Bmca> ParentTrackingBmca<B> {
 }
 
 impl<B: Bmca> Bmca for ParentTrackingBmca<B> {
-    fn consider(&mut self, source_port_identity: PortIdentity, foreign_clock_ds: ForeignClockDS) {
-        self.inner.consider(source_port_identity, foreign_clock_ds);
+    fn consider(
+        &mut self,
+        source_port_identity: PortIdentity,
+        foreign_clock_ds: ForeignClockDS,
+        log_announce_interval: LogInterval,
+        now: Instant,
+    ) {
+        self.inner.consider(
+            source_port_identity,
+            foreign_clock_ds,
+            log_announce_interval,
+            now,
+        );
     }
 
     fn decision<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> BmcaDecision {
@@ -714,11 +830,15 @@ impl<S: SortedForeignClockRecords> FullBmca<S> {
         &mut self,
         source_port_identity: PortIdentity,
         foreign_clock_ds: ForeignClockDS,
+        log_announce_interval: LogInterval,
+        now: Instant,
     ) -> ForeignClockStatus {
+        self.sorted_clock_records.prune_stale(now);
+
         let result = self
             .sorted_clock_records
             .update_record(&source_port_identity, |record| {
-                record.consider(foreign_clock_ds)
+                record.consider(foreign_clock_ds, log_announce_interval, now)
             });
 
         match result {
@@ -726,6 +846,8 @@ impl<S: SortedForeignClockRecords> FullBmca<S> {
                 self.sorted_clock_records.insert(ForeignClockRecord::new(
                     source_port_identity,
                     foreign_clock_ds,
+                    log_announce_interval,
+                    now,
                 ));
                 ForeignClockStatus::Unchanged
             }
@@ -807,6 +929,8 @@ impl Bmca for NoopBmca {
         &mut self,
         _source_port_identity: crate::port::PortIdentity,
         _foreign_clock_ds: ForeignClockDS,
+        _log_announce_interval: LogInterval,
+        _now: Instant,
     ) {
     }
 
@@ -845,8 +969,8 @@ impl QualificationTimeoutPolicy {
             BmcaMasterDecisionPoint::M1 => Duration::from_secs(0),
             BmcaMasterDecisionPoint::M2 => Duration::from_secs(0),
             BmcaMasterDecisionPoint::M3 => {
-                let n = self.steps_removed.as_u16() as u32 + 1;
-                log_announce_interval.duration() * n
+                let n = self.steps_removed.as_u16() as u64 + 1;
+                log_announce_interval.duration().saturating_mul(n)
             }
         }
     }
@@ -859,6 +983,7 @@ pub(crate) mod tests {
     use crate::clock::FakeClock;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::port::PortNumber;
+    use crate::time::{Duration, Instant};
 
     const CLK_ID_HIGH: ClockIdentity =
         ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]);
@@ -875,6 +1000,16 @@ pub(crate) mod tests {
     const CLK_QUALITY_GM: ClockQuality = ClockQuality::new(100, 0xFE, 0xFFFF);
 
     impl ForeignClockDS {
+        pub(crate) fn gm_grade_test_clock() -> ForeignClockDS {
+            ForeignClockDS::new(
+                CLK_ID_GM,
+                Priority1::new(127),
+                Priority2::new(127),
+                CLK_QUALITY_GM,
+                StepsRemoved::new(0),
+            )
+        }
+
         pub(crate) fn high_grade_test_clock() -> ForeignClockDS {
             ForeignClockDS::new(
                 CLK_ID_HIGH,
@@ -947,10 +1082,188 @@ pub(crate) mod tests {
     impl ForeignClockRecord {
         pub(crate) fn qualify(self) -> Self {
             Self {
-                validation_cnt: Self::FOREIGN_MASTER_THRESHOLD,
+                // TODO: this might make tests brittle to reach into internals of
+                //       the qualification state. Consider a better solution.
+                qualification: SlidingWindowQualification {
+                    last: self.qualification.last,
+                    prev: Some(self.qualification.last),
+                    window: self.qualification.window,
+                },
                 ..self
             }
         }
+    }
+
+    #[test]
+    fn sliding_window_qualification_requires_two_fast_announces() {
+        let t0 = Instant::from_secs(0);
+        let mut record = ForeignClockRecord::new(
+            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            t0,
+        );
+
+        // First Announce: record is created, still unqualified.
+        assert!(record.dataset().is_none());
+
+        // Second Announce within the window makes it qualified.
+        record.consider(
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(1),
+        );
+        assert!(record.dataset().is_some());
+    }
+
+    #[test]
+    fn sliding_window_qualification_drops_on_slow_announces() {
+        let t0 = Instant::from_secs(0);
+        let mut record = ForeignClockRecord::new(
+            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            t0,
+        );
+
+        // A second fast announce to qualify.
+        record.consider(
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(1),
+        );
+        assert!(record.dataset().is_some());
+
+        // After a long gap, a single announce is not enough to stay qualified.
+        record.consider(
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(10),
+        );
+        assert!(record.dataset().is_none());
+    }
+
+    #[test]
+    fn sliding_window_never_qualifies_with_one_annonce_per_window() {
+        let t0 = Instant::from_secs(0);
+        let mut record = ForeignClockRecord::new(
+            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            t0,
+        );
+
+        // Announce exactly once per foreignMasterTimeWindow; density never reaches 2
+        // within any sliding window.
+        record.consider(
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(4),
+        );
+        assert!(record.dataset().is_none());
+
+        record.consider(
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(8),
+        );
+        assert!(record.dataset().is_none());
+
+        record.consider(
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(12),
+        );
+        assert!(record.dataset().is_none());
+    }
+
+    #[test]
+    fn qualified_dataset_change_reports_updated() {
+        let t0 = Instant::from_secs(0);
+        let mut record = ForeignClockRecord::new(
+            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            t0,
+        );
+
+        // First fast Announce qualifies the record (two samples: t0 and t1).
+        record.consider(
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(1),
+        );
+        assert!(record.dataset().is_some());
+
+        // Change dataset while still qualified.
+        let status = record.consider(
+            ForeignClockDS::low_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(2),
+        );
+        assert_eq!(status, ForeignClockStatus::Updated);
+        assert_eq!(
+            record.dataset(),
+            Some(&ForeignClockDS::low_grade_test_clock())
+        );
+    }
+
+    #[test]
+    fn unqualified_dataset_change_does_not_report_updated() {
+        let t0 = Instant::from_secs(0);
+        let mut record = ForeignClockRecord::new(
+            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            t0,
+        );
+
+        // First slow Announce: still unqualified (spacing >= window).
+        let _ = record.consider(
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(10),
+        );
+        assert!(record.dataset().is_none());
+
+        // Second slow Announce with changed dataset: still unqualified and should report Unchanged.
+        let status = record.consider(
+            ForeignClockDS::low_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(20),
+        );
+        assert_eq!(status, ForeignClockStatus::Unchanged);
+        assert!(record.dataset().is_none());
+    }
+
+    #[test]
+    fn sliding_window_can_be_unqualified_but_not_stale() {
+        let t0 = Instant::from_secs(0);
+        let mut record = ForeignClockRecord::new(
+            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            t0,
+        );
+
+        // Qualify with a fast Announce.
+        record.consider(
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(1),
+        );
+        assert!(record.dataset().is_some());
+
+        // Next Announce spaced exactly at the edge of the window drops qualification
+        // but the record is not stale yet.
+        let now = Instant::from_secs(5);
+        let _ = record.consider(
+            ForeignClockDS::high_grade_test_clock(),
+            LogInterval::new(0),
+            now,
+        );
+        assert!(record.dataset().is_none());
+        assert!(!record.is_stale(now));
     }
 
     #[test]
@@ -1067,6 +1380,58 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn full_bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
+        let stale_records = vec![
+            ForeignClockRecord::new(
+                PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
+                ForeignClockDS::high_grade_test_clock(),
+                LogInterval::new(0),
+                Instant::from_secs(0),
+            )
+            .qualify(),
+            ForeignClockRecord::new(
+                PortIdentity::new(CLK_ID_MID, PortNumber::new(1)),
+                ForeignClockDS::mid_grade_test_clock(),
+                LogInterval::new(0),
+                Instant::from_secs(1),
+            )
+            .qualify(),
+            ForeignClockRecord::new(
+                PortIdentity::new(CLK_ID_MID, PortNumber::new(1)),
+                ForeignClockDS::low_grade_test_clock(),
+                LogInterval::new(0),
+                Instant::from_secs(2),
+            ),
+        ];
+        let mut sorted_records = SortedForeignClockRecordsVec::from_records(&stale_records);
+
+        let mut bmca = FullBmca::new(&mut sorted_records);
+
+        // Consider a new announce from a different foreign clock.
+        bmca.consider(
+            PortIdentity::new(CLK_ID_GM, PortNumber::new(1)),
+            ForeignClockDS::gm_grade_test_clock(),
+            LogInterval::new(0),
+            Instant::from_secs(10),
+        );
+
+        assert_eq!(
+            sorted_records.len(),
+            1,
+            "stale foreign clock records should have been pruned"
+        );
+        assert_eq!(
+            sorted_records.first(),
+            Some(&ForeignClockRecord::new(
+                PortIdentity::new(CLK_ID_GM, PortNumber::new(1)),
+                ForeignClockDS::gm_grade_test_clock(),
+                LogInterval::new(0),
+                Instant::from_secs(10),
+            ))
+        );
+    }
+
+    #[test]
     fn full_bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
@@ -1097,8 +1462,18 @@ pub(crate) mod tests {
         );
         let port_id = PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1));
 
-        bmca.consider(port_id, foreign_strong);
-        bmca.consider(port_id, foreign_strong);
+        bmca.consider(
+            port_id,
+            foreign_strong,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
+        bmca.consider(
+            port_id,
+            foreign_strong,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
 
         assert_eq!(bmca.decision(&local_clock), BmcaDecision::Passive);
     }
@@ -1116,8 +1491,8 @@ pub(crate) mod tests {
         let foreign = ForeignClockDS::mid_grade_test_clock();
         let port_id = PortIdentity::new(CLK_ID_MID, PortNumber::new(1));
 
-        bmca.consider(port_id, foreign);
-        bmca.consider(port_id, foreign);
+        bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
+        bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
 
         assert_eq!(
             bmca.decision(&local_clock),
@@ -1141,8 +1516,8 @@ pub(crate) mod tests {
         let foreign = ForeignClockDS::low_grade_test_clock();
         let port_id = PortIdentity::new(CLK_ID_LOW, PortNumber::new(1));
 
-        bmca.consider(port_id, foreign);
-        bmca.consider(port_id, foreign);
+        bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
+        bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
 
         assert_eq!(
             bmca.decision(&local_clock),
@@ -1165,8 +1540,8 @@ pub(crate) mod tests {
         let foreign = ForeignClockDS::high_grade_test_clock();
         let port_id = PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1));
 
-        bmca.consider(port_id, foreign);
-        bmca.consider(port_id, foreign);
+        bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
+        bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
 
         assert_eq!(
             bmca.decision(&local_clock),
@@ -1198,10 +1573,30 @@ pub(crate) mod tests {
             PortNumber::new(1),
         );
 
-        bmca.consider(port_id_high, foreign_high);
-        bmca.consider(port_id_mid, foreign_mid);
-        bmca.consider(port_id_high, foreign_high);
-        bmca.consider(port_id_mid, foreign_mid);
+        bmca.consider(
+            port_id_high,
+            foreign_high,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
+        bmca.consider(
+            port_id_mid,
+            foreign_mid,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
+        bmca.consider(
+            port_id_high,
+            foreign_high,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
+        bmca.consider(
+            port_id_mid,
+            foreign_mid,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
 
         let decision = bmca.decision(&local_clock);
 
@@ -1235,10 +1630,30 @@ pub(crate) mod tests {
             PortNumber::new(1),
         );
 
-        bmca.consider(port_id_high, foreign_high);
-        bmca.consider(port_id_high, foreign_high);
-        bmca.consider(port_id_mid, foreign_mid);
-        bmca.consider(port_id_mid, foreign_mid);
+        bmca.consider(
+            port_id_high,
+            foreign_high,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
+        bmca.consider(
+            port_id_high,
+            foreign_high,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
+        bmca.consider(
+            port_id_mid,
+            foreign_mid,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
+        bmca.consider(
+            port_id_mid,
+            foreign_mid,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
 
         let decision = bmca.decision(&local_clock);
 
@@ -1274,7 +1689,12 @@ pub(crate) mod tests {
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
-        bmca.consider(PortIdentity::fake(), foreign_high);
+        bmca.consider(
+            PortIdentity::fake(),
+            foreign_high,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        );
 
         assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
@@ -1295,14 +1715,20 @@ pub(crate) mod tests {
         bmca.consider(
             PortIdentity::new(CLK_ID_HIGH, PortNumber::new(0)),
             foreign_high,
+            LogInterval::new(0),
+            Instant::from_secs(0),
         );
         bmca.consider(
             PortIdentity::new(CLK_ID_MID, PortNumber::new(0)),
             foreign_mid,
+            LogInterval::new(0),
+            Instant::from_secs(0),
         );
         bmca.consider(
             PortIdentity::new(CLK_ID_LOW, PortNumber::new(0)),
             foreign_low,
+            LogInterval::new(0),
+            Instant::from_secs(0),
         );
 
         assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);

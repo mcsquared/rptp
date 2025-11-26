@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::bmca::{
     Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
     ParentTrackingBmca,
@@ -12,7 +10,7 @@ use crate::message::{
 use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
 use crate::portstate::{PortState, StateDecision};
 use crate::sync::MasterEstimate;
-use crate::time::TimeStamp;
+use crate::time::{Duration, Instant, TimeStamp};
 
 pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
     port: P,
@@ -48,12 +46,13 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
+        now: Instant,
     ) -> Option<StateDecision> {
         self.log.message_received("Announce");
         self.announce_receipt_timeout
             .restart(self.timing_policy.announce_receipt_timeout_interval());
 
-        msg.feed_bmca(&mut self.bmca, source_port_identity);
+        msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision(self.port.local_clock()) {
             BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
@@ -219,6 +218,7 @@ mod tests {
     use crate::port::test_support::{FakePort, FakeTimeout, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::portstate::PortState;
+    use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]
     fn slave_port_synchronizes_clock() {
@@ -596,7 +596,13 @@ mod tests {
             PortNumber::new(1),
         );
         let foreign_clock_ds = ForeignClockDS::mid_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds).qualify()];
+        let prior_records = [ForeignClockRecord::new(
+            parent_port,
+            foreign_clock_ds,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )
+        .qualify()];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -626,8 +632,13 @@ mod tests {
 
         // Receive a better announce from the same parent port
         let decision = slave.process_announce(
-            AnnounceMessage::new(42.into(), ForeignClockDS::high_grade_test_clock()),
+            AnnounceMessage::new(
+                42.into(),
+                LogMessageInterval::new(0),
+                ForeignClockDS::high_grade_test_clock(),
+            ),
             parent_port,
+            Instant::from_secs(0),
         );
 
         // expect a no decision since parent is unchanged
@@ -648,7 +659,13 @@ mod tests {
             PortNumber::new(1),
         );
         let foreign_clock_ds = ForeignClockDS::mid_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds).qualify()];
+        let prior_records = [ForeignClockRecord::new(
+            parent_port,
+            foreign_clock_ds,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )
+        .qualify()];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -682,14 +699,24 @@ mod tests {
             PortNumber::new(1),
         );
         let decision = slave.process_announce(
-            AnnounceMessage::new(42.into(), ForeignClockDS::high_grade_test_clock()),
+            AnnounceMessage::new(
+                42.into(),
+                LogMessageInterval::new(0),
+                ForeignClockDS::high_grade_test_clock(),
+            ),
             new_parent,
+            Instant::from_secs(0),
         );
         assert!(matches!(decision, None)); // first announce from new parent is ignored
 
         let decision = slave.process_announce(
-            AnnounceMessage::new(43.into(), ForeignClockDS::high_grade_test_clock()),
+            AnnounceMessage::new(
+                43.into(),
+                LogMessageInterval::new(0),
+                ForeignClockDS::high_grade_test_clock(),
+            ),
             new_parent,
+            Instant::from_secs(0),
         );
 
         // expect a slave recommendation
@@ -714,7 +741,13 @@ mod tests {
             PortNumber::new(1),
         );
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds).qualify()];
+        let prior_records = [ForeignClockRecord::new(
+            parent_port,
+            foreign_clock_ds,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )
+        .qualify()];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -744,8 +777,13 @@ mod tests {
 
         // Receive a worse announce from the current parent
         let decision = slave.process_announce(
-            AnnounceMessage::new(42.into(), ForeignClockDS::low_grade_test_clock()),
+            AnnounceMessage::new(
+                42.into(),
+                LogMessageInterval::new(0),
+                ForeignClockDS::low_grade_test_clock(),
+            ),
             parent_port,
+            Instant::from_secs(0),
         );
 
         // expect a master recommendation since local clock is better

@@ -1,17 +1,18 @@
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::Instant as StdInstant;
+
+use tokio::sync::mpsc;
 
 use rptp::bmca::IncrementalBmca;
 use rptp::clock::SynchronizableClock;
 use rptp::port::TimerHost;
-use tokio::sync::mpsc;
-
 use rptp::{
     clock::LocalClock,
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{DomainMessage, EventMessage, SystemMessage, TimestampMessage},
     port::{DomainNumber, DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
+    time::{Duration, Instant},
 };
 
 use crate::log::TracingPortLog;
@@ -63,6 +64,7 @@ impl TokioTimeout {
         delay: Duration,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
+            let delay = std::time::Duration::from_nanos(delay.as_u64_nanos());
             tokio::time::sleep(delay).await;
             let _ = inner.tx.send((inner.domain_number, msg));
         })
@@ -195,6 +197,8 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
     where
         F: std::future::Future<Output = ()>,
     {
+        let start = StdInstant::now();
+
         let mut event_buf = [0u8; 2048];
         let mut general_buf = [0u8; 2048];
 
@@ -215,9 +219,10 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
                     }
                 }
                 recv = self.general_socket.recv(&mut general_buf) => {
+                    let now = Instant::from_nanos(start.elapsed().as_nanos() as u64);
                     if let Ok((size, _peer)) = recv {
                         let domain_msg = DomainMessage::new(&general_buf[..size]);
-                        let _ = domain_msg.dispatch_general(&mut self.portmap);
+                        let _ = domain_msg.dispatch_general(&mut self.portmap, now);
                     }
                 }
                 msg = self.system_rx.recv() => {
@@ -257,6 +262,8 @@ async fn terminate() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::time::Duration as StdDuration;
 
     use futures::FutureExt;
     use tokio::time;
@@ -350,9 +357,9 @@ mod tests {
         let mut sync_count = 0;
         let mut follow_up_count = 0;
 
-        let cond = time::timeout(Duration::from_secs(10), async {
+        let cond = time::timeout(StdDuration::from_secs(10), async {
             loop {
-                time::advance(Duration::from_millis(100)).await;
+                time::advance(StdDuration::from_millis(100)).await;
 
                 while let Ok(msg) = event_socket_rx.try_recv() {
                     if matches!(
@@ -459,9 +466,9 @@ mod tests {
 
         let mut delay_request_count = 0;
 
-        let cond = time::timeout(Duration::from_secs(10), async {
+        let cond = time::timeout(StdDuration::from_secs(10), async {
             loop {
-                time::advance(Duration::from_millis(100)).await;
+                time::advance(StdDuration::from_millis(100)).await;
 
                 while let Ok(msg) = event_socket_rx.try_recv() {
                     if matches!(

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::bmca::{
     Bmca, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca, ParentTrackingBmca,
     QualificationTimeoutPolicy,
@@ -13,7 +11,7 @@ use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::port::{Port, PortIdentity, PortTimingPolicy};
 use crate::premaster::PreMasterPort;
 use crate::slave::{DelayCycle, SlavePort};
-use crate::time::TimeStamp;
+use crate::time::{Duration, Instant, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 
 // Possible decisions that move the port state machine from one state
@@ -53,7 +51,11 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
     ) -> Self {
         let announce_send_timeout =
             port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
-        let announce_cycle = AnnounceCycle::new(0.into(), announce_send_timeout);
+        let announce_cycle = AnnounceCycle::new(
+            0.into(),
+            timing_policy.log_announce_interval(),
+            announce_send_timeout,
+        );
         let sync_timeout = port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
         let sync_cycle = SyncCycle::new(0.into(), sync_timeout);
 
@@ -212,16 +214,23 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         &mut self,
         msg: GeneralMessage,
         source_port_identity: PortIdentity,
+        now: Instant,
     ) -> Option<StateDecision> {
         use GeneralMessage::*;
         use PortState::*;
 
         match (self, msg) {
-            (Listening(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
-            (Slave(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
-            (Master(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
-            (PreMaster(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
-            (Uncalibrated(port), Announce(msg)) => port.process_announce(msg, source_port_identity),
+            (Listening(port), Announce(msg)) => {
+                port.process_announce(msg, source_port_identity, now)
+            }
+            (Slave(port), Announce(msg)) => port.process_announce(msg, source_port_identity, now),
+            (Master(port), Announce(msg)) => port.process_announce(msg, source_port_identity, now),
+            (PreMaster(port), Announce(msg)) => {
+                port.process_announce(msg, source_port_identity, now)
+            }
+            (Uncalibrated(port), Announce(msg)) => {
+                port.process_announce(msg, source_port_identity, now)
+            }
             (Slave(port), FollowUp(msg)) => port.process_follow_up(msg, source_port_identity),
             (Slave(port), DelayResp(msg)) => port.process_delay_response(msg, source_port_identity),
             _ => None,
@@ -297,9 +306,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -354,9 +361,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -441,9 +446,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -472,9 +475,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -504,9 +505,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -587,9 +586,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -643,9 +640,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -700,9 +695,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -728,9 +721,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -820,9 +811,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -946,9 +935,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -977,9 +964,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -1096,9 +1081,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1124,9 +1107,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -1236,9 +1217,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -1264,9 +1243,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),

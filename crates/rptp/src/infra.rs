@@ -7,7 +7,7 @@ pub mod infra_support {
     use crate::clock::{Clock, FakeClock, LocalClock, SynchronizableClock};
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
     use crate::port::{Port, PortIdentity};
-    use crate::time::TimeStamp;
+    use crate::time::{Duration, TimeStamp};
 
     impl Clock for Rc<dyn SynchronizableClock> {
         fn now(&self) -> TimeStamp {
@@ -44,7 +44,7 @@ pub mod infra_support {
             self.as_ref().send_general(msg)
         }
 
-        fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout {
+        fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
             self.as_ref().timeout(msg, delay)
         }
     }
@@ -72,6 +72,10 @@ pub mod infra_support {
             };
             vec.sort_records();
             vec
+        }
+
+        pub fn len(&self) -> usize {
+            self.records.len()
         }
 
         fn sort_records(&mut self) {
@@ -111,11 +115,15 @@ pub mod infra_support {
         fn first(&self) -> Option<&ForeignClockRecord> {
             self.records.first()
         }
+
+        fn prune_stale(&mut self, now: crate::time::Instant) {
+            self.records.retain(|record| !record.is_stale(now));
+        }
     }
 
-    impl SortedForeignClockRecords for Box<SortedForeignClockRecordsVec> {
+    impl<S: SortedForeignClockRecords> SortedForeignClockRecords for &mut S {
         fn insert(&mut self, record: ForeignClockRecord) {
-            self.as_mut().insert(record);
+            (*self).insert(record);
         }
 
         fn update_record<F>(
@@ -126,11 +134,15 @@ pub mod infra_support {
         where
             F: FnOnce(&mut ForeignClockRecord) -> ForeignClockStatus,
         {
-            self.as_mut().update_record(source_port_identity, update)
+            (*self).update_record(source_port_identity, update)
         }
 
         fn first(&self) -> Option<&ForeignClockRecord> {
-            self.as_ref().first()
+            (**self).first()
+        }
+
+        fn prune_stale(&mut self, now: crate::time::Instant) {
+            (*self).prune_stale(now);
         }
     }
 
@@ -140,6 +152,7 @@ pub mod infra_support {
         use crate::bmca::ForeignClockDS;
         use crate::clock::ClockIdentity;
         use crate::port::{PortIdentity, PortNumber};
+        use crate::time::{Instant, LogInterval};
 
         #[test]
         fn sorted_foreign_vec_maintains_best_record_first() {
@@ -162,13 +175,34 @@ pub mod infra_support {
                 PortNumber::new(1),
             );
 
-            records.insert(ForeignClockRecord::new(high_port_id, high_clock));
-            records.insert(ForeignClockRecord::new(low_port_id, low_clock));
-            records.insert(ForeignClockRecord::new(mid_port_id, mid_clock));
+            records.insert(ForeignClockRecord::new(
+                high_port_id,
+                high_clock,
+                LogInterval::new(0),
+                Instant::from_secs(0),
+            ));
+            records.insert(ForeignClockRecord::new(
+                low_port_id,
+                low_clock,
+                LogInterval::new(0),
+                Instant::from_secs(0),
+            ));
+            records.insert(ForeignClockRecord::new(
+                mid_port_id,
+                mid_clock,
+                LogInterval::new(0),
+                Instant::from_secs(0),
+            ));
 
-            records.update_record(&high_port_id, |record| record.consider(high_clock));
-            records.update_record(&low_port_id, |record| record.consider(low_clock));
-            records.update_record(&mid_port_id, |record| record.consider(mid_clock));
+            records.update_record(&high_port_id, |record| {
+                record.consider(high_clock, LogInterval::new(0), Instant::from_secs(0))
+            });
+            records.update_record(&low_port_id, |record| {
+                record.consider(low_clock, LogInterval::new(0), Instant::from_secs(0))
+            });
+            records.update_record(&mid_port_id, |record| {
+                record.consider(mid_clock, LogInterval::new(0), Instant::from_secs(0))
+            });
 
             let best_clock = records.first().and_then(|record| record.dataset());
             assert_eq!(best_clock, Some(&high_clock));

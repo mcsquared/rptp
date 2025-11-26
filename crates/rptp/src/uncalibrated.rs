@@ -6,6 +6,7 @@ use crate::log::PortLog;
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
 use crate::portstate::{PortState, StateDecision};
+use crate::time::Instant;
 
 pub struct UncalibratedPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
@@ -36,12 +37,13 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
+        now: Instant,
     ) -> Option<StateDecision> {
         self.log.message_received("Announce");
         self.announce_receipt_timeout
             .restart(self.timing_policy.announce_receipt_timeout_interval());
 
-        msg.feed_bmca(&mut self.bmca, source_port_identity);
+        msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         // TODO: real calibration behaviour is yet to be implemented. For now, we just return
         // MasterClockSelected on the first announce from the current parent, as long as the
@@ -115,8 +117,6 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
 mod tests {
     use super::*;
 
-    use std::time::Duration;
-
     use crate::bmca::{
         BmcaMasterDecision, BmcaMasterDecisionPoint, DefaultDS, ForeignClockDS, ForeignClockRecord,
         IncrementalBmca,
@@ -128,6 +128,7 @@ mod tests {
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::portstate::PortState;
+    use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]
     fn uncalibrated_port_produces_slave_recommendation_with_new_parent() {
@@ -141,7 +142,13 @@ mod tests {
             PortNumber::new(1),
         );
         let foreign_clock_ds = ForeignClockDS::mid_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds).qualify()];
+        let prior_records = [ForeignClockRecord::new(
+            parent_port,
+            foreign_clock_ds,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )
+        .qualify()];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -171,14 +178,24 @@ mod tests {
             PortNumber::new(1),
         );
         let decision = uncalibrated.process_announce(
-            AnnounceMessage::new(42.into(), ForeignClockDS::high_grade_test_clock()),
+            AnnounceMessage::new(
+                42.into(),
+                LogMessageInterval::new(0),
+                ForeignClockDS::high_grade_test_clock(),
+            ),
             new_parent,
+            Instant::from_secs(0),
         );
         assert!(matches!(decision, None)); // first announce from new parent is ignored
 
         let decision = uncalibrated.process_announce(
-            AnnounceMessage::new(43.into(), ForeignClockDS::high_grade_test_clock()),
+            AnnounceMessage::new(
+                43.into(),
+                LogMessageInterval::new(0),
+                ForeignClockDS::high_grade_test_clock(),
+            ),
             new_parent,
+            Instant::from_secs(0),
         );
 
         // expect a slave recommendation
@@ -200,7 +217,13 @@ mod tests {
         );
         let parent_port = PortIdentity::fake();
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds).qualify()];
+        let prior_records = [ForeignClockRecord::new(
+            parent_port,
+            foreign_clock_ds,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )
+        .qualify()];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -225,8 +248,9 @@ mod tests {
         );
 
         let decision = uncalibrated.process_announce(
-            AnnounceMessage::new(42.into(), foreign_clock_ds),
+            AnnounceMessage::new(42.into(), LogMessageInterval::new(0), foreign_clock_ds),
             parent_port,
+            Instant::from_secs(0),
         );
 
         assert!(matches!(decision, Some(StateDecision::MasterClockSelected)));
@@ -308,12 +332,18 @@ mod tests {
         );
 
         // First announce qualifies the foreign record but yields no decision yet.
-        let _ = uncalibrated
-            .process_announce(AnnounceMessage::new(42.into(), foreign_clock), foreign_port);
+        let _ = uncalibrated.process_announce(
+            AnnounceMessage::new(42.into(), LogMessageInterval::new(0), foreign_clock),
+            foreign_port,
+            Instant::from_secs(0),
+        );
 
         // Second announce from the same foreign clock drives BMCA to a Master(M1) decision.
-        let decision = uncalibrated
-            .process_announce(AnnounceMessage::new(43.into(), foreign_clock), foreign_port);
+        let decision = uncalibrated.process_announce(
+            AnnounceMessage::new(43.into(), LogMessageInterval::new(0), foreign_clock),
+            foreign_port,
+            Instant::from_secs(0),
+        );
 
         assert_eq!(
             decision,
@@ -361,11 +391,17 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let _ = uncalibrated
-            .process_announce(AnnounceMessage::new(42.into(), foreign_clock), foreign_port);
+        let _ = uncalibrated.process_announce(
+            AnnounceMessage::new(42.into(), LogMessageInterval::new(0), foreign_clock),
+            foreign_port,
+            Instant::from_secs(0),
+        );
 
-        let decision = uncalibrated
-            .process_announce(AnnounceMessage::new(43.into(), foreign_clock), foreign_port);
+        let decision = uncalibrated.process_announce(
+            AnnounceMessage::new(43.into(), LogMessageInterval::new(0), foreign_clock),
+            foreign_port,
+            Instant::from_secs(0),
+        );
 
         assert_eq!(
             decision,

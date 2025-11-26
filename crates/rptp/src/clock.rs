@@ -5,7 +5,7 @@ use std::ops::Range;
 use crate::{
     bmca::{DefaultDS, ForeignClockDS},
     message::{AnnounceMessage, SequenceId},
-    time::TimeStamp,
+    time::{LogMessageInterval, TimeStamp},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -146,8 +146,13 @@ impl<C: SynchronizableClock> LocalClock<C> {
         self.steps_removed.set(steps_removed);
     }
 
-    pub fn announce(&self, sequence_id: SequenceId) -> AnnounceMessage {
-        self.default_ds.announce(sequence_id, self.steps_removed.get())
+    pub fn announce(
+        &self,
+        sequence_id: SequenceId,
+        log_message_interval: LogMessageInterval,
+    ) -> AnnounceMessage {
+        self.default_ds
+            .announce(sequence_id, log_message_interval, self.steps_removed.get())
     }
 
     pub fn is_grandmaster_capable(&self) -> bool {
@@ -155,7 +160,8 @@ impl<C: SynchronizableClock> LocalClock<C> {
     }
 
     pub fn better_than(&self, other: &ForeignClockDS) -> bool {
-        self.default_ds.better_than(other, &self.steps_removed.get())
+        self.default_ds
+            .better_than(other, &self.steps_removed.get())
     }
 
     pub fn discipline(&self, estimate: TimeStamp) {

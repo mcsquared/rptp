@@ -3,6 +3,7 @@ use crate::log::PortLog;
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity, PortTimingPolicy};
 use crate::portstate::{PortState, StateDecision};
+use crate::time::Instant;
 
 pub struct PreMasterPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
@@ -33,10 +34,11 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
+        now: Instant,
     ) -> Option<StateDecision> {
         self.log.message_received("Announce");
 
-        msg.feed_bmca(&mut self.bmca, source_port_identity);
+        msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision(self.port.local_clock()) {
             BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
@@ -77,8 +79,6 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
 mod tests {
     use super::*;
 
-    use std::time::Duration;
-
     use crate::bmca::{DefaultDS, IncrementalBmca};
     use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
@@ -88,6 +88,7 @@ mod tests {
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
     use crate::portstate::StateDecision;
+    use crate::time::{Duration, Instant, LogMessageInterval};
 
     #[test]
     fn pre_master_port_schedules_qualification_timeout() {
@@ -109,9 +110,7 @@ mod tests {
 
         let _ = PreMasterPort::new(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             qualification_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -140,9 +139,7 @@ mod tests {
 
         let mut pre_master = PortState::PreMaster(PreMasterPort::new(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             qualification_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -184,9 +181,7 @@ mod tests {
 
         let mut pre_master = PreMasterPort::new(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             qualification_timeout,
             NoopPortLog,
             PortTimingPolicy::default(),
@@ -194,15 +189,25 @@ mod tests {
 
         // Receive first better announce
         let decision = pre_master.process_announce(
-            AnnounceMessage::new(42.into(), ForeignClockDS::high_grade_test_clock()),
+            AnnounceMessage::new(
+                42.into(),
+                LogMessageInterval::new(0),
+                ForeignClockDS::high_grade_test_clock(),
+            ),
             better_port,
+            Instant::from_secs(0),
         );
         assert!(matches!(decision, None)); // first announce is not yet qualified
 
         // Receive second better announce
         let decision = pre_master.process_announce(
-            AnnounceMessage::new(43.into(), ForeignClockDS::high_grade_test_clock()),
+            AnnounceMessage::new(
+                43.into(),
+                LogMessageInterval::new(0),
+                ForeignClockDS::high_grade_test_clock(),
+            ),
             better_port,
+            Instant::from_secs(0),
         );
 
         // expect a slave recommendation

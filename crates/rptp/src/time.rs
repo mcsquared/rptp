@@ -96,6 +96,125 @@ impl std::ops::Sub for TimeInterval {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Instant {
+    nanos: u64,
+}
+
+impl Instant {
+    pub fn from_nanos(nanos: u64) -> Self {
+        Self { nanos }
+    }
+
+    pub fn from_secs(secs: u32) -> Self {
+        Self {
+            nanos: (secs as u64) * 1_000_000_000,
+        }
+    }
+}
+
+impl std::ops::Sub for Instant {
+    type Output = Duration;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        if self.nanos >= rhs.nanos {
+            Duration::from_nanos(self.nanos - rhs.nanos)
+        } else {
+            Duration::from_nanos(rhs.nanos - self.nanos)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Duration {
+    nanos: u64,
+}
+
+impl Duration {
+    pub const fn from_secs(secs: u32) -> Self {
+        Self {
+            nanos: secs as u64 * 1_000_000_000,
+        }
+    }
+
+    pub fn from_millis(millis: u32) -> Self {
+        Self {
+            nanos: millis as u64 * 1_000_000,
+        }
+    }
+
+    pub const fn from_nanos(nanos: u64) -> Self {
+        Self { nanos }
+    }
+
+    pub fn saturating_mul(self, rhs: u64) -> Self {
+        Self {
+            nanos: self.nanos.saturating_mul(rhs),
+        }
+    }
+
+    pub fn as_u64_nanos(&self) -> u64 {
+        self.nanos
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogMessageInterval(i8);
+
+impl LogMessageInterval {
+    pub const fn new(value: i8) -> Self {
+        Self(value)
+    }
+
+    pub fn log_interval(&self) -> Option<LogInterval> {
+        if self.0 >= LogInterval::MIN_LOG_VALUE && self.0 <= LogInterval::MAX_LOG_VALUE {
+            Some(LogInterval::new(self.0))
+        } else {
+            None
+        }
+    }
+
+    pub fn as_u8(self) -> u8 {
+        self.0 as u8
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogInterval {
+    log_value: i8,
+}
+
+impl LogInterval {
+    const MIN_LOG_VALUE: i8 = -20;
+    const MAX_LOG_VALUE: i8 = 20;
+
+    pub const fn new(log_value: i8) -> Self {
+        assert!(log_value >= Self::MIN_LOG_VALUE && log_value <= Self::MAX_LOG_VALUE);
+
+        Self { log_value }
+    }
+
+    pub fn duration(self) -> Duration {
+        let e = self
+            .log_value
+            .clamp(Self::MIN_LOG_VALUE, Self::MAX_LOG_VALUE);
+
+        if e >= 0 {
+            let secs = 1u64 << e;
+            let nanos = secs.saturating_mul(1_000_000_000);
+            Duration::from_nanos(nanos)
+        } else {
+            let div = 1u64 << (-e);
+            let nanos = 1_000_000_000 / div;
+            Duration::from_nanos(nanos)
+        }
+    }
+
+    pub fn log_message_interval(&self) -> LogMessageInterval {
+        LogMessageInterval::new(self.log_value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +296,38 @@ mod tests {
     fn duration_half_negative_odd_rounds_towards_zero() {
         let duration = TimeInterval::new(-1, 999_999_999);
         assert_eq!(duration.half(), TimeInterval::new(0, 0));
+    }
+
+    #[test]
+    fn log_interval_duration() {
+        let li = LogInterval::new(0);
+        assert_eq!(li.duration(), Duration::from_secs(1));
+
+        let li = LogInterval::new(1);
+        assert_eq!(li.duration(), Duration::from_secs(2));
+
+        let li = LogInterval::new(2);
+        assert_eq!(li.duration(), Duration::from_secs(4));
+
+        let li = LogInterval::new(-1);
+        assert_eq!(li.duration(), Duration::from_millis(500));
+
+        let li = LogInterval::new(-2);
+        assert_eq!(li.duration(), Duration::from_millis(250));
+
+        let li = LogInterval::new(-3);
+        assert_eq!(li.duration(), Duration::from_millis(125));
+    }
+
+    #[test]
+    #[should_panic]
+    fn log_interval_new_panics_on_out_of_range_positive() {
+        let _ = LogInterval::new(21);
+    }
+
+    #[test]
+    #[should_panic]
+    fn log_interval_new_panics_on_out_of_range_negative() {
+        let _ = LogInterval::new(-21);
     }
 }

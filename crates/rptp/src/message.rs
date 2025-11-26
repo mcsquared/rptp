@@ -3,7 +3,7 @@ use crate::{
     buffer::{ControlField, FinalizedBuffer, MessageBuffer, MessageFlags, MessageType},
     port::{DomainNumber, PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
-    time::{TimeInterval, TimeStamp},
+    time::{Instant, LogMessageInterval, TimeInterval, TimeStamp},
 };
 
 pub struct DomainMessage<'a> {
@@ -25,12 +25,12 @@ impl<'a> DomainMessage<'a> {
         Ok(())
     }
 
-    pub fn dispatch_general(self, ports: &mut impl PortMap) -> Result<()> {
+    pub fn dispatch_general(self, ports: &mut impl PortMap, now: Instant) -> Result<()> {
         let domain_number = self.domain_number()?;
         let port = ports.port_by_domain(domain_number)?;
         let source_port_identity = self.source_port_identity()?;
         let msg = GeneralMessage::try_from(self.buf)?;
-        port.process_general_message(source_port_identity, msg);
+        port.process_general_message(source_port_identity, msg, now);
 
         Ok(())
     }
@@ -188,30 +188,46 @@ impl TryFrom<&[u8]> for SequenceId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnnounceMessage {
     sequence_id: SequenceId,
+    log_message_interval: LogMessageInterval,
     foreign_clock_ds: ForeignClockDS,
 }
 
 impl AnnounceMessage {
-    pub fn new(sequence_id: SequenceId, foreign_clock_ds: ForeignClockDS) -> Self {
+    pub fn new(
+        sequence_id: SequenceId,
+        log_message_interval: LogMessageInterval,
+        foreign_clock_ds: ForeignClockDS,
+    ) -> Self {
         Self {
             sequence_id,
+            log_message_interval,
             foreign_clock_ds,
         }
     }
 
     pub fn from_slice(buf: &[u8]) -> Result<Self> {
         let sequence_id = SequenceId::try_from(&buf[30..32])?;
+        let log_message_interval =
+            LogMessageInterval::new(buf.get(33).copied().ok_or(ParseError::BadLength)? as i8);
         let foreign_clock_ds =
             ForeignClockDS::from_slice(&buf[47..63].try_into().map_err(|_| ParseError::BadLength)?);
 
         Ok(Self {
             sequence_id,
+            log_message_interval,
             foreign_clock_ds,
         })
     }
 
-    pub fn feed_bmca(self, bmca: &mut impl Bmca, source_port_identity: PortIdentity) {
-        bmca.consider(source_port_identity, self.foreign_clock_ds)
+    pub fn feed_bmca(self, bmca: &mut impl Bmca, source_port_identity: PortIdentity, now: Instant) {
+        if let Some(log_interval) = self.log_message_interval.log_interval() {
+            bmca.consider(
+                source_port_identity,
+                self.foreign_clock_ds,
+                log_interval,
+                now,
+            );
+        }
     }
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
@@ -219,6 +235,7 @@ impl AnnounceMessage {
             .typed(MessageType::Announce, ControlField::Other)
             .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
+            .with_log_message_interval(self.log_message_interval)
             .payload();
 
         let payload_buf = payload.buf();
@@ -253,6 +270,7 @@ impl TwoStepSyncMessage {
             .typed(MessageType::Sync, ControlField::Sync)
             .flagged(MessageFlags::TWO_STEP)
             .sequenced(self.sequence_id)
+            .with_log_message_interval(LogMessageInterval::new(0x7F))
             .payload();
 
         payload.finalize(10)
@@ -306,6 +324,7 @@ impl FollowUpMessage {
             .typed(MessageType::FollowUp, ControlField::FollowUp)
             .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
+            .with_log_message_interval(LogMessageInterval::new(0x7F))
             .payload();
 
         let payload_buf = payload.buf();
@@ -340,6 +359,7 @@ impl DelayRequestMessage {
             .typed(MessageType::DelayRequest, ControlField::DelayRequest)
             .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
+            .with_log_message_interval(LogMessageInterval::new(0x7F))
             .payload();
 
         payload.finalize(10)
@@ -393,6 +413,7 @@ impl DelayResponseMessage {
             .typed(MessageType::DelayResponse, ControlField::DelayResponse)
             .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
+            .with_log_message_interval(LogMessageInterval::new(0x7F))
             .payload();
 
         let payload_buf = payload.buf();
@@ -485,14 +506,16 @@ mod tests {
     use super::*;
 
     use crate::bmca::{Priority1, Priority2};
-    use crate::buffer::{LogMessageInterval, PtpVersion, TransportSpecific};
+    use crate::buffer::{PtpVersion, TransportSpecific};
     use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved};
     use crate::port::PortNumber;
+    use crate::time::LogMessageInterval;
 
     #[test]
     fn announce_message_wire_roundtrip() {
         let announce = AnnounceMessage::new(
             42.into(),
+            LogMessageInterval::new(0x7F),
             ForeignClockDS::new(
                 ClockIdentity::new(&[0; 8]),
                 Priority1::new(127),
@@ -507,7 +530,6 @@ mod tests {
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            LogMessageInterval::new(0x7F),
         );
         let wire = announce.serialize(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
@@ -523,7 +545,6 @@ mod tests {
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            LogMessageInterval::new(0x7F),
         );
         let wire = sync.serialize(&mut buf);
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
@@ -539,7 +560,6 @@ mod tests {
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            LogMessageInterval::new(0x7F),
         );
         let wire = follow_up.serialize(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
@@ -555,7 +575,6 @@ mod tests {
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            LogMessageInterval::new(0x7F),
         );
         let wire = delay_req.serialize(&mut buf);
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
@@ -571,7 +590,6 @@ mod tests {
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
-            LogMessageInterval::new(0x7F),
         );
         let wire = delay_resp.serialize(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();

@@ -2,16 +2,16 @@ use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
 use crate::bmca::{Bmca, QualificationTimeoutPolicy};
-use crate::buffer::{LogMessageInterval, MessageBuffer, PtpVersion, TransportSpecific};
+use crate::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
 use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::PortState;
 use crate::result::{ProtocolError, Result};
-use crate::time::TimeStamp;
+use crate::time::{Duration, Instant, LogInterval, TimeStamp};
 
 pub trait Timeout {
-    fn restart(&self, timeout: std::time::Duration);
+    fn restart(&self, timeout: Duration);
 }
 
 pub trait PhysicalPort {
@@ -22,7 +22,7 @@ pub trait PhysicalPort {
 pub trait TimerHost {
     type Timeout: Timeout + Drop;
 
-    fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
+    fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout;
 }
 
 pub trait Port {
@@ -33,7 +33,7 @@ pub trait Port {
     fn local_clock(&self) -> &LocalClock<Self::Clock>;
     fn send_event(&self, msg: EventMessage);
     fn send_general(&self, msg: GeneralMessage);
-    fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout;
+    fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout;
 
     fn update_steps_removed(&self, steps_removed: StepsRemoved) {
         self.local_clock().set_steps_removed(steps_removed);
@@ -208,7 +208,6 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> Port for DomainP
             PtpVersion::V2,
             self.domain_number,
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
-            LogMessageInterval::new(0x7F),
         );
         let finalized = msg.serialize(&mut buf);
         self.physical_port.send_event(finalized.as_ref());
@@ -220,13 +219,12 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> Port for DomainP
             PtpVersion::V2,
             self.domain_number,
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
-            LogMessageInterval::new(0x7F),
         );
         let finalized = msg.serialize(&mut buf);
         self.physical_port.send_general(finalized.as_ref());
     }
 
-    fn timeout(&self, msg: SystemMessage, delay: std::time::Duration) -> Self::Timeout {
+    fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
         self.timer_host.timeout(msg, delay)
     }
 }
@@ -266,7 +264,12 @@ pub trait PortIngress {
         msg: EventMessage,
         timestamp: TimeStamp,
     );
-    fn process_general_message(&mut self, source_port_identity: PortIdentity, msg: GeneralMessage);
+    fn process_general_message(
+        &mut self,
+        source_port_identity: PortIdentity,
+        msg: GeneralMessage,
+        now: Instant,
+    );
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
@@ -284,9 +287,14 @@ impl<P: Port, B: Bmca, L: PortLog> PortIngress for Option<PortState<P, B, L>> {
         }
     }
 
-    fn process_general_message(&mut self, source_port_identity: PortIdentity, msg: GeneralMessage) {
+    fn process_general_message(
+        &mut self,
+        source_port_identity: PortIdentity,
+        msg: GeneralMessage,
+        now: Instant,
+    ) {
         if let Some(state) = self.as_mut() {
-            if let Some(decision) = state.dispatch_general(msg, source_port_identity) {
+            if let Some(decision) = state.dispatch_general(msg, source_port_identity, now) {
                 *self = self.take().map(|state| state.apply(decision));
             }
         }
@@ -298,25 +306,6 @@ impl<P: Port, B: Bmca, L: PortLog> PortIngress for Option<PortState<P, B, L>> {
                 *self = self.take().map(|state| state.apply(decision));
             }
         }
-    }
-}
-
-use std::time::Duration;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LogInterval {
-    log_value: i8,
-}
-
-impl LogInterval {
-    pub const fn new(log_value: i8) -> Self {
-        assert!(log_value >= -10 && log_value <= 10);
-
-        Self { log_value }
-    }
-
-    pub fn duration(self) -> Duration {
-        Duration::from_secs_f64(2_f64.powi(self.log_value as i32))
     }
 }
 
@@ -342,8 +331,8 @@ impl PortTimingPolicy {
         }
     }
 
-    pub fn announce_interval(&self) -> Duration {
-        self.log_announce_interval.duration()
+    pub fn log_announce_interval(&self) -> LogInterval {
+        self.log_announce_interval
     }
 
     pub fn sync_interval(&self) -> Duration {
@@ -481,36 +470,6 @@ mod tests {
             &crate::port::PortIdentity::new(identity, port_number).to_bytes()
         );
     }
-
-    #[test]
-    fn log_interval_duration() {
-        let li = LogInterval::new(0);
-        assert_eq!(li.duration(), Duration::from_secs(1));
-
-        let li = LogInterval::new(1);
-        assert_eq!(li.duration(), Duration::from_secs(2));
-
-        let li = LogInterval::new(2);
-        assert_eq!(li.duration(), Duration::from_secs(4));
-
-        let li = LogInterval::new(-1);
-        assert_eq!(li.duration(), Duration::from_millis(500));
-
-        let li = LogInterval::new(-2);
-        assert_eq!(li.duration(), Duration::from_millis(250));
-    }
-
-    #[test]
-    #[should_panic]
-    fn log_interval_new_panics_on_out_of_range_positive() {
-        let _ = LogInterval::new(11);
-    }
-
-    #[test]
-    #[should_panic]
-    fn log_interval_new_panics_on_out_of_range_negative() {
-        let _ = LogInterval::new(-11);
-    }
 }
 
 #[cfg(test)]
@@ -519,11 +478,9 @@ pub mod test_support {
 
     use std::cell::RefCell;
     use std::rc::Rc;
-    use std::time::Duration;
 
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-
-    use super::Timeout;
+    use crate::time::Duration;
 
     #[derive(Debug)]
     pub struct FakeTimeout {

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::bmca::{
     Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
 };
@@ -11,7 +9,7 @@ use crate::message::{
 };
 use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
 use crate::portstate::{PortState, StateDecision};
-use crate::time::TimeStamp;
+use crate::time::{Duration, Instant, LogInterval, TimeStamp};
 
 pub struct MasterPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
@@ -45,8 +43,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         let announce_message = self.announce_cycle.announce(&self.port.local_clock());
         self.port
             .send_general(GeneralMessage::Announce(announce_message));
-        self.announce_cycle
-            .next(self.timing_policy.announce_interval());
+        self.announce_cycle.next();
         self.log.message_sent("Announce");
     }
 
@@ -54,10 +51,11 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
+        now: Instant,
     ) -> Option<StateDecision> {
         self.log.message_received("Announce");
 
-        msg.feed_bmca(&mut self.bmca, source_port_identity);
+        msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision(self.port.local_clock()) {
             BmcaDecision::Undecided => None,
@@ -133,24 +131,26 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
 #[derive(Debug, PartialEq, Eq)]
 pub struct AnnounceCycle<T: Timeout> {
     sequence_id: SequenceId,
+    log_interval: LogInterval,
     timeout: T,
 }
 
 impl<T: Timeout> AnnounceCycle<T> {
-    pub fn new(start: SequenceId, timeout: T) -> Self {
+    pub fn new(start: SequenceId, log_interval: LogInterval, timeout: T) -> Self {
         Self {
             sequence_id: start,
+            log_interval,
             timeout,
         }
     }
 
-    pub fn next(&mut self, interval: Duration) {
-        self.timeout.restart(interval);
+    pub fn next(&mut self) {
+        self.timeout.restart(self.log_interval.duration());
         self.sequence_id = self.sequence_id.next();
     }
 
     pub fn announce<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> AnnounceMessage {
-        local_clock.announce(self.sequence_id)
+        local_clock.announce(self.sequence_id, self.log_interval.log_message_interval())
     }
 }
 
@@ -193,6 +193,7 @@ mod tests {
     use crate::port::test_support::{FakePort, FakeTimeout, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
+    use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]
     fn master_port_answers_delay_request_with_delay_response() {
@@ -212,6 +213,7 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
+            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
         );
         let sync_cycle = SyncCycle::new(
@@ -221,9 +223,7 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -264,9 +264,7 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -300,9 +298,7 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -334,6 +330,7 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
+            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
         );
         let sync_cycle = SyncCycle::new(
@@ -343,9 +340,7 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -386,9 +381,7 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -420,9 +413,7 @@ mod tests {
 
         let mut master = PortState::master(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
             PortTimingPolicy::default(),
         );
@@ -433,6 +424,7 @@ mod tests {
         assert!(
             messages.contains(&GeneralMessage::Announce(AnnounceMessage::new(
                 0.into(),
+                LogMessageInterval::new(0),
                 ForeignClockDS::high_grade_test_clock()
             )))
         );
@@ -455,6 +447,7 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
+            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
         );
         let sync_cycle = SyncCycle::new(
@@ -464,9 +457,7 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -474,14 +465,16 @@ mod tests {
         );
 
         let decision = master.process_announce(
-            AnnounceMessage::new(42.into(), foreign_clock_ds),
+            AnnounceMessage::new(42.into(), LogMessageInterval::new(0), foreign_clock_ds),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
         assert!(matches!(decision, None));
 
         let decision = master.process_announce(
-            AnnounceMessage::new(43.into(), foreign_clock_ds),
+            AnnounceMessage::new(43.into(), LogMessageInterval::new(0), foreign_clock_ds),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         assert!(matches!(decision, Some(StateDecision::RecommendedSlave(_))));
@@ -495,8 +488,13 @@ mod tests {
             StepsRemoved::new(0),
         );
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
-        let prior_records =
-            [ForeignClockRecord::new(PortIdentity::fake(), foreign_clock_ds).qualify()];
+        let prior_records = [ForeignClockRecord::new(
+            PortIdentity::fake(),
+            foreign_clock_ds,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )
+        .qualify()];
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
@@ -508,6 +506,7 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
+            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
         );
         let sync_cycle = SyncCycle::new(
@@ -530,8 +529,9 @@ mod tests {
         timer_host.take_system_messages();
 
         let decision = master.process_announce(
-            AnnounceMessage::new(42.into(), foreign_clock_ds),
+            AnnounceMessage::new(42.into(), LogMessageInterval::new(0), foreign_clock_ds),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         assert!(matches!(decision, None));
@@ -557,6 +557,7 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
+            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
         );
         let sync_cycle = SyncCycle::new(
@@ -566,9 +567,7 @@ mod tests {
 
         let mut master = MasterPort::new(
             domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             announce_cycle,
             sync_cycle,
             NoopPortLog,
@@ -579,8 +578,9 @@ mod tests {
         timer_host.take_system_messages();
 
         let transition = master.process_announce(
-            AnnounceMessage::new(42.into(), foreign_clock_ds),
+            AnnounceMessage::new(42.into(), LogMessageInterval::new(0), foreign_clock_ds),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         assert!(matches!(transition, None));
@@ -596,7 +596,13 @@ mod tests {
         );
         let parent_port = PortIdentity::fake();
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(parent_port, foreign_clock_ds).qualify()];
+        let prior_records = [ForeignClockRecord::new(
+            parent_port,
+            foreign_clock_ds,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )
+        .qualify()];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -606,6 +612,7 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
+            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
         );
         let sync_cycle = SyncCycle::new(
@@ -626,8 +633,13 @@ mod tests {
 
         // Receive a better announce (but still lower quality than local high-grade clock)
         let decision = master.process_announce(
-            AnnounceMessage::new(42.into(), ForeignClockDS::mid_grade_test_clock()),
+            AnnounceMessage::new(
+                42.into(),
+                LogMessageInterval::new(0),
+                ForeignClockDS::mid_grade_test_clock(),
+            ),
             parent_port,
+            Instant::from_secs(0),
         );
 
         // expect no state change - master stays master when receiving worse announces
@@ -644,19 +656,28 @@ mod tests {
 
         let mut cycle = AnnounceCycle::new(
             0.into(),
+            LogInterval::new(0),
             FakeTimeout::new(SystemMessage::AnnounceSendTimeout),
         );
         let msg1 = cycle.announce(&local_clock);
-        cycle.next(Duration::from_secs(1));
+        cycle.next();
         let msg2 = cycle.announce(&local_clock);
 
         assert_eq!(
             msg1,
-            AnnounceMessage::new(0.into(), ForeignClockDS::high_grade_test_clock())
+            AnnounceMessage::new(
+                0.into(),
+                LogInterval::new(0).log_message_interval(),
+                ForeignClockDS::high_grade_test_clock()
+            )
         );
         assert_eq!(
             msg2,
-            AnnounceMessage::new(1.into(), ForeignClockDS::high_grade_test_clock())
+            AnnounceMessage::new(
+                1.into(),
+                LogInterval::new(0).log_message_interval(),
+                ForeignClockDS::high_grade_test_clock()
+            )
         );
     }
 

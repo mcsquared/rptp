@@ -5,6 +5,7 @@ use crate::log::PortLog;
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
 use crate::portstate::{PortState, StateDecision};
+use crate::time::Instant;
 
 pub struct ListeningPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
@@ -68,12 +69,13 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
+        now: Instant,
     ) -> Option<StateDecision> {
         self.log.message_received("Announce");
         self.announce_receipt_timeout
             .restart(self.timing_policy.announce_receipt_timeout_interval());
 
-        msg.feed_bmca(&mut self.bmca, source_port_identity);
+        msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision(self.port.local_clock()) {
             BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
@@ -88,8 +90,6 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
 mod tests {
     use super::*;
 
-    use std::time::Duration;
-
     use crate::bmca::{BmcaMasterDecisionPoint, DefaultDS, ForeignClockDS, IncrementalBmca};
     use crate::clock::{FakeClock, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
@@ -98,6 +98,7 @@ mod tests {
     use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
+    use crate::time::{Duration, Instant, LogMessageInterval};
 
     #[test]
     fn listening_port_to_master_transition_on_announce_receipt_timeout() {
@@ -168,8 +169,9 @@ mod tests {
         timer_host.take_system_messages();
 
         let transition = listening.process_announce(
-            AnnounceMessage::new(0.into(), foreign_clock),
+            AnnounceMessage::new(0.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         assert!(matches!(transition, None));
@@ -207,14 +209,16 @@ mod tests {
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
         let transition = listening.process_announce(
-            AnnounceMessage::new(0.into(), foreign_clock.clone()),
+            AnnounceMessage::new(0.into(), LogMessageInterval::new(0), foreign_clock.clone()),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
         assert!(matches!(transition, None));
 
         let transition = listening.process_announce(
-            AnnounceMessage::new(1.into(), foreign_clock.clone()),
+            AnnounceMessage::new(1.into(), LogMessageInterval::new(0), foreign_clock.clone()),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
         assert!(matches!(
             transition,
@@ -256,14 +260,16 @@ mod tests {
         timer_host.take_system_messages();
 
         let transition = listening.process_announce(
-            AnnounceMessage::new(0.into(), foreign_clock),
+            AnnounceMessage::new(0.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
         assert!(matches!(transition, None));
 
         let transition = listening.process_announce(
-            AnnounceMessage::new(1.into(), foreign_clock),
+            AnnounceMessage::new(1.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         assert!(matches!(
@@ -305,13 +311,15 @@ mod tests {
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
         let _ = listening.process_announce(
-            AnnounceMessage::new(0.into(), foreign_clock),
+            AnnounceMessage::new(0.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         let transition = listening.process_announce(
-            AnnounceMessage::new(1.into(), foreign_clock),
+            AnnounceMessage::new(1.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         let decision = match transition {
@@ -359,13 +367,15 @@ mod tests {
         let foreign_clock = ForeignClockDS::low_grade_test_clock();
 
         let _ = listening.process_announce(
-            AnnounceMessage::new(0.into(), foreign_clock),
+            AnnounceMessage::new(0.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         let transition = listening.process_announce(
-            AnnounceMessage::new(1.into(), foreign_clock),
+            AnnounceMessage::new(1.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         let decision = match transition {
@@ -417,13 +427,15 @@ mod tests {
         timer_host.take_system_messages();
 
         let _ = listening.process_announce(
-            AnnounceMessage::new(0.into(), foreign_clock),
+            AnnounceMessage::new(0.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         let transition = listening.process_announce(
-            AnnounceMessage::new(1.into(), foreign_clock),
+            AnnounceMessage::new(1.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
+            Instant::from_secs(0),
         );
 
         let decision = match transition {
