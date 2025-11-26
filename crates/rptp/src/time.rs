@@ -20,10 +20,10 @@ impl TimeStamp {
     }
 }
 
-impl std::ops::Sub<Duration> for TimeStamp {
+impl std::ops::Sub<TimeInterval> for TimeStamp {
     type Output = TimeStamp;
 
-    fn sub(self, rhs: Duration) -> Self::Output {
+    fn sub(self, rhs: TimeInterval) -> Self::Output {
         let mut seconds = self.seconds as i64 - rhs.seconds;
         let mut nanos = self.nanos as i32 - rhs.nanos as i32;
 
@@ -38,7 +38,7 @@ impl std::ops::Sub<Duration> for TimeStamp {
 }
 
 impl std::ops::Sub for TimeStamp {
-    type Output = Duration;
+    type Output = TimeInterval;
 
     fn sub(self, rhs: Self) -> Self::Output {
         let mut delta_seconds = self.seconds as i64 - rhs.seconds as i64;
@@ -49,17 +49,17 @@ impl std::ops::Sub for TimeStamp {
             delta_nanos += 1_000_000_000;
         }
 
-        Duration::new(delta_seconds, delta_nanos as u32)
+        TimeInterval::new(delta_seconds, delta_nanos as u32)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Duration {
+pub struct TimeInterval {
     seconds: i64,
     nanos: u32,
 }
 
-impl Duration {
+impl TimeInterval {
     pub fn new(seconds: i64, nanos: u32) -> Self {
         Self { seconds, nanos }
     }
@@ -80,8 +80,8 @@ impl Duration {
     }
 }
 
-impl std::ops::Sub for Duration {
-    type Output = Duration;
+impl std::ops::Sub for TimeInterval {
+    type Output = TimeInterval;
 
     fn sub(self, rhs: Self) -> Self::Output {
         let mut delta_seconds = self.seconds - rhs.seconds;
@@ -92,7 +92,7 @@ impl std::ops::Sub for Duration {
             delta_nanos += 1_000_000_000;
         }
 
-        Duration::new(delta_seconds, delta_nanos as u32)
+        TimeInterval::new(delta_seconds, delta_nanos as u32)
     }
 }
 
@@ -118,10 +118,10 @@ mod tests {
         let ts2 = TimeStamp::new(1, 200_000_000);
 
         let duration = ts1 - ts2;
-        assert_eq!(duration, Duration::new(0, 300_000_000));
+        assert_eq!(duration, TimeInterval::new(0, 300_000_000));
 
         let duration = ts2 - ts1;
-        assert_eq!(duration, Duration::new(-1, 700_000_000));
+        assert_eq!(duration, TimeInterval::new(-1, 700_000_000));
     }
 
     #[test]
@@ -130,10 +130,10 @@ mod tests {
         let ts2 = TimeStamp::new(0, 0);
 
         let duration = ts1 - ts2;
-        assert_eq!(duration, Duration::new((1 << 47) - 1, 999_999_999));
+        assert_eq!(duration, TimeInterval::new((1 << 47) - 1, 999_999_999));
 
         let duration = ts2 - ts1;
-        assert_eq!(duration, Duration::new(-((1 << 47) - 1) - 1, 1));
+        assert_eq!(duration, TimeInterval::new(-((1 << 47) - 1) - 1, 1));
     }
 
     #[test]
@@ -142,40 +142,40 @@ mod tests {
         let ts2 = TimeStamp::new(1, 900_000_000);
 
         let duration = ts1 - ts2;
-        assert_eq!(duration, Duration::new(0, 200_000_000));
+        assert_eq!(duration, TimeInterval::new(0, 200_000_000));
 
         let duration = ts2 - ts1;
-        assert_eq!(duration, Duration::new(-1, 800_000_000));
+        assert_eq!(duration, TimeInterval::new(-1, 800_000_000));
     }
 
     #[test]
     fn timestamp_subtraction_zero_duration() {
         let ts = TimeStamp::new(1, 500_000_000);
         let duration = ts - ts;
-        assert_eq!(duration, Duration::new(0, 0));
+        assert_eq!(duration, TimeInterval::new(0, 0));
     }
 
     #[test]
     fn duration_half_zero() {
-        let duration = Duration::new(0, 0);
-        assert_eq!(duration.half(), Duration::new(0, 0));
+        let duration = TimeInterval::new(0, 0);
+        assert_eq!(duration.half(), TimeInterval::new(0, 0));
     }
 
     #[test]
     fn duration_half_even_positive() {
-        let duration = Duration::new(2, 0);
-        assert_eq!(duration.half(), Duration::new(1, 0));
+        let duration = TimeInterval::new(2, 0);
+        assert_eq!(duration.half(), TimeInterval::new(1, 0));
     }
 
     #[test]
     fn duration_half_positive_odd_rounds_towards_zero() {
-        let duration = Duration::new(0, 1);
-        assert_eq!(duration.half(), Duration::new(0, 0));
+        let duration = TimeInterval::new(0, 1);
+        assert_eq!(duration.half(), TimeInterval::new(0, 0));
     }
 
     #[test]
     fn duration_half_negative_odd_rounds_towards_zero() {
-        let duration = Duration::new(-1, 999_999_999);
-        assert_eq!(duration.half(), Duration::new(0, 0));
+        let duration = TimeInterval::new(-1, 999_999_999);
+        assert_eq!(duration.half(), TimeInterval::new(0, 0));
     }
 }

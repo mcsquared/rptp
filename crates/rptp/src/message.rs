@@ -3,7 +3,7 @@ use crate::{
     buffer::{ControlField, FinalizedBuffer, MessageBuffer, MessageFlags, MessageType},
     port::{DomainNumber, PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
-    time::{Duration, TimeStamp},
+    time::{TimeInterval, TimeStamp},
 };
 
 pub struct DomainMessage<'a> {
@@ -293,7 +293,7 @@ impl FollowUpMessage {
         &self,
         sync: TwoStepSyncMessage,
         sync_ingress_timestamp: TimeStamp,
-    ) -> Option<Duration> {
+    ) -> Option<TimeInterval> {
         if self.sequence_id == sync.sequence_id {
             Some(sync_ingress_timestamp - self.precise_origin_timestamp)
         } else {
@@ -380,7 +380,7 @@ impl DelayResponseMessage {
         &self,
         delay_req: DelayRequestMessage,
         delay_req_egress_timestamp: TimeStamp,
-    ) -> Option<Duration> {
+    ) -> Option<TimeInterval> {
         if self.sequence_id == delay_req.sequence_id {
             Some(self.receive_timestamp - delay_req_egress_timestamp)
         } else {
@@ -629,7 +629,7 @@ mod tests {
         let sync_ingress_timestamp = TimeStamp::new(5, 0);
         let offset = follow_up.master_slave_offset(sync, sync_ingress_timestamp);
 
-        assert_eq!(offset, Some(Duration::new(1, 0)));
+        assert_eq!(offset, Some(TimeInterval::new(1, 0)));
     }
 
     #[test]
@@ -651,7 +651,7 @@ mod tests {
         let delay_req_egress_timestamp = TimeStamp::new(4, 0);
         let offset = delay_resp.slave_master_offset(delay_req, delay_req_egress_timestamp);
 
-        assert_eq!(offset, Some(Duration::new(1, 0)));
+        assert_eq!(offset, Some(TimeInterval::new(1, 0)));
     }
 
     #[test]
@@ -688,7 +688,7 @@ mod tests {
             follow.master_slave_offset(sync, ts)
         });
 
-        assert_eq!(offset, Some(Duration::new(1, 0)));
+        assert_eq!(offset, Some(TimeInterval::new(1, 0)));
     }
 
     #[test]
@@ -723,7 +723,7 @@ mod tests {
         let matched = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });
-        assert_eq!(matched, Some(Duration::new(1, 0)));
+        assert_eq!(matched, Some(TimeInterval::new(1, 0)));
     }
 
     #[test]
@@ -744,7 +744,7 @@ mod tests {
         let matched = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });
-        assert_eq!(matched, Some(Duration::new(1, 0)));
+        assert_eq!(matched, Some(TimeInterval::new(1, 0)));
     }
 
     #[test]
@@ -759,7 +759,7 @@ mod tests {
         let matched = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });
-        assert_eq!(matched, Some(Duration::new(1, 0)));
+        assert_eq!(matched, Some(TimeInterval::new(1, 0)));
     }
 
     #[test]
@@ -774,7 +774,7 @@ mod tests {
         let first = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });
-        assert_eq!(first, Some(Duration::new(2, 0)));
+        assert_eq!(first, Some(TimeInterval::new(2, 0)));
 
         // Second pair -> 3s offset overwrites windows
         sync_window.record((TwoStepSyncMessage::new(2.into()), TimeStamp::new(9, 0)));
@@ -782,7 +782,7 @@ mod tests {
         let second = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });
-        assert_eq!(second, Some(Duration::new(3, 0)));
+        assert_eq!(second, Some(TimeInterval::new(3, 0)));
     }
 
     #[test]

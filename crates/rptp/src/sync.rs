@@ -1,7 +1,7 @@
 use crate::message::{
     DelayRequestMessage, DelayResponseMessage, FollowUpMessage, MessageWindow, TwoStepSyncMessage,
 };
-use crate::time::{Duration, TimeStamp};
+use crate::time::{TimeInterval, TimeStamp};
 
 struct SyncExchange {
     two_step_sync_window: MessageWindow<(TwoStepSyncMessage, TimeStamp)>,
@@ -24,7 +24,7 @@ impl SyncExchange {
         self.follow_up_window.record(follow_up);
     }
 
-    pub fn master_slave_offset(&self) -> Option<Duration> {
+    pub fn master_slave_offset(&self) -> Option<TimeInterval> {
         self.follow_up_window
             .combine_latest(&self.two_step_sync_window, |follow_up, &(sync, ts)| {
                 follow_up.master_slave_offset(sync, ts)
@@ -53,7 +53,7 @@ impl DelayExchange {
         self.delay_response_window.record(resp);
     }
 
-    pub fn slave_master_offset(&self) -> Option<Duration> {
+    pub fn slave_master_offset(&self) -> Option<TimeInterval> {
         self.delay_response_window
             .combine_latest(&self.delay_request_window, |resp, &(req, ts)| {
                 resp.slave_master_offset(req, ts)
@@ -154,7 +154,7 @@ mod tests {
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
-            Some(Duration::new(1, 0))
+            Some(TimeInterval::new(1, 0))
         );
     }
 
@@ -167,7 +167,7 @@ mod tests {
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
-            Some(Duration::new(1, 0))
+            Some(TimeInterval::new(1, 0))
         );
     }
 
@@ -201,7 +201,7 @@ mod tests {
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
-            Some(Duration::new(1, 0))
+            Some(TimeInterval::new(1, 0))
         );
     }
 
@@ -216,7 +216,7 @@ mod tests {
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
-            Some(Duration::new(1, 0))
+            Some(TimeInterval::new(1, 0))
         );
     }
 
@@ -254,7 +254,7 @@ mod tests {
 
         assert_eq!(
             delay_exchange.slave_master_offset(),
-            Some(Duration::new(1, 0))
+            Some(TimeInterval::new(1, 0))
         );
     }
 
@@ -268,7 +268,7 @@ mod tests {
 
         assert_eq!(
             delay_exchange.slave_master_offset(),
-            Some(Duration::new(1, 0))
+            Some(TimeInterval::new(1, 0))
         );
     }
 
@@ -306,7 +306,7 @@ mod tests {
 
         assert_eq!(
             delay_exchange.slave_master_offset(),
-            Some(Duration::new(1, 0))
+            Some(TimeInterval::new(1, 0))
         );
     }
 
@@ -322,7 +322,7 @@ mod tests {
 
         assert_eq!(
             delay_exchange.slave_master_offset(),
-            Some(Duration::new(1, 0))
+            Some(TimeInterval::new(1, 0))
         );
     }
 
