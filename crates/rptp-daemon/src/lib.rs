@@ -1,3 +1,4 @@
+pub mod clock;
 pub mod log;
 pub mod net;
 pub mod node;

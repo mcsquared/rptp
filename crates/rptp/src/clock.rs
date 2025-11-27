@@ -113,7 +113,8 @@ pub trait Clock {
 }
 
 pub trait SynchronizableClock: Clock {
-    fn synchronize(&self, to: TimeStamp);
+    fn step(&self, to: TimeStamp);
+    fn adjust(&self, rate: f64);
 }
 
 pub struct LocalClock<C: SynchronizableClock> {
@@ -166,7 +167,7 @@ impl<C: SynchronizableClock> LocalClock<C> {
 
     pub fn discipline(&self, estimate: TimeStamp) {
         // TODO: apply filtering, slew rate limiting, feed to servo, etc.
-        self.clock.synchronize(estimate);
+        self.clock.step(estimate);
     }
 }
 
@@ -222,7 +223,11 @@ impl Clock for FakeClock {
 }
 
 impl SynchronizableClock for FakeClock {
-    fn synchronize(&self, to: TimeStamp) {
+    fn step(&self, to: TimeStamp) {
         self.now.set(to);
+    }
+
+    fn adjust(&self, _rate: f64) {
+        // no-op
     }
 }

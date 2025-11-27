@@ -15,12 +15,6 @@ pub mod infra_support {
         }
     }
 
-    impl SynchronizableClock for Rc<dyn SynchronizableClock> {
-        fn synchronize(&self, to: TimeStamp) {
-            self.as_ref().synchronize(to);
-        }
-    }
-
     impl Clock for Rc<FakeClock> {
         fn now(&self) -> TimeStamp {
             self.as_ref().now()
@@ -46,12 +40,6 @@ pub mod infra_support {
 
         fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
             self.as_ref().timeout(msg, delay)
-        }
-    }
-
-    impl SynchronizableClock for Rc<FakeClock> {
-        fn synchronize(&self, to: TimeStamp) {
-            self.as_ref().synchronize(to);
         }
     }
 
