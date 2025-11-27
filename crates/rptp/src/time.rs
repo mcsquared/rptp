@@ -18,6 +18,22 @@ impl TimeStamp {
         buf[6..10].copy_from_slice(&self.nanos.to_be_bytes());
         buf
     }
+
+    pub fn checked_add(self, rhs: TimeInterval) -> Option<Self> {
+        let mut seconds = (self.seconds as i64).checked_add(rhs.seconds)?;
+        let mut nanos = self.nanos + rhs.nanos;
+
+        if nanos >= 1_000_000_000 {
+            nanos -= 1_000_000_000;
+            seconds = seconds.checked_add(1)?;
+        }
+
+        if seconds < 0 || seconds >= (1 << 47) {
+            return None;
+        }
+
+        Some(TimeStamp::new(seconds as u64, nanos as u32))
+    }
 }
 
 impl std::ops::Sub<TimeInterval> for TimeStamp {
@@ -272,6 +288,69 @@ mod tests {
         let ts = TimeStamp::new(1, 500_000_000);
         let duration = ts - ts;
         assert_eq!(duration, TimeInterval::new(0, 0));
+    }
+
+    #[test]
+    fn timestamp_checked_add_simple() {
+        let ts = TimeStamp::new(1, 500_000_000);
+        let interval = TimeInterval::new(2, 250_000_000);
+
+        let result = ts.checked_add(interval).unwrap();
+        assert_eq!(result, TimeStamp::new(3, 750_000_000));
+    }
+
+    #[test]
+    fn timestamp_checked_add_with_nanos_carry() {
+        let ts = TimeStamp::new(1, 900_000_000);
+        let interval = TimeInterval::new(0, 200_000_000);
+
+        let result = ts.checked_add(interval).unwrap();
+        assert_eq!(result, TimeStamp::new(2, 100_000_000));
+    }
+
+    #[test]
+    fn timestamp_checked_add_overflows_domain_range() {
+        let ts = TimeStamp::new(0, 0);
+        let interval = TimeInterval::new(i64::MAX, 0);
+
+        let result = ts.checked_add(interval);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn timestamp_checked_add_hits_upper_bound() {
+        let ts = TimeStamp::new((1 << 47) - 2, 999_999_999);
+        let interval = TimeInterval::new(0, 1);
+
+        let result = ts.checked_add(interval).unwrap();
+        assert_eq!(result, TimeStamp::new((1 << 47) - 1, 0));
+    }
+
+    #[test]
+    fn timestamp_checked_add_beyond_upper_bound_returns_none() {
+        let ts = TimeStamp::new((1 << 47) - 2, 0);
+        let interval = TimeInterval::new(3, 0);
+
+        let result = ts.checked_add(interval);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn timestamp_checked_add_negative_interval_below_zero_returns_none() {
+        let ts = TimeStamp::new(1, 0);
+        let interval = TimeInterval::new(-2, 0);
+
+        let result = ts.checked_add(interval);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn timestamp_checked_add_large_negative_interval_returns_none() {
+        let ts = TimeStamp::new(0, 0);
+        let interval = TimeInterval::new(i64::MIN, 0);
+
+        let result = ts.checked_add(interval);
+        assert!(result.is_none());
     }
 
     #[test]
