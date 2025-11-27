@@ -8,8 +8,9 @@ use std::rc::Rc;
 use tokio::sync::mpsc;
 
 use rptp::bmca::{DefaultDS, Priority1, Priority2};
-use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock, StepsRemoved};
+use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved};
 use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
+use rptp::test_support::FakeClock;
 
 use crate::net::MulticastSocket;
 use crate::node::TokioPortsLoop;

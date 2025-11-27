@@ -4,18 +4,12 @@ pub mod infra_support {
     use crate::bmca::{
         ForeignClockRecord, ForeignClockResult, ForeignClockStatus, SortedForeignClockRecords,
     };
-    use crate::clock::{Clock, FakeClock, LocalClock, SynchronizableClock};
+    use crate::clock::{Clock, LocalClock, SynchronizableClock};
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
     use crate::port::{Port, PortIdentity};
     use crate::time::{Duration, TimeStamp};
 
     impl Clock for Rc<dyn SynchronizableClock> {
-        fn now(&self) -> TimeStamp {
-            self.as_ref().now()
-        }
-    }
-
-    impl Clock for Rc<FakeClock> {
         fn now(&self) -> TimeStamp {
             self.as_ref().now()
         }

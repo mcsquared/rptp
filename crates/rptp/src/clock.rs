@@ -197,37 +197,3 @@ impl StepsRemoved {
         self.0.to_be_bytes()
     }
 }
-
-pub struct FakeClock {
-    now: Cell<TimeStamp>,
-}
-
-impl FakeClock {
-    pub fn new(now: TimeStamp) -> Self {
-        Self {
-            now: Cell::new(now),
-        }
-    }
-}
-
-impl Default for FakeClock {
-    fn default() -> Self {
-        Self::new(TimeStamp::new(0, 0))
-    }
-}
-
-impl Clock for FakeClock {
-    fn now(&self) -> TimeStamp {
-        self.now.get()
-    }
-}
-
-impl SynchronizableClock for FakeClock {
-    fn step(&self, to: TimeStamp) {
-        self.now.set(to);
-    }
-
-    fn adjust(&self, _rate: f64) {
-        // no-op
-    }
-}

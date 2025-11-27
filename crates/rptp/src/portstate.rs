@@ -284,11 +284,11 @@ mod tests {
 
     use crate::bmca::BmcaMasterDecisionPoint;
     use crate::bmca::{DefaultDS, IncrementalBmca};
-    use crate::clock::{FakeClock, LocalClock, StepsRemoved};
+    use crate::clock::{LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
-    use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
+    use crate::test_support::{FakeClock, FakePort, FakeTimerHost};
 
     #[test]
     fn portstate_listening_to_master_transition() {

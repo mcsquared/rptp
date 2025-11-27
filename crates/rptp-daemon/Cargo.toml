@@ -12,7 +12,7 @@ categories = ["date-and-time", "network-programming"]
 rust-version = "1.89"
 
 [dependencies]
-rptp = { path = "../rptp" }
+rptp = { path = "../rptp", features = ["test-support"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

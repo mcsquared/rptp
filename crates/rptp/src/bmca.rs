@@ -980,9 +980,9 @@ impl QualificationTimeoutPolicy {
 pub(crate) mod tests {
     use super::*;
 
-    use crate::clock::FakeClock;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::port::PortNumber;
+    use crate::test_support::FakeClock;
     use crate::time::{Duration, Instant};
 
     const CLK_ID_HIGH: ClockIdentity =

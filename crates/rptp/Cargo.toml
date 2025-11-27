@@ -13,3 +13,6 @@ rust-version = "1.89"
 
 [dependencies]
 bitflags = "2"
+
+[features]
+test-support = []

@@ -5,8 +5,9 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
 use rptp::bmca::{DefaultDS, Priority1, Priority2};
-use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, LocalClock, StepsRemoved};
+use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved};
 use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
+use rptp::test_support::FakeClock;
 use rptp::time::TimeStamp;
 use rptp_daemon::net::MulticastSocket;
 use rptp_daemon::node::TokioPortsLoop;

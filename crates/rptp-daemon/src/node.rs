@@ -271,13 +271,14 @@ mod tests {
     use rptp::bmca::{
         DefaultDS, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1, Priority2,
     };
-    use rptp::clock::{ClockIdentity, ClockQuality, FakeClock, StepsRemoved};
+    use rptp::clock::{ClockIdentity, ClockQuality, StepsRemoved};
     use rptp::message::{EventMessage, GeneralMessage};
     use rptp::port::{
         DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber, PortTimingPolicy,
     };
     use rptp::portstate::PortState;
     use rptp::slave::{DelayCycle, SlavePort};
+    use rptp::test_support::FakeClock;
 
     use crate::log::TracingPortLog;
     use crate::net::{FakeNetworkSocket, MulticastSocket};

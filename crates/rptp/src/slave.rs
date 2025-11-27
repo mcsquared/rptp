@@ -211,13 +211,13 @@ mod tests {
     use super::*;
 
     use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, IncrementalBmca};
-    use crate::clock::{ClockIdentity, FakeClock, LocalClock, StepsRemoved};
+    use crate::clock::{ClockIdentity, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
-    use crate::port::test_support::{FakePort, FakeTimeout, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::portstate::PortState;
+    use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]

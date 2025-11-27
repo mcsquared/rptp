@@ -80,14 +80,14 @@ mod tests {
     use super::*;
 
     use crate::bmca::{DefaultDS, IncrementalBmca};
-    use crate::clock::{FakeClock, LocalClock, StepsRemoved};
+    use crate::clock::{LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
-    use crate::port::test_support::{FakePort, FakeTimerHost};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
     use crate::portstate::StateDecision;
+    use crate::test_support::{FakeClock, FakePort, FakeTimerHost};
     use crate::time::{Duration, Instant, LogMessageInterval};
 
     #[test]
