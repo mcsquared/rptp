@@ -1,5 +1,5 @@
-use std::fmt::{Display, Formatter};
-use std::ops::Range;
+use core::fmt::{Display, Formatter};
+use core::ops::Range;
 
 use crate::bmca::{Bmca, QualificationTimeoutPolicy};
 use crate::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
@@ -140,7 +140,7 @@ impl PortIdentity {
 }
 
 impl Display for PortIdentity {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}-{}", self.clock_identity, self.port_number.0)
     }
 }
@@ -163,7 +163,7 @@ impl ParentPortIdentity {
 }
 
 impl Display for ParentPortIdentity {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.parent_port_identity)
     }
 }
@@ -377,7 +377,7 @@ impl Default for PortTimingPolicy {
 mod tests {
     use super::*;
 
-    use std::cell::RefCell;
+    use core::cell::RefCell;
     use std::rc::Rc;
 
     use crate::bmca::DefaultDS;

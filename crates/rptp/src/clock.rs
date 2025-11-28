@@ -1,6 +1,6 @@
+use core::cell::Cell;
 use core::fmt::{Display, Formatter};
-use std::cell::Cell;
-use std::ops::Range;
+use core::ops::Range;
 
 use crate::{
     bmca::{DefaultDS, ForeignClockDS},
@@ -24,7 +24,7 @@ impl ClockIdentity {
 }
 
 impl Display for ClockIdentity {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{:02x}{:02x}{:02x}.{:02x}{:02x}.{:02x}{:02x}{:02x}",
@@ -86,7 +86,7 @@ impl ClockQuality {
 }
 
 impl Ord for ClockQuality {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         let a = (
             &self.clock_class,
             &self.clock_accuracy,
@@ -103,7 +103,7 @@ impl Ord for ClockQuality {
 }
 
 impl PartialOrd for ClockQuality {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }

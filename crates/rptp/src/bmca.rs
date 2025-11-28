@@ -15,8 +15,8 @@
 //! - query the current decision using [`Bmca::decision`];
 //! - transition the [`PortState`] based on the returned [`BmcaDecision`].
 
-use std::cell::Cell;
-use std::ops::Range;
+use core::cell::Cell;
+use core::ops::Range;
 
 use crate::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
 use crate::log::PortLog;
@@ -494,8 +494,8 @@ impl ForeignClockRecord {
 }
 
 impl Ord for ForeignClockRecord {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use std::cmp::Ordering::*;
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        use core::cmp::Ordering::*;
 
         let ord = match (self.dataset(), other.dataset()) {
             (Some(&ds1), Some(&ds2)) => {
@@ -521,7 +521,7 @@ impl Ord for ForeignClockRecord {
 }
 
 impl PartialOrd for ForeignClockRecord {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }

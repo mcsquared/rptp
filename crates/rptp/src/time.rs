@@ -36,7 +36,7 @@ impl TimeStamp {
     }
 }
 
-impl std::ops::Sub<TimeInterval> for TimeStamp {
+impl core::ops::Sub<TimeInterval> for TimeStamp {
     type Output = TimeStamp;
 
     fn sub(self, rhs: TimeInterval) -> Self::Output {
@@ -53,7 +53,7 @@ impl std::ops::Sub<TimeInterval> for TimeStamp {
     }
 }
 
-impl std::ops::Sub for TimeStamp {
+impl core::ops::Sub for TimeStamp {
     type Output = TimeInterval;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -96,7 +96,7 @@ impl TimeInterval {
     }
 }
 
-impl std::ops::Sub for TimeInterval {
+impl core::ops::Sub for TimeInterval {
     type Output = TimeInterval;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -129,7 +129,7 @@ impl Instant {
     }
 }
 
-impl std::ops::Sub for Instant {
+impl core::ops::Sub for Instant {
     type Output = Duration;
 
     fn sub(self, rhs: Self) -> Self::Output {
