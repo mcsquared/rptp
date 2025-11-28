@@ -1,3 +1,4 @@
+#[cfg(feature = "std")]
 pub mod infra_support {
     use std::rc::Rc;
 

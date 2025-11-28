@@ -1,8 +1,9 @@
+#![cfg_attr(not(any(test, feature = "std")), no_std)]
+
 pub mod bmca;
 pub mod buffer;
 pub mod clock;
 pub mod faulty;
-pub mod infra;
 pub mod initializing;
 pub mod listening;
 pub mod log;
@@ -17,6 +18,9 @@ pub mod sync;
 pub mod time;
 pub mod timestamping;
 pub mod uncalibrated;
+
+#[cfg(feature = "std")]
+pub mod infra;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

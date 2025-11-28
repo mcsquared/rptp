@@ -12,7 +12,10 @@ categories = ["date-and-time", "network-programming"]
 rust-version = "1.89"
 
 [dependencies]
-bitflags = "2"
+bitflags = { version = "2", default-features = false }
 
 [features]
-test-support = []
+default = ["std"]
+std = []
+test-support = ["std"]      # test_support module needs Rc/RefCell/Vec
+infra = ["std"]             # infra module needs Rc/Vec
