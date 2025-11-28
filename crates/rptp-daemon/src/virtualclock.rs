@@ -4,14 +4,12 @@ use std::time::Instant as StdInstant;
 use rptp::clock::{Clock, SynchronizableClock};
 use rptp::time::{TimeInterval, TimeStamp};
 
-#[allow(dead_code)]
-struct VirtualClock {
+pub struct VirtualClock {
     start: RefCell<StdInstant>,
     ts: RefCell<TimeStamp>,
     rate: RefCell<f64>,
 }
 
-#[allow(dead_code)]
 impl VirtualClock {
     pub fn new(start_ts: TimeStamp, rate: f64) -> Self {
         Self {
@@ -35,6 +33,12 @@ impl Clock for VirtualClock {
     }
 }
 
+impl Clock for &VirtualClock {
+    fn now(&self) -> TimeStamp {
+        (*self).now()
+    }
+}
+
 impl SynchronizableClock for VirtualClock {
     fn step(&self, to: TimeStamp) {
         self.start.replace(StdInstant::now());
@@ -46,6 +50,16 @@ impl SynchronizableClock for VirtualClock {
         self.start.replace(StdInstant::now());
         self.ts.replace(current);
         self.rate.replace(rate);
+    }
+}
+
+impl SynchronizableClock for &VirtualClock {
+    fn step(&self, to: TimeStamp) {
+        (*self).step(to)
+    }
+
+    fn adjust(&self, rate: f64) {
+        (*self).adjust(rate)
     }
 }
 

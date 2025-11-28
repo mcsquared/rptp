@@ -15,6 +15,7 @@ pub mod result;
 pub mod slave;
 pub mod sync;
 pub mod time;
+pub mod timestamping;
 pub mod uncalibrated;
 
 #[cfg(any(test, feature = "test-support"))]

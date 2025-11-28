@@ -3,6 +3,7 @@ use std::cell::Cell;
 use crate::clock::{Clock, ClockIdentity, SynchronizableClock};
 use crate::port::{PhysicalPort, PortIdentity, PortNumber, Timeout, TimerHost};
 use crate::time::TimeStamp;
+use crate::timestamping::TxTimestamping;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -34,6 +35,12 @@ impl Clock for FakeClock {
     }
 }
 
+impl Clock for &FakeClock {
+    fn now(&self) -> TimeStamp {
+        (*self).now()
+    }
+}
+
 impl SynchronizableClock for FakeClock {
     fn step(&self, to: TimeStamp) {
         self.now.set(to);
@@ -44,9 +51,33 @@ impl SynchronizableClock for FakeClock {
     }
 }
 
+impl SynchronizableClock for &FakeClock {
+    fn step(&self, to: TimeStamp) {
+        (*self).step(to);
+    }
+
+    fn adjust(&self, rate: f64) {
+        (*self).adjust(rate);
+    }
+}
+
 impl Clock for Rc<FakeClock> {
     fn now(&self) -> TimeStamp {
         self.as_ref().now()
+    }
+}
+
+pub struct FakeTimestamping;
+
+impl FakeTimestamping {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl TxTimestamping for FakeTimestamping {
+    fn stamp_egress(&self, _msg: EventMessage) {
+        // no-op
     }
 }
 

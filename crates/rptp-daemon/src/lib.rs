@@ -1,8 +1,9 @@
-pub mod clock;
 pub mod log;
 pub mod net;
 pub mod node;
 pub mod ordinary;
+pub mod timestamping;
+pub mod virtualclock;
 
 use std::fmt;
 use std::time::Instant;

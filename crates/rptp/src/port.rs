@@ -9,6 +9,7 @@ use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::PortState;
 use crate::result::{ProtocolError, Result};
 use crate::time::{Duration, Instant, LogInterval, TimeStamp};
+use crate::timestamping::TxTimestamping;
 
 pub trait Timeout {
     fn restart(&self, timeout: Duration);
@@ -167,19 +168,24 @@ impl Display for ParentPortIdentity {
     }
 }
 
-pub struct DomainPort<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> {
+pub struct DomainPort<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestamping>
+{
     local_clock: &'a LocalClock<C>,
     physical_port: P,
     timer_host: T,
+    timestamping: TS,
     domain_number: DomainNumber,
     port_number: PortNumber,
 }
 
-impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> DomainPort<'a, C, P, T> {
+impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestamping>
+    DomainPort<'a, C, P, T, TS>
+{
     pub fn new(
         local_clock: &'a LocalClock<C>,
         physical_port: P,
         timer_host: T,
+        timestamping: TS,
         domain_number: DomainNumber,
         port_number: PortNumber,
     ) -> Self {
@@ -187,13 +193,16 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> DomainPort<'a, C
             local_clock,
             physical_port,
             timer_host,
+            timestamping,
             domain_number,
             port_number,
         }
     }
 }
 
-impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> Port for DomainPort<'a, C, P, T> {
+impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestamping> Port
+    for DomainPort<'a, C, P, T, TS>
+{
     type Clock = C;
     type PhysicalPort = P;
     type Timeout = T::Timeout;
@@ -211,6 +220,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost> Port for DomainP
         );
         let finalized = msg.serialize(&mut buf);
         self.physical_port.send_event(finalized.as_ref());
+        self.timestamping.stamp_egress(msg);
     }
 
     fn send_general(&self, msg: GeneralMessage) {
@@ -373,7 +383,7 @@ mod tests {
     use crate::bmca::DefaultDS;
     use crate::clock::{ClockQuality, StepsRemoved};
     use crate::message::{DelayRequestMessage, FollowUpMessage};
-    use crate::test_support::{FakeClock, FakeTimerHost};
+    use crate::test_support::{FakeClock, FakeTimerHost, FakeTimestamping};
 
     struct CapturePort {
         sent: Rc<RefCell<Vec<Vec<u8>>>>,
@@ -417,6 +427,7 @@ mod tests {
             &local_clock,
             cap_port,
             &timer_host,
+            FakeTimestamping::new(),
             domain_number,
             port_number,
         );
@@ -454,6 +465,7 @@ mod tests {
             &local_clock,
             cap_port,
             &timer_host,
+            FakeTimestamping::new(),
             domain_number,
             port_number,
         );

@@ -127,7 +127,7 @@ mod tests {
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::portstate::PortState;
-    use crate::test_support::{FakeClock, FakePort, FakeTimerHost};
+    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]
@@ -153,6 +153,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -228,6 +229,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -267,6 +269,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -306,6 +309,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -366,6 +370,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );

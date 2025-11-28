@@ -8,15 +8,16 @@ use rptp::bmca::IncrementalBmca;
 use rptp::clock::SynchronizableClock;
 use rptp::port::TimerHost;
 use rptp::{
-    clock::LocalClock,
     infra::infra_support::SortedForeignClockRecordsVec,
-    message::{DomainMessage, EventMessage, SystemMessage, TimestampMessage},
+    message::{DomainMessage, SystemMessage},
     port::{DomainNumber, DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
     time::{Duration, Instant},
+    timestamping::TxTimestamping,
 };
 
 use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
+use crate::timestamping::RxTimestamping;
 
 pub struct TokioTimeout {
     inner: Arc<TokioTimeoutInner>,
@@ -111,44 +112,23 @@ impl TimerHost for TokioTimerHost {
     }
 }
 
-pub struct TokioPhysicalPort<'a, C: SynchronizableClock, N: NetworkSocket> {
-    clock: &'a LocalClock<C>,
-    domain_number: DomainNumber,
+pub struct TokioPhysicalPort<N: NetworkSocket> {
     event_socket: Rc<N>,
     general_socket: Rc<N>,
-    system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
 }
 
-impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPhysicalPort<'a, C, N> {
-    pub fn new(
-        clock: &'a LocalClock<C>,
-        domain_number: DomainNumber,
-        event_socket: Rc<N>,
-        general_socket: Rc<N>,
-        system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
-    ) -> Self {
+impl<N: NetworkSocket> TokioPhysicalPort<N> {
+    pub fn new(event_socket: Rc<N>, general_socket: Rc<N>) -> Self {
         Self {
-            clock,
-            domain_number,
             event_socket,
             general_socket,
-            system_tx,
         }
     }
 }
 
-impl<'a, C: SynchronizableClock, N: NetworkSocket> PhysicalPort for TokioPhysicalPort<'a, C, N> {
+impl<N: NetworkSocket> PhysicalPort for TokioPhysicalPort<N> {
     fn send_event(&self, buf: &[u8]) {
         let _ = self.event_socket.try_send(buf);
-
-        let timestamp_msg = SystemMessage::Timestamp(TimestampMessage::new(
-            EventMessage::try_from(buf).unwrap(),
-            self.clock.now(),
-        ));
-
-        self.system_tx
-            .send((self.domain_number, timestamp_msg))
-            .ok();
     }
 
     fn send_general(&self, buf: &[u8]) {
@@ -156,35 +136,37 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> PhysicalPort for TokioPhysica
     }
 }
 
-pub struct TokioPortsLoop<'a, C: SynchronizableClock, N: NetworkSocket> {
-    local_clock: &'a LocalClock<C>,
+pub struct TokioPortsLoop<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping> {
     portmap: SingleDomainPortMap<
-        Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
+        Box<DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, TS>>,
         IncrementalBmca<SortedForeignClockRecordsVec>,
         TracingPortLog,
     >,
     event_socket: Rc<N>,
     general_socket: Rc<N>,
+    timestamping: &'a dyn RxTimestamping,
     system_rx: mpsc::UnboundedReceiver<(DomainNumber, SystemMessage)>,
 }
 
-impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
+impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
+    TokioPortsLoop<'a, C, N, TS>
+{
     pub async fn new(
-        local_clock: &'a LocalClock<C>,
         portmap: SingleDomainPortMap<
-            Box<DomainPort<'a, C, TokioPhysicalPort<'a, C, N>, TokioTimerHost>>,
+            Box<DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, TS>>,
             IncrementalBmca<SortedForeignClockRecordsVec>,
             TracingPortLog,
         >,
         event_socket: Rc<N>,
         general_socket: Rc<N>,
+        timestamping: &'a dyn RxTimestamping,
         system_rx: mpsc::UnboundedReceiver<(DomainNumber, SystemMessage)>,
     ) -> std::io::Result<Self> {
         Ok(Self {
-            local_clock,
             portmap,
             event_socket,
             general_socket,
+            timestamping,
             system_rx,
         })
     }
@@ -215,7 +197,10 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket> TokioPortsLoop<'a, C, N> {
                 recv = self.event_socket.recv(&mut event_buf) => {
                     if let Ok((size, _peer)) = recv {
                         let domain_msg = DomainMessage::new(&event_buf[..size]);
-                        let _ = domain_msg.dispatch_event(&mut self.portmap, self.local_clock.now());
+                        let _ = domain_msg.dispatch_event(
+                            &mut self.portmap,
+                            self.timestamping.ingress_stamp()
+                        );
                     }
                 }
                 recv = self.general_socket.recv(&mut general_buf) => {
@@ -271,7 +256,7 @@ mod tests {
     use rptp::bmca::{
         DefaultDS, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1, Priority2,
     };
-    use rptp::clock::{ClockIdentity, ClockQuality, StepsRemoved};
+    use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved};
     use rptp::message::{EventMessage, GeneralMessage};
     use rptp::port::{
         DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber, PortTimingPolicy,
@@ -279,9 +264,13 @@ mod tests {
     use rptp::portstate::PortState;
     use rptp::slave::{DelayCycle, SlavePort};
     use rptp::test_support::FakeClock;
+    use rptp::test_support::FakeTimestamping;
+    use rptp::time::TimeStamp;
 
     use crate::log::TracingPortLog;
     use crate::net::{FakeNetworkSocket, MulticastSocket};
+    use crate::timestamping::ClockTimestamping;
+    use crate::virtualclock::VirtualClock;
 
     #[test]
     fn tokio_node_state_size() {
@@ -292,8 +281,9 @@ mod tests {
                     DomainPort<
                         'static,
                         FakeClock,
-                        TokioPhysicalPort<'static, FakeClock, MulticastSocket>,
+                        TokioPhysicalPort<MulticastSocket>,
                         TokioTimerHost,
+                        ClockTimestamping<FakeClock>,
                     >,
                 >,
                 IncrementalBmca<SortedForeignClockRecordsVec>,
@@ -302,6 +292,12 @@ mod tests {
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
         assert!(s <= 512);
+    }
+
+    impl RxTimestamping for FakeTimestamping {
+        fn ingress_stamp(&self) -> TimeStamp {
+            TimeStamp::new(0, 0)
+        }
     }
 
     #[tokio::test(start_paused = true)]
@@ -313,8 +309,9 @@ mod tests {
 
         let domain_number = DomainNumber::new(0);
 
+        let virtual_clock = VirtualClock::new(TimeStamp::new(0, 0), 1.0);
         let local_clock = LocalClock::new(
-            FakeClock::default(),
+            &virtual_clock,
             DefaultDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
                 Priority1::new(127),
@@ -325,18 +322,14 @@ mod tests {
         );
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
-        let physical_port = TokioPhysicalPort::new(
-            &local_clock,
-            domain_number,
-            event_socket.clone(),
-            general_socket.clone(),
-            system_tx.clone(),
-        );
+        let timestamping = ClockTimestamping::new(&virtual_clock, system_tx.clone(), domain_number);
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         let port_number = PortNumber::new(1);
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
+            &timestamping,
             domain_number,
             port_number,
         ));
@@ -347,10 +340,10 @@ mod tests {
         let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let portsloop = TokioPortsLoop::new(
-            &local_clock,
             portmap,
             event_socket,
             general_socket,
+            &timestamping,
             system_rx,
         )
         .await?;
@@ -414,18 +407,13 @@ mod tests {
         );
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
-        let physical_port = TokioPhysicalPort::new(
-            &local_clock,
-            domain_number,
-            event_socket.clone(),
-            general_socket.clone(),
-            system_tx.clone(),
-        );
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         let port_number = PortNumber::new(1);
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
             physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
+            FakeTimestamping::new(),
             domain_number,
             port_number,
         ));
@@ -456,11 +444,12 @@ mod tests {
             PortTimingPolicy::default(),
         ));
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
+        let rx_timestamping = FakeTimestamping::new();
         let portsloop = TokioPortsLoop::new(
-            &local_clock,
             portmap,
             event_socket,
             general_socket,
+            &rx_timestamping,
             system_rx,
         )
         .await?;

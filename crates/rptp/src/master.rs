@@ -192,7 +192,7 @@ mod tests {
     };
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
-    use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost};
+    use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]
@@ -208,6 +208,7 @@ mod tests {
             &local_clock,
             &port,
             &timer_host,
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -258,6 +259,7 @@ mod tests {
             &local_clock,
             &port,
             &timer_host,
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -292,6 +294,7 @@ mod tests {
             &local_clock,
             &port,
             &timer_host,
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -325,6 +328,7 @@ mod tests {
             &local_clock,
             &port,
             &timer_host,
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -375,6 +379,7 @@ mod tests {
             &local_clock,
             &port,
             &timer_host,
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -407,6 +412,7 @@ mod tests {
             &local_clock,
             &port,
             &timer_host,
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -442,6 +448,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -501,6 +508,7 @@ mod tests {
             &local_clock,
             &port,
             &timer_host,
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -552,6 +560,7 @@ mod tests {
             &local_clock,
             &port,
             &timer_host,
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -607,6 +616,7 @@ mod tests {
             &local_clock,
             FakePort::new(),
             FakeTimerHost::new(),
+            FakeTimestamping::new(),
             DomainNumber::new(0),
             PortNumber::new(1),
         );
