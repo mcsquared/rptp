@@ -1,3 +1,5 @@
+use core::panic;
+
 use crate::bmca::{
     Bmca, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca, ParentTrackingBmca,
     QualificationTimeoutPolicy,
@@ -159,11 +161,13 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
                 PortState::Uncalibrated(uncalibrated) => {
                     uncalibrated.announce_receipt_timeout_expired()
                 }
-                _ => PortState::Faulty(FaultyPort::new()),
+                _ => panic!(
+                    "AnnounceReceiptTimeoutExpired can only be applied in Listening, Slave, or Uncalibrated states"
+                ),
             },
             StateDecision::MasterClockSelected => match self {
                 PortState::Uncalibrated(uncalibrated) => uncalibrated.master_clock_selected(),
-                _ => PortState::Faulty(FaultyPort::new()),
+                _ => panic!("MasterClockSelected can only be applied in Uncalibrated state"),
             },
             StateDecision::RecommendedSlave(decision) => match self {
                 PortState::Listening(listening) => listening.recommended_slave(decision),
@@ -171,22 +175,26 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
                 PortState::PreMaster(pre_master) => pre_master.recommended_slave(decision),
                 PortState::Slave(slave) => slave.recommended_slave(decision),
                 PortState::Uncalibrated(uncalibrated) => uncalibrated.recommended_slave(decision),
-                _ => PortState::Faulty(FaultyPort::new()),
+                _ => panic!(
+                    "RecommendedSlave can only be applied in Listening, Master, PreMaster, Slave, or Uncalibrated states"
+                ),
             },
             StateDecision::RecommendedMaster(decision) => match self {
                 PortState::Listening(listening) => listening.recommended_master(decision),
                 PortState::Uncalibrated(uncalibrated) => uncalibrated.recommended_master(decision),
                 PortState::Master(master) => master.recommended_master(decision),
                 PortState::Slave(slave) => slave.recommended_master(decision),
-                _ => PortState::Faulty(FaultyPort::new()),
+                _ => panic!(
+                    "RecommendedMaster can only be applied in Listening, Uncalibrated, Master, or Slave states"
+                ),
             },
             StateDecision::Initialized => match self {
                 PortState::Initializing(initializing) => initializing.initialized(),
-                _ => PortState::Faulty(FaultyPort::new()),
+                _ => panic!("Initialized can only be applied in Initializing state"),
             },
             StateDecision::QualificationTimeoutExpired => match self {
                 PortState::PreMaster(pre_master) => pre_master.qualified(),
-                _ => PortState::Faulty(FaultyPort::new()),
+                _ => panic!("QualificationTimeoutExpired can only be applied in PreMaster state"),
             },
             StateDecision::FaultDetected => PortState::Faulty(FaultyPort::new()),
         }
@@ -553,7 +561,8 @@ mod tests {
     }
 
     #[test]
-    fn portstate_initializing_to_master_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_initializing_to_master_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
@@ -574,14 +583,12 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = initializing.apply(StateDecision::AnnounceReceiptTimeoutExpired);
-        // TODO:: do we need to check for all possible transition types from illegal to faulty?
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        initializing.apply(StateDecision::AnnounceReceiptTimeoutExpired);
     }
 
     #[test]
-    fn portstate_master_to_master_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_master_to_master_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
@@ -602,15 +609,14 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = master.apply(StateDecision::AnnounceReceiptTimeoutExpired);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        master.apply(StateDecision::AnnounceReceiptTimeoutExpired);
     }
 
     // Tests for illegal ToSlave transitions
 
     #[test]
-    fn portstate_initializing_to_slave_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_initializing_to_slave_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
@@ -631,13 +637,12 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = initializing.apply(StateDecision::MasterClockSelected);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        initializing.apply(StateDecision::MasterClockSelected);
     }
 
     #[test]
-    fn portstate_listening_to_slave_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_listening_to_slave_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
@@ -658,13 +663,12 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = listening.apply(StateDecision::MasterClockSelected);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        listening.apply(StateDecision::MasterClockSelected);
     }
 
     #[test]
-    fn portstate_slave_to_slave_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_slave_to_slave_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
@@ -688,13 +692,12 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = slave.apply(StateDecision::MasterClockSelected);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        slave.apply(StateDecision::MasterClockSelected);
     }
 
     #[test]
-    fn portstate_master_to_slave_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_master_to_slave_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
@@ -715,13 +718,12 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = master.apply(StateDecision::MasterClockSelected);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        master.apply(StateDecision::MasterClockSelected);
     }
 
     #[test]
-    fn portstate_pre_master_to_slave_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_pre_master_to_slave_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
@@ -743,13 +745,12 @@ mod tests {
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
         );
 
-        let result = pre_master.apply(StateDecision::MasterClockSelected);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        pre_master.apply(StateDecision::MasterClockSelected);
     }
 
     #[test]
-    fn portstate_initializing_to_uncalibrated_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_initializing_to_uncalibrated_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
@@ -771,12 +772,10 @@ mod tests {
         );
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
-        let result = initializing.apply(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
+        initializing.apply(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
             parent_port_identity,
             StepsRemoved::new(0),
         )));
-
-        assert!(matches!(result, PortState::Faulty(_)));
     }
 
     #[test]
@@ -879,6 +878,7 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
     fn portstate_initializing_to_pre_master_illegal_transition_goes_to_faulty() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
@@ -972,7 +972,8 @@ mod tests {
     }
 
     #[test]
-    fn portstate_pre_master_to_pre_master_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_pre_master_to_pre_master_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
@@ -994,12 +995,10 @@ mod tests {
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
         );
 
-        let result = pre_master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+        pre_master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
         )));
-
-        assert!(matches!(result, PortState::Faulty(_)));
     }
 
     #[test]
@@ -1036,7 +1035,8 @@ mod tests {
     }
 
     #[test]
-    fn portstate_listening_to_listening_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_listening_to_listening_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
@@ -1057,13 +1057,12 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = listening.apply(StateDecision::Initialized);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        listening.apply(StateDecision::Initialized);
     }
 
     #[test]
-    fn portstate_slave_to_listening_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_slave_to_listening_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
@@ -1087,13 +1086,12 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = slave.apply(StateDecision::Initialized);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        slave.apply(StateDecision::Initialized);
     }
 
     #[test]
-    fn portstate_master_to_listening_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_master_to_listening_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
@@ -1114,13 +1112,12 @@ mod tests {
             PortTimingPolicy::default(),
         );
 
-        let result = master.apply(StateDecision::Initialized);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        master.apply(StateDecision::Initialized);
     }
 
     #[test]
-    fn portstate_pre_master_to_listening_illegal_transition_goes_to_faulty() {
+    #[should_panic]
+    fn portstate_pre_master_to_listening_illegal_transition_panics() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
@@ -1142,9 +1139,7 @@ mod tests {
             QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
         );
 
-        let result = pre_master.apply(StateDecision::Initialized);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        pre_master.apply(StateDecision::Initialized);
     }
 
     // Tests for explicit ToFaulty transitions from every state
