@@ -1,5 +1,5 @@
 use crate::bmca::Bmca;
-use crate::log::PortLog;
+use crate::log::{PortEvent, PortLog};
 use crate::port::{Port, PortTimingPolicy};
 use crate::portstate::PortState;
 
@@ -12,6 +12,8 @@ pub struct InitializingPort<P: Port, B: Bmca, L: PortLog> {
 
 impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
     pub fn new(port: P, bmca: B, log: L, timing_policy: PortTimingPolicy) -> Self {
+        log.port_event(PortEvent::Static("Become InitializingPort"));
+
         Self {
             port,
             bmca,
@@ -21,9 +23,7 @@ impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
     }
 
     pub fn initialized(self) -> PortState<P, B, L> {
-        self.log
-            .state_transition("Initializing", "Listening", "Port has been initialized");
-
+        self.log.port_event(PortEvent::Initialized);
         PortState::listening(self.port, self.bmca, self.log, self.timing_policy)
     }
 }

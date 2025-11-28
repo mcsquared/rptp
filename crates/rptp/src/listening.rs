@@ -1,7 +1,7 @@
 use crate::bmca::{
     Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
 };
-use crate::log::PortLog;
+use crate::log::{PortEvent, PortLog};
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
 use crate::portstate::{PortState, StateDecision};
@@ -23,6 +23,8 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
         log: L,
         timing_policy: PortTimingPolicy,
     ) -> Self {
+        log.port_event(PortEvent::Static("Become ListeningPort"));
+
         Self {
             port,
             bmca,
@@ -33,35 +35,20 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
     }
 
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
-        self.log.state_transition(
-            "Listening",
-            "Uncalibrated",
-            format!(
-                "Recommended Slave, parent {}",
-                decision.parent_port_identity()
-            )
-            .as_str(),
-        );
-
+        self.log.port_event(PortEvent::RecommendedSlave {
+            parent: *decision.parent_port_identity(),
+        });
         decision.apply(self.port, self.bmca, self.log, self.timing_policy)
     }
 
     pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
-        self.log
-            .state_transition("Listening", "Pre-Master", "Recommended Master");
-
+        self.log.port_event(PortEvent::RecommendedMaster);
         decision.apply(self.port, self.bmca, self.log, self.timing_policy)
     }
 
     pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
-        self.log.state_transition(
-            "Listening",
-            "Master",
-            "Announce receipt timeout expired, becoming Master",
-        );
-
+        self.log.port_event(PortEvent::AnnounceReceiptTimeout);
         let bmca = LocalMasterTrackingBmca::new(self.bmca);
-
         PortState::master(self.port, bmca, self.log, self.timing_policy)
     }
 

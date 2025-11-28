@@ -2,7 +2,7 @@ use crate::bmca::{
     Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
     ParentTrackingBmca,
 };
-use crate::log::PortLog;
+use crate::log::{PortEvent, PortLog};
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
     SequenceId, TwoStepSyncMessage,
@@ -31,6 +31,8 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         log: L,
         timing_policy: PortTimingPolicy,
     ) -> Self {
+        log.port_event(PortEvent::Static("Become SlavePort"));
+
         Self {
             port,
             bmca,
@@ -142,24 +144,15 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
     }
 
     pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
-        self.log
-            .state_transition("Slave", "Master", "Announce receipt timeout expired");
-
+        self.log.port_event(PortEvent::AnnounceReceiptTimeout);
         let bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
-
         PortState::master(self.port, bmca, self.log, self.timing_policy)
     }
 
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
-        self.log.state_transition(
-            "Slave",
-            "Uncalibrated",
-            format!(
-                "Recommended Slave, parent {}",
-                decision.parent_port_identity()
-            )
-            .as_str(),
-        );
+        self.log.port_event(PortEvent::RecommendedSlave {
+            parent: *decision.parent_port_identity(),
+        });
 
         decision.apply(
             self.port,
@@ -170,9 +163,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
     }
 
     pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
-        self.log
-            .state_transition("Slave", "Pre-Master", "Recommended Master");
-
+        self.log.port_event(PortEvent::RecommendedMaster);
         decision.apply(
             self.port,
             self.bmca.into_inner(),

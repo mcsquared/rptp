@@ -1,5 +1,5 @@
 use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision, LocalMasterTrackingBmca};
-use crate::log::PortLog;
+use crate::log::{PortEvent, PortLog};
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity, PortTimingPolicy};
 use crate::portstate::{PortState, StateDecision};
@@ -21,6 +21,8 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
         log: L,
         timing_policy: PortTimingPolicy,
     ) -> Self {
+        log.port_event(PortEvent::Static("Become PreMasterPort"));
+
         Self {
             port,
             bmca,
@@ -49,23 +51,14 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
     }
 
     pub fn qualified(self) -> PortState<P, B, L> {
-        self.log
-            .state_transition("Pre-Master", "Master", "Port has qualified as Master");
-
+        self.log.port_event(PortEvent::QualifiedMaster);
         PortState::master(self.port, self.bmca, self.log, self.timing_policy)
     }
 
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
-        self.log.state_transition(
-            "Pre-Master",
-            "Uncalibrated",
-            format!(
-                "Recommended Slave, parent {}",
-                decision.parent_port_identity()
-            )
-            .as_str(),
-        );
-
+        self.log.port_event(PortEvent::RecommendedSlave {
+            parent: *decision.parent_port_identity(),
+        });
         decision.apply(
             self.port,
             self.bmca.into_inner(),

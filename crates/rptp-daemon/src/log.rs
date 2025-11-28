@@ -1,4 +1,4 @@
-use rptp::log::PortLog;
+use rptp::log::{PortEvent, PortLog};
 use rptp::port::PortIdentity;
 
 #[derive(Clone, Copy, Debug)]
@@ -21,7 +21,37 @@ impl PortLog for TracingPortLog {
         tracing::debug!("{}: Received {}", self.port_identity, msg);
     }
 
-    fn state_transition(&self, from: &str, to: &str, reason: &str) {
-        tracing::info!("{}: {} to {} - {}", self.port_identity, from, to, reason);
+    fn port_event(&self, event: PortEvent) {
+        match event {
+            PortEvent::Initialized => {
+                tracing::info!("{}: Initialized", self.port_identity);
+            }
+            PortEvent::RecommendedSlave { parent } => {
+                tracing::info!(
+                    "{}: Recommended Slave, parent {}",
+                    self.port_identity,
+                    parent
+                );
+            }
+            PortEvent::RecommendedMaster => {
+                tracing::info!("{}: Recommended Master", self.port_identity);
+            }
+            PortEvent::MasterClockSelected { parent } => {
+                tracing::info!(
+                    "{}: Master Clock Selected, parent {}",
+                    self.port_identity,
+                    parent
+                );
+            }
+            PortEvent::AnnounceReceiptTimeout => {
+                tracing::info!("{}: Announce Receipt Timeout", self.port_identity);
+            }
+            PortEvent::QualifiedMaster => {
+                tracing::info!("{}: Qualified Master", self.port_identity);
+            }
+            PortEvent::Static(desc) => {
+                tracing::info!("{}: {}", self.port_identity, desc);
+            }
+        }
     }
 }

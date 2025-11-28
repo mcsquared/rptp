@@ -2,7 +2,7 @@ use crate::bmca::{
     Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
 };
 use crate::clock::{LocalClock, SynchronizableClock};
-use crate::log::PortLog;
+use crate::log::{PortEvent, PortLog};
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId,
     TwoStepSyncMessage,
@@ -29,6 +29,8 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         log: L,
         timing_policy: PortTimingPolicy,
     ) -> Self {
+        log.port_event(PortEvent::Static("Become MasterPort"));
+
         Self {
             port,
             bmca,
@@ -97,9 +99,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
     }
 
     pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
-        self.log
-            .state_transition("Master", "Pre-Master", "Recommended Master");
-
+        self.log.port_event(PortEvent::RecommendedMaster);
         decision.apply(
             self.port,
             self.bmca.into_inner(),
@@ -109,15 +109,9 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
     }
 
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
-        self.log.state_transition(
-            "Master",
-            "Uncalibrated",
-            format!(
-                "Recommended Slave, parent {}",
-                decision.parent_port_identity()
-            )
-            .as_str(),
-        );
+        self.log.port_event(PortEvent::RecommendedSlave {
+            parent: *decision.parent_port_identity(),
+        });
 
         decision.apply(
             self.port,
