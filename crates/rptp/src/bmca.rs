@@ -654,7 +654,7 @@ pub trait Bmca {
 /// state changed between calls. If no updates occur between calls to decision,
 /// it returns [`BmcaDecision::Undecided`].
 pub struct IncrementalBmca<S: SortedForeignClockRecords> {
-    inner: FullBmca<S>,
+    inner: BestMasterClockAlgorithm<S>,
     dirty: Cell<bool>,
 }
 
@@ -662,7 +662,7 @@ impl<S: SortedForeignClockRecords> IncrementalBmca<S> {
     /// Create a new incremental BMCA around the given sorted record store.
     pub fn new(sorted_clock_records: S) -> Self {
         Self {
-            inner: FullBmca::new(sorted_clock_records),
+            inner: BestMasterClockAlgorithm::new(sorted_clock_records),
             dirty: Cell::new(false),
         }
     }
@@ -813,12 +813,23 @@ impl<B: Bmca> Bmca for ParentTrackingBmca<B> {
     }
 }
 
-/// Full BMCA implementation over a sorted collection of foreign clocks.
-pub struct FullBmca<S: SortedForeignClockRecords> {
+/// Best Master Clock Algorithm as defined in IEEE 1588-2019 section 9.3
+///
+/// Implemented over an abstract sorted collection of foreign clock records. [`consider`] is
+/// used to feed in new foreign clock data sets, while [`decision`] produces the current BMCA
+/// decision. [`decision`] is pure, i.e., it does not mutate internal state and returns the
+/// same result when called multiple times without intervening calls to [`consider`].
+///
+/// Private to the module; client code shall use the BMCA in terms of defined context-sensitive
+/// decorators implementing the `Bmca` trait. In terms of the design philosophy, the BMCA steps
+/// into different roles depending on the port state (e.g., local master tracking in pre-master,
+/// parent tracking in slave, etc.), and those roles are implemented as decorators around this
+/// core BMCA.
+struct BestMasterClockAlgorithm<S: SortedForeignClockRecords> {
     sorted_clock_records: S,
 }
 
-impl<S: SortedForeignClockRecords> FullBmca<S> {
+impl<S: SortedForeignClockRecords> BestMasterClockAlgorithm<S> {
     /// Create a new full BMCA.
     pub fn new(sorted_clock_records: S) -> Self {
         Self {
@@ -826,6 +837,7 @@ impl<S: SortedForeignClockRecords> FullBmca<S> {
         }
     }
 
+    /// Let the BMCA consider a foreign clock data set.
     fn consider(
         &mut self,
         source_port_identity: PortIdentity,
@@ -1405,7 +1417,7 @@ pub(crate) mod tests {
         ];
         let mut sorted_records = SortedForeignClockRecordsVec::from_records(&stale_records);
 
-        let mut bmca = FullBmca::new(&mut sorted_records);
+        let mut bmca = BestMasterClockAlgorithm::new(&mut sorted_records);
 
         // Consider a new announce from a different foreign clock.
         bmca.consider(
