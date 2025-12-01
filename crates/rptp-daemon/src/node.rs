@@ -5,6 +5,7 @@ use std::time::Instant as StdInstant;
 use tokio::sync::mpsc;
 
 use rptp::bmca::IncrementalBmca;
+use rptp::buffer::UnvalidatedMessage;
 use rptp::clock::SynchronizableClock;
 use rptp::port::TimerHost;
 use rptp::{
@@ -196,18 +197,46 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
             tokio::select! {
                 recv = self.event_socket.recv(&mut event_buf) => {
                     if let Ok((size, _peer)) = recv {
-                        let domain_msg = DomainMessage::new(&event_buf[..size]);
-                        let _ = domain_msg.dispatch_event(
+                        let length_checked = match UnvalidatedMessage::new(&event_buf[..size])
+                            .length_checked() {
+                                Ok(msg) => msg,
+                                Err(e) => {
+                                    tracing::trace!(?e, "dropping malformed event message");
+                                    continue;
+                                }
+                            };
+
+                        let domain_msg = DomainMessage::new(length_checked);
+                        if let Err(e) = domain_msg.dispatch_event(
                             &mut self.portmap,
                             self.timestamping.ingress_stamp()
-                        );
+                        ) {
+                            tracing::debug!(?e, "event message domain/protocol error");
+                        }
+                    } else if let Err(e) = recv {
+                        tracing::warn!("event socket receive error: {}", e);
+                        // TODO: extended & more granular receive error handling
                     }
                 }
                 recv = self.general_socket.recv(&mut general_buf) => {
                     let now = Instant::from_nanos(start.elapsed().as_nanos() as u64);
                     if let Ok((size, _peer)) = recv {
-                        let domain_msg = DomainMessage::new(&general_buf[..size]);
-                        let _ = domain_msg.dispatch_general(&mut self.portmap, now);
+                        let length_checked = match UnvalidatedMessage::new(&general_buf[..size])
+                            .length_checked() {
+                                Ok(msg) => msg,
+                                Err(e) => {
+                                    tracing::trace!(?e, "dropping malformed general message");
+                                    continue;
+                                }
+                            };
+
+                        let domain_msg = DomainMessage::new(length_checked);
+                        if let Err(e) = domain_msg.dispatch_general(&mut self.portmap, now) {
+                            tracing::debug!(?e, "general message domain/protocol error");
+                        }
+                    } else if let Err(e) = recv {
+                        tracing::warn!("general socket receive error: {}", e);
+                        // TODO: extended & more granular receive error handling
                     }
                 }
                 msg = self.system_rx.recv() => {

@@ -1,6 +1,9 @@
 use crate::{
     bmca::{Bmca, ForeignClockDS},
-    buffer::{ControlField, FinalizedBuffer, MessageBuffer, MessageFlags, MessageType},
+    buffer::{
+        ControlField, FinalizedBuffer, LengthCheckedMessage, MessageBuffer, MessageFlags,
+        MessageType,
+    },
     port::{DomainNumber, PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Instant, LogMessageInterval, TimeInterval, TimeStamp},
@@ -11,8 +14,10 @@ pub struct DomainMessage<'a> {
 }
 
 impl<'a> DomainMessage<'a> {
-    pub fn new(buf: &'a [u8]) -> Self {
-        Self { buf }
+    pub fn new(length_checked: LengthCheckedMessage<'a>) -> Self {
+        Self {
+            buf: length_checked.buf(),
+        }
     }
 
     pub fn dispatch_event(self, ports: &mut impl PortMap, timestamp: TimeStamp) -> Result<()> {

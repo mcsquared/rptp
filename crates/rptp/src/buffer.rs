@@ -1,9 +1,59 @@
+use core::ops::Range;
+
 use crate::message::SequenceId;
 use crate::port::DomainNumber;
 use crate::port::PortIdentity;
+use crate::result::ParseError;
 use crate::time::LogMessageInterval;
 
 use bitflags::bitflags;
+
+pub struct UnvalidatedMessage<'a> {
+    buf: &'a [u8],
+}
+
+impl<'a> UnvalidatedMessage<'a> {
+    pub fn new(buf: &'a [u8]) -> Self {
+        Self { buf }
+    }
+
+    pub fn length_checked(self) -> Result<LengthCheckedMessage<'a>, ParseError> {
+        const PAYLOAD_OFFSET: usize = 34;
+        const HEADER_LENGTH: usize = PAYLOAD_OFFSET;
+        const LENGTH_RANGE: Range<usize> = 2..4;
+
+        if self.buf.len() < HEADER_LENGTH {
+            return Err(ParseError::BadLength);
+        }
+
+        let expected = u16::from_be_bytes(
+            self.buf[LENGTH_RANGE]
+                .try_into()
+                .map_err(|_| ParseError::BadLength)?,
+        ) as usize;
+        let found = self.buf.len();
+
+        if expected != found {
+            return Err(ParseError::BadLength);
+        }
+
+        Ok(LengthCheckedMessage::new(self.buf))
+    }
+}
+
+pub struct LengthCheckedMessage<'a> {
+    buf: &'a [u8],
+}
+
+impl<'a> LengthCheckedMessage<'a> {
+    fn new(buf: &'a [u8]) -> Self {
+        Self { buf }
+    }
+
+    pub(crate) fn buf(self) -> &'a [u8] {
+        self.buf
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TransportSpecific;
