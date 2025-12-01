@@ -9,7 +9,6 @@ pub enum Error {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseError {
     BadLength,
-    BadMessageType,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -17,6 +16,7 @@ pub enum ProtocolError {
     UnsupportedPtpVersion(u8),
     DomainNotFound,
     InvalidTimestamp,
+    UnknownMessageType,
 }
 
 impl From<ParseError> for Error {

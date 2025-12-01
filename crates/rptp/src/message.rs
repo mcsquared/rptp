@@ -2,14 +2,15 @@ use crate::{
     bmca::{Bmca, ForeignClockDS},
     buffer::{
         ControlField, FinalizedBuffer, LengthCheckedMessage, MessageBuffer, MessageFlags,
-        MessageType,
+        MessageType, PTP_DOMAIN_NUMBER_OFFSET, PTP_LOG_INTERVAL_OFFSET, PTP_MSG_TYPE_OFFSET,
+        PTP_PAYLOAD_OFFSET, PTP_SEQUENCE_ID_RANGE, PTP_SOURCE_PORT_IDENTITY_RANGE,
     },
     port::{DomainNumber, PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Instant, LogMessageInterval, TimeInterval, TimeStamp},
 };
 
-struct MessageHeader<'a> {
+pub(crate) struct MessageHeader<'a> {
     length_checked: LengthCheckedMessage<'a>,
 }
 
@@ -18,22 +19,38 @@ impl<'a> MessageHeader<'a> {
         Self { length_checked }
     }
 
+    pub fn message_type(&self) -> Result<MessageType> {
+        let nibble = self.length_checked.buf()[PTP_MSG_TYPE_OFFSET] & 0x0F;
+        MessageType::from_nibble(nibble)
+    }
+
     fn domain_number(&self) -> DomainNumber {
-        DomainNumber::new(self.length_checked.buf()[4])
+        DomainNumber::new(self.length_checked.buf()[PTP_DOMAIN_NUMBER_OFFSET])
+    }
+
+    pub fn sequence_id(&self) -> SequenceId {
+        let id = u16::from_be_bytes(
+            self.length_checked.buf()[PTP_SEQUENCE_ID_RANGE]
+                .try_into()
+                .unwrap(),
+        );
+        SequenceId::new(id)
     }
 
     fn source_port_identity(&self) -> PortIdentity {
-        const SOURCE_PORT_IDENTITY_RANGE: std::ops::Range<usize> = 20..30;
-
         PortIdentity::from_slice(
-            self.length_checked.buf()[SOURCE_PORT_IDENTITY_RANGE]
+            self.length_checked.buf()[PTP_SOURCE_PORT_IDENTITY_RANGE]
                 .try_into()
                 .unwrap(),
         )
     }
 
-    fn buf(&self) -> &'a [u8] {
-        &self.length_checked.buf()
+    pub fn log_message_interval(&self) -> LogMessageInterval {
+        LogMessageInterval::new(self.length_checked.buf()[PTP_LOG_INTERVAL_OFFSET] as i8)
+    }
+
+    pub fn payload(&self) -> &'a [u8] {
+        &self.length_checked.buf()[PTP_PAYLOAD_OFFSET..]
     }
 }
 
@@ -52,7 +69,7 @@ impl<'a> DomainMessage<'a> {
         let domain_number = self.header.domain_number();
         let port = ports.port_by_domain(domain_number)?;
         let source_port_identity = self.header.source_port_identity();
-        let msg = EventMessage::try_from(self.header.buf())?;
+        let msg = EventMessage::new(self.header.message_type()?, self.header.sequence_id())?;
         port.process_event_message(source_port_identity, msg, timestamp);
 
         Ok(())
@@ -62,7 +79,12 @@ impl<'a> DomainMessage<'a> {
         let domain_number = self.header.domain_number();
         let port = ports.port_by_domain(domain_number)?;
         let source_port_identity = self.header.source_port_identity();
-        let msg = GeneralMessage::try_from(self.header.buf())?;
+        let msg = GeneralMessage::new(
+            self.header.message_type()?,
+            self.header.sequence_id(),
+            self.header.log_message_interval(),
+            self.header.payload(),
+        )?;
         port.process_general_message(source_port_identity, msg, now);
 
         Ok(())
@@ -98,6 +120,14 @@ pub enum SystemMessage {
 }
 
 impl EventMessage {
+    pub fn new(msg_type: MessageType, sequence_id: SequenceId) -> Result<Self> {
+        match msg_type {
+            MessageType::Sync => Ok(Self::TwoStepSync(TwoStepSyncMessage::new(sequence_id))),
+            MessageType::DelayRequest => Ok(Self::DelayReq(DelayRequestMessage::new(sequence_id))),
+            _ => Err(ProtocolError::UnknownMessageType.into()),
+        }
+    }
+
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         match self {
             EventMessage::DelayReq(msg) => msg.serialize(buf),
@@ -106,51 +136,50 @@ impl EventMessage {
     }
 }
 
-impl TryFrom<&[u8]> for EventMessage {
-    type Error = crate::result::Error;
-
-    fn try_from(buf: &[u8]) -> Result<Self> {
-        let msg_type = buf.get(0).ok_or(ParseError::BadLength)? & 0x0F;
-
+impl GeneralMessage {
+    pub fn new(
+        msg_type: MessageType,
+        sequence_id: SequenceId,
+        log_message_interval: LogMessageInterval,
+        payload: &[u8],
+    ) -> Result<Self> {
         match msg_type {
-            0x00 => Ok(Self::TwoStepSync(TwoStepSyncMessage::from_slice(
-                buf.try_into().map_err(|_| ParseError::BadLength)?,
-            )?)),
-            0x01 => Ok(Self::DelayReq(DelayRequestMessage::from_slice(
-                buf.try_into().map_err(|_| ParseError::BadLength)?,
-            )?)),
-            _ => Err(ParseError::BadMessageType.into()),
+            MessageType::Announce => Ok(Self::Announce(AnnounceMessage::new(
+                sequence_id,
+                log_message_interval,
+                ForeignClockDS::from_slice(
+                    &payload[13..29]
+                        .try_into()
+                        .map_err(|_| ProtocolError::UnknownMessageType)?,
+                ),
+            ))),
+            MessageType::FollowUp => Ok(Self::FollowUp(FollowUpMessage::new(
+                sequence_id,
+                WireTimeStamp::new(
+                    payload[0..10]
+                        .try_into()
+                        .map_err(|_| ParseError::BadLength)?,
+                )
+                .timestamp()?,
+            ))),
+            MessageType::DelayResponse => Ok(Self::DelayResp(DelayResponseMessage::new(
+                sequence_id,
+                WireTimeStamp::new(
+                    payload[0..10]
+                        .try_into()
+                        .map_err(|_| ParseError::BadLength)?,
+                )
+                .timestamp()?,
+            ))),
+            _ => Err(ProtocolError::UnknownMessageType.into()),
         }
     }
-}
 
-impl GeneralMessage {
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         match self {
             GeneralMessage::Announce(msg) => msg.serialize(buf),
             GeneralMessage::DelayResp(msg) => msg.serialize(buf),
             GeneralMessage::FollowUp(msg) => msg.serialize(buf),
-        }
-    }
-}
-
-impl TryFrom<&[u8]> for GeneralMessage {
-    type Error = crate::result::Error;
-
-    fn try_from(buf: &[u8]) -> Result<Self> {
-        let msgtype = buf.get(0).ok_or(ParseError::BadLength)? & 0x0F;
-
-        match msgtype {
-            0x0B => Ok(Self::Announce(AnnounceMessage::from_slice(
-                buf.try_into().map_err(|_| ParseError::BadLength)?,
-            )?)),
-            0x08 => Ok(Self::FollowUp(FollowUpMessage::from_slice(
-                buf.try_into().map_err(|_| ParseError::BadLength)?,
-            )?)),
-            0x09 => Ok(Self::DelayResp(DelayResponseMessage::from_slice(
-                buf.try_into().map_err(|_| ParseError::BadLength)?,
-            )?)),
-            _ => Err(ParseError::BadMessageType.into()),
         }
     }
 }
@@ -220,20 +249,6 @@ impl AnnounceMessage {
         }
     }
 
-    pub fn from_slice(buf: &[u8]) -> Result<Self> {
-        let sequence_id = SequenceId::try_from(&buf[30..32])?;
-        let log_message_interval =
-            LogMessageInterval::new(buf.get(33).copied().ok_or(ParseError::BadLength)? as i8);
-        let foreign_clock_ds =
-            ForeignClockDS::from_slice(&buf[47..63].try_into().map_err(|_| ParseError::BadLength)?);
-
-        Ok(Self {
-            sequence_id,
-            log_message_interval,
-            foreign_clock_ds,
-        })
-    }
-
     pub fn feed_bmca(self, bmca: &mut impl Bmca, source_port_identity: PortIdentity, now: Instant) {
         if let Some(log_interval) = self.log_message_interval.log_interval() {
             bmca.consider(
@@ -270,12 +285,6 @@ impl TwoStepSyncMessage {
         Self { sequence_id }
     }
 
-    pub fn from_slice(buf: &[u8]) -> Result<Self> {
-        let sequence_id = SequenceId::try_from(&buf[30..32])?;
-
-        Ok(Self { sequence_id })
-    }
-
     pub fn follow_up(self, precise_origin_timestamp: TimeStamp) -> FollowUpMessage {
         FollowUpMessage::new(self.sequence_id, precise_origin_timestamp)
     }
@@ -304,22 +313,6 @@ impl FollowUpMessage {
             sequence_id,
             precise_origin_timestamp,
         }
-    }
-
-    pub fn from_slice(buf: &[u8]) -> Result<Self> {
-        let sequence_id = SequenceId::try_from(&buf[30..32])?;
-        let wire_timestamp = WireTimeStamp::new(
-            buf.get(34..44)
-                .ok_or(ParseError::BadLength)?
-                .try_into()
-                .map_err(|_| ParseError::BadLength)?,
-        );
-        let precise_origin_timestamp = wire_timestamp.timestamp()?;
-
-        Ok(Self {
-            sequence_id,
-            precise_origin_timestamp,
-        })
     }
 
     pub fn master_slave_offset(
@@ -359,12 +352,6 @@ impl DelayRequestMessage {
         Self { sequence_id }
     }
 
-    pub fn from_slice(buf: &[u8]) -> Result<Self> {
-        let sequence_id = SequenceId::try_from(&buf[30..32])?;
-
-        Ok(Self { sequence_id })
-    }
-
     pub fn response(self, receive_timestamp: TimeStamp) -> DelayResponseMessage {
         DelayResponseMessage::new(self.sequence_id, receive_timestamp)
     }
@@ -393,22 +380,6 @@ impl DelayResponseMessage {
             sequence_id,
             receive_timestamp,
         }
-    }
-
-    pub fn from_slice(buf: &[u8]) -> Result<Self> {
-        let sequence_id = SequenceId::try_from(&buf[30..32])?;
-        let wire_timestamp = WireTimeStamp::new(
-            buf.get(34..44)
-                .ok_or(ParseError::BadLength)?
-                .try_into()
-                .map_err(|_| ParseError::BadLength)?,
-        );
-        let receive_timestamp = wire_timestamp.timestamp()?;
-
-        Ok(Self {
-            sequence_id,
-            receive_timestamp,
-        })
     }
 
     pub fn slave_master_offset(

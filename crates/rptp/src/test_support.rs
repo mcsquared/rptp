@@ -1,7 +1,10 @@
 use std::cell::Cell;
 
+use crate::buffer::UnvalidatedMessage;
 use crate::clock::{Clock, ClockIdentity, SynchronizableClock};
+use crate::message::MessageHeader;
 use crate::port::{PhysicalPort, PortIdentity, PortNumber, Timeout, TimerHost};
+use crate::result::Result;
 use crate::time::TimeStamp;
 use crate::timestamping::TxTimestamping;
 
@@ -219,5 +222,33 @@ impl PhysicalPort for &FakePort {
         self.general_messages
             .borrow_mut()
             .push(GeneralMessage::try_from(buf).unwrap());
+    }
+}
+
+impl TryFrom<&[u8]> for EventMessage {
+    type Error = crate::result::Error;
+
+    fn try_from(buf: &[u8]) -> Result<Self> {
+        let length_checked = UnvalidatedMessage::new(buf).length_checked_v2()?;
+        let header = MessageHeader::new(length_checked);
+        let msg_type = header.message_type()?;
+        let sequence_id = header.sequence_id();
+
+        EventMessage::new(msg_type, sequence_id)
+    }
+}
+
+impl TryFrom<&[u8]> for GeneralMessage {
+    type Error = crate::result::Error;
+
+    fn try_from(buf: &[u8]) -> Result<Self> {
+        let length_checked = UnvalidatedMessage::new(buf).length_checked_v2()?;
+        let header = MessageHeader::new(length_checked);
+        let msg_type = header.message_type()?;
+        let sequence_id = header.sequence_id();
+        let log_message_interval = header.log_message_interval();
+        let payload = header.payload();
+
+        GeneralMessage::new(msg_type, sequence_id, log_message_interval, payload)
     }
 }

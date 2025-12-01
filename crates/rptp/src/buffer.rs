@@ -1,5 +1,3 @@
-use core::ops::Range;
-
 use crate::message::SequenceId;
 use crate::port::DomainNumber;
 use crate::port::PortIdentity;
@@ -7,6 +5,20 @@ use crate::result::{ParseError, ProtocolError, Result};
 use crate::time::LogMessageInterval;
 
 use bitflags::bitflags;
+
+const PTP_TRANSPORT_SPECIFIC_OFFSET: usize = 0;
+
+pub(crate) const PTP_HEADER_LEN: usize = 34;
+pub(crate) const PTP_LENGTH_RANGE: core::ops::Range<usize> = 2..4;
+pub(crate) const PTP_MSG_TYPE_OFFSET: usize = 0;
+pub(crate) const PTP_VERSION_OFFSET: usize = 1;
+pub(crate) const PTP_DOMAIN_NUMBER_OFFSET: usize = 4;
+pub(crate) const PTP_FLAGS_RANGE: core::ops::Range<usize> = 6..8;
+pub(crate) const PTP_SOURCE_PORT_IDENTITY_RANGE: core::ops::Range<usize> = 20..30;
+pub(crate) const PTP_SEQUENCE_ID_RANGE: core::ops::Range<usize> = 30..32;
+pub(crate) const PTP_CONTROL_FIELD_OFFSET: usize = 32;
+pub(crate) const PTP_LOG_INTERVAL_OFFSET: usize = 33;
+pub(crate) const PTP_PAYLOAD_OFFSET: usize = 34;
 
 pub struct UnvalidatedMessage<'a> {
     buf: &'a [u8],
@@ -18,21 +30,17 @@ impl<'a> UnvalidatedMessage<'a> {
     }
 
     pub fn length_checked_v2(self) -> Result<LengthCheckedMessage<'a>> {
-        const PAYLOAD_OFFSET: usize = 34;
-        const HEADER_LENGTH: usize = PAYLOAD_OFFSET;
-        const LENGTH_RANGE: Range<usize> = 2..4;
-
-        if self.buf.len() < HEADER_LENGTH {
+        if self.buf.len() < PTP_HEADER_LEN {
             return Err(ParseError::BadLength.into());
         }
 
-        let v = PtpVersion(self.buf[1] & 0x0F);
+        let v = PtpVersion(self.buf[PTP_VERSION_OFFSET] & 0x0F);
         if v != PtpVersion::V2 {
             return Err(ProtocolError::UnsupportedPtpVersion(v.as_u8()).into());
         }
 
         let expected = u16::from_be_bytes(
-            self.buf[LENGTH_RANGE]
+            self.buf[PTP_LENGTH_RANGE]
                 .try_into()
                 .map_err(|_| ParseError::BadLength)?,
         ) as usize;
@@ -96,10 +104,11 @@ impl MessageBuffer {
         source_port_identity: PortIdentity,
     ) -> Self {
         let mut buf = [0u8; 2048];
-        buf[0] = (transport_specific.to_wire() & 0x0F) << 4;
-        buf[1] = version.as_u8() & 0x0F;
-        buf[4] = domain_number.as_u8();
-        buf[20..30].copy_from_slice(source_port_identity.to_bytes().as_ref());
+        buf[PTP_TRANSPORT_SPECIFIC_OFFSET] = (transport_specific.to_wire() & 0x0F) << 4;
+        buf[PTP_VERSION_OFFSET] = version.as_u8() & 0x0F;
+        buf[PTP_DOMAIN_NUMBER_OFFSET] = domain_number.as_u8();
+        buf[PTP_SOURCE_PORT_IDENTITY_RANGE]
+            .copy_from_slice(source_port_identity.to_bytes().as_ref());
 
         Self { buf }
     }
@@ -109,8 +118,9 @@ impl MessageBuffer {
         msg_type: MessageType,
         control: ControlField,
     ) -> TypedBuffer<'a> {
-        self.buf[0] = (self.buf[0] & 0xF0) | (msg_type as u8 & 0x0F);
-        self.buf[32] = control as u8;
+        self.buf[PTP_MSG_TYPE_OFFSET] =
+            (self.buf[PTP_MSG_TYPE_OFFSET] & 0xF0) | msg_type.to_nibble();
+        self.buf[PTP_CONTROL_FIELD_OFFSET] = control as u8;
         TypedBuffer { buf: &mut self.buf }
     }
 }
@@ -121,7 +131,7 @@ pub struct TypedBuffer<'a> {
 
 impl<'a> TypedBuffer<'a> {
     pub fn flagged(self, flags: MessageFlags) -> FlaggedBuffer<'a> {
-        self.buf[6..8].copy_from_slice(&flags.bits().to_be_bytes());
+        self.buf[PTP_FLAGS_RANGE].copy_from_slice(&flags.bits().to_be_bytes());
         FlaggedBuffer { buf: self.buf }
     }
 }
@@ -132,7 +142,7 @@ pub struct FlaggedBuffer<'a> {
 
 impl<'a> FlaggedBuffer<'a> {
     pub fn sequenced(self, sequence_id: SequenceId) -> SequencedBuffer<'a> {
-        self.buf[30..32].copy_from_slice(&sequence_id.to_be_bytes());
+        self.buf[PTP_SEQUENCE_ID_RANGE].copy_from_slice(&sequence_id.to_be_bytes());
         SequencedBuffer { buf: self.buf }
     }
 }
@@ -146,7 +156,7 @@ impl<'a> SequencedBuffer<'a> {
         self,
         log_message_interval: LogMessageInterval,
     ) -> LogMessageIntervalBuffer<'a> {
-        self.buf[33] = log_message_interval.as_u8();
+        self.buf[PTP_LOG_INTERVAL_OFFSET] = log_message_interval.as_u8();
         LogMessageIntervalBuffer { buf: self.buf }
     }
 }
@@ -167,13 +177,13 @@ pub struct PayloadBuffer<'a> {
 
 impl<'a> PayloadBuffer<'a> {
     pub fn buf(&mut self) -> &mut [u8] {
-        &mut self.buf[34..]
+        &mut self.buf[PTP_PAYLOAD_OFFSET..]
     }
 
     pub fn finalize(self, payload_len: u16) -> FinalizedBuffer<'a> {
         let payload_len = payload_len as usize;
-        let total_len = (34 + payload_len) as u16;
-        self.buf[2..4].copy_from_slice(&total_len.to_be_bytes());
+        let total_len = (PTP_PAYLOAD_OFFSET + payload_len) as u16;
+        self.buf[PTP_LENGTH_RANGE].copy_from_slice(&total_len.to_be_bytes());
 
         FinalizedBuffer {
             buf: &mut self.buf[..total_len as usize],
@@ -197,6 +207,23 @@ pub enum MessageType {
     FollowUp = 0x08,
     DelayResponse = 0x09,
     Announce = 0x0B,
+}
+
+impl MessageType {
+    pub fn to_nibble(self) -> u8 {
+        self as u8 & 0x0F
+    }
+
+    pub fn from_nibble(n: u8) -> Result<Self> {
+        match n {
+            0x00 => Ok(MessageType::Sync),
+            0x01 => Ok(MessageType::DelayRequest),
+            0x08 => Ok(MessageType::FollowUp),
+            0x09 => Ok(MessageType::DelayResponse),
+            0x0B => Ok(MessageType::Announce),
+            _ => Err(ProtocolError::UnknownMessageType.into()),
+        }
+    }
 }
 
 pub enum ControlField {
