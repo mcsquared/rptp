@@ -9,53 +9,63 @@ use crate::{
     time::{Instant, LogMessageInterval, TimeInterval, TimeStamp},
 };
 
+struct MessageHeader<'a> {
+    length_checked: LengthCheckedMessage<'a>,
+}
+
+impl<'a> MessageHeader<'a> {
+    pub fn new(length_checked: LengthCheckedMessage<'a>) -> Self {
+        Self { length_checked }
+    }
+
+    fn domain_number(&self) -> DomainNumber {
+        DomainNumber::new(self.length_checked.buf()[4])
+    }
+
+    fn source_port_identity(&self) -> PortIdentity {
+        const SOURCE_PORT_IDENTITY_RANGE: std::ops::Range<usize> = 20..30;
+
+        PortIdentity::from_slice(
+            self.length_checked.buf()[SOURCE_PORT_IDENTITY_RANGE]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    fn buf(&self) -> &'a [u8] {
+        &self.length_checked.buf()
+    }
+}
+
 pub struct DomainMessage<'a> {
-    buf: &'a [u8],
+    header: MessageHeader<'a>,
 }
 
 impl<'a> DomainMessage<'a> {
     pub fn new(length_checked: LengthCheckedMessage<'a>) -> Self {
         Self {
-            buf: length_checked.buf(),
+            header: MessageHeader::new(length_checked),
         }
     }
 
     pub fn dispatch_event(self, ports: &mut impl PortMap, timestamp: TimeStamp) -> Result<()> {
-        let domain_number = self.domain_number()?;
+        let domain_number = self.header.domain_number();
         let port = ports.port_by_domain(domain_number)?;
-        let source_port_identity = self.source_port_identity()?;
-        let msg = EventMessage::try_from(self.buf)?;
+        let source_port_identity = self.header.source_port_identity();
+        let msg = EventMessage::try_from(self.header.buf())?;
         port.process_event_message(source_port_identity, msg, timestamp);
 
         Ok(())
     }
 
     pub fn dispatch_general(self, ports: &mut impl PortMap, now: Instant) -> Result<()> {
-        let domain_number = self.domain_number()?;
+        let domain_number = self.header.domain_number();
         let port = ports.port_by_domain(domain_number)?;
-        let source_port_identity = self.source_port_identity()?;
-        let msg = GeneralMessage::try_from(self.buf)?;
+        let source_port_identity = self.header.source_port_identity();
+        let msg = GeneralMessage::try_from(self.header.buf())?;
         port.process_general_message(source_port_identity, msg, now);
 
         Ok(())
-    }
-
-    fn domain_number(&self) -> Result<DomainNumber> {
-        self.buf
-            .get(4)
-            .copied()
-            .map(DomainNumber::new)
-            .ok_or(ProtocolError::DomainNotFound.into())
-    }
-
-    fn source_port_identity(&self) -> Result<PortIdentity> {
-        Ok(PortIdentity::from_slice(
-            self.buf
-                .get(20..30)
-                .ok_or(ParseError::BadLength)?
-                .try_into()
-                .map_err(|_| ParseError::BadLength)?,
-        ))
     }
 }
 

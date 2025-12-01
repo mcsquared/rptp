@@ -55,7 +55,7 @@ impl<'a> LengthCheckedMessage<'a> {
         Self { buf }
     }
 
-    pub(crate) fn buf(self) -> &'a [u8] {
+    pub(crate) fn buf(&self) -> &'a [u8] {
         self.buf
     }
 }
