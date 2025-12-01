@@ -198,7 +198,7 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
                 recv = self.event_socket.recv(&mut event_buf) => {
                     if let Ok((size, _peer)) = recv {
                         let length_checked = match UnvalidatedMessage::new(&event_buf[..size])
-                            .length_checked() {
+                            .length_checked_v2() {
                                 Ok(msg) => msg,
                                 Err(e) => {
                                     tracing::trace!(?e, "dropping malformed event message");
@@ -222,7 +222,7 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
                     let now = Instant::from_nanos(start.elapsed().as_nanos() as u64);
                     if let Ok((size, _peer)) = recv {
                         let length_checked = match UnvalidatedMessage::new(&general_buf[..size])
-                            .length_checked() {
+                            .length_checked_v2() {
                                 Ok(msg) => msg,
                                 Err(e) => {
                                     tracing::trace!(?e, "dropping malformed general message");

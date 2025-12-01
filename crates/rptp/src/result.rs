@@ -14,6 +14,7 @@ pub enum ParseError {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProtocolError {
+    UnsupportedPtpVersion(u8),
     DomainNotFound,
     InvalidTimestamp,
 }

@@ -3,7 +3,7 @@ use core::ops::Range;
 use crate::message::SequenceId;
 use crate::port::DomainNumber;
 use crate::port::PortIdentity;
-use crate::result::ParseError;
+use crate::result::{ParseError, ProtocolError, Result};
 use crate::time::LogMessageInterval;
 
 use bitflags::bitflags;
@@ -17,13 +17,18 @@ impl<'a> UnvalidatedMessage<'a> {
         Self { buf }
     }
 
-    pub fn length_checked(self) -> Result<LengthCheckedMessage<'a>, ParseError> {
+    pub fn length_checked_v2(self) -> Result<LengthCheckedMessage<'a>> {
         const PAYLOAD_OFFSET: usize = 34;
         const HEADER_LENGTH: usize = PAYLOAD_OFFSET;
         const LENGTH_RANGE: Range<usize> = 2..4;
 
         if self.buf.len() < HEADER_LENGTH {
-            return Err(ParseError::BadLength);
+            return Err(ParseError::BadLength.into());
+        }
+
+        let v = PtpVersion(self.buf[1] & 0x0F);
+        if v != PtpVersion::V2 {
+            return Err(ProtocolError::UnsupportedPtpVersion(v.as_u8()).into());
         }
 
         let expected = u16::from_be_bytes(
@@ -34,7 +39,7 @@ impl<'a> UnvalidatedMessage<'a> {
         let found = self.buf.len();
 
         if expected != found {
-            return Err(ParseError::BadLength);
+            return Err(ParseError::BadLength.into());
         }
 
         Ok(LengthCheckedMessage::new(self.buf))
@@ -74,7 +79,7 @@ pub struct PtpVersion(u8);
 impl PtpVersion {
     pub const V2: Self = Self(2);
 
-    pub const fn to_wire(self) -> u8 {
+    pub const fn as_u8(self) -> u8 {
         self.0 & 0x0F
     }
 }
@@ -92,7 +97,7 @@ impl MessageBuffer {
     ) -> Self {
         let mut buf = [0u8; 2048];
         buf[0] = (transport_specific.to_wire() & 0x0F) << 4;
-        buf[1] = version.to_wire() & 0x0F;
+        buf[1] = version.as_u8() & 0x0F;
         buf[4] = domain_number.as_u8();
         buf[20..30].copy_from_slice(source_port_identity.to_bytes().as_ref());
 
