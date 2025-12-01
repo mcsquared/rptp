@@ -5,7 +5,7 @@ use crate::bmca::{
 use crate::log::{PortEvent, PortLog};
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
-    SequenceId, TwoStepSyncMessage,
+    OneStepSyncMessage, SequenceId, TwoStepSyncMessage,
 };
 use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
 use crate::portstate::{PortState, StateDecision};
@@ -64,13 +64,34 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         }
     }
 
+    pub fn process_one_step_sync(
+        &mut self,
+        sync: OneStepSyncMessage,
+        source_port_identity: PortIdentity,
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateDecision> {
+        self.log.message_received("One-Step Sync");
+        if !self.bmca.matches_parent(&source_port_identity) {
+            return None;
+        }
+
+        if let Some(estimate) = self
+            .master_estimate
+            .record_one_step_sync(sync, ingress_timestamp)
+        {
+            self.port.local_clock().discipline(estimate);
+        }
+
+        None
+    }
+
     pub fn process_two_step_sync(
         &mut self,
         sync: TwoStepSyncMessage,
         source_port_identity: PortIdentity,
         ingress_timestamp: TimeStamp,
     ) -> Option<StateDecision> {
-        self.log.message_received("Sync");
+        self.log.message_received("Two-Step Sync");
         if !self.bmca.matches_parent(&source_port_identity) {
             return None;
         }
@@ -212,7 +233,7 @@ mod tests {
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]
-    fn slave_port_synchronizes_clock() {
+    fn slave_port_synchronizes_clock_with_two_step_sync() {
         let local_clock = LocalClock::new(
             FakeClock::new(TimeStamp::new(0, 0)),
             DefaultDS::mid_grade_test_clock(),
@@ -250,6 +271,51 @@ mod tests {
         slave.process_follow_up(
             FollowUpMessage::new(0.into(), TimeStamp::new(1, 0)),
             PortIdentity::fake(),
+        );
+        slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
+        slave.process_delay_response(
+            DelayResponseMessage::new(0.into(), TimeStamp::new(2, 0)),
+            PortIdentity::fake(),
+        );
+
+        assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
+    }
+
+    #[test]
+    fn slave_port_synchronizes_clock_with_one_step_sync() {
+        let local_clock = LocalClock::new(
+            FakeClock::new(TimeStamp::new(0, 0)),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FakePort::new(),
+            FakeTimerHost::new(),
+            FakeTimestamping::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+
+        let mut slave = SlavePort::new(
+            domain_port,
+            ParentTrackingBmca::new(
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                ParentPortIdentity::new(PortIdentity::fake()),
+            ),
+            FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
+            DelayCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+            ),
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        slave.process_one_step_sync(
+            OneStepSyncMessage::new(0.into(), TimeStamp::new(1, 0)),
+            PortIdentity::fake(),
+            TimeStamp::new(1, 0),
         );
         slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
         slave.process_delay_response(

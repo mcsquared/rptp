@@ -233,8 +233,10 @@ impl TryFrom<&[u8]> for EventMessage {
         let header = MessageHeader::new(length_checked);
         let msg_type = header.message_type()?;
         let sequence_id = header.sequence_id();
+        let flags = header.flags();
+        let payload = header.payload();
 
-        EventMessage::new(msg_type, sequence_id)
+        EventMessage::new(msg_type, sequence_id, flags, payload)
     }
 }
 

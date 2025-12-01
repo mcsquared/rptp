@@ -2,8 +2,9 @@ use crate::{
     bmca::{Bmca, ForeignClockDS},
     buffer::{
         ControlField, FinalizedBuffer, LengthCheckedMessage, MessageBuffer, MessageFlags,
-        MessageType, PTP_DOMAIN_NUMBER_OFFSET, PTP_LOG_INTERVAL_OFFSET, PTP_MSG_TYPE_OFFSET,
-        PTP_PAYLOAD_OFFSET, PTP_SEQUENCE_ID_RANGE, PTP_SOURCE_PORT_IDENTITY_RANGE,
+        MessageType, PTP_DOMAIN_NUMBER_OFFSET, PTP_FLAGS_RANGE, PTP_LOG_INTERVAL_OFFSET,
+        PTP_MSG_TYPE_OFFSET, PTP_PAYLOAD_OFFSET, PTP_SEQUENCE_ID_RANGE,
+        PTP_SOURCE_PORT_IDENTITY_RANGE,
     },
     port::{DomainNumber, PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
@@ -35,6 +36,15 @@ impl<'a> MessageHeader<'a> {
                 .unwrap(),
         );
         SequenceId::new(id)
+    }
+
+    pub fn flags(&self) -> MessageFlags {
+        let flags = u16::from_be_bytes(
+            self.length_checked.buf()[PTP_FLAGS_RANGE]
+                .try_into()
+                .unwrap(),
+        );
+        MessageFlags::from_bits_truncate(flags)
     }
 
     fn source_port_identity(&self) -> PortIdentity {
@@ -69,7 +79,12 @@ impl<'a> DomainMessage<'a> {
         let domain_number = self.header.domain_number();
         let port = ports.port_by_domain(domain_number)?;
         let source_port_identity = self.header.source_port_identity();
-        let msg = EventMessage::new(self.header.message_type()?, self.header.sequence_id())?;
+        let msg = EventMessage::new(
+            self.header.message_type()?,
+            self.header.sequence_id(),
+            self.header.flags(),
+            self.header.payload(),
+        )?;
         port.process_event_message(source_port_identity, msg, timestamp);
 
         Ok(())
@@ -94,6 +109,7 @@ impl<'a> DomainMessage<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventMessage {
     DelayReq(DelayRequestMessage),
+    OneStepSync(OneStepSyncMessage),
     TwoStepSync(TwoStepSyncMessage),
 }
 
@@ -120,9 +136,28 @@ pub enum SystemMessage {
 }
 
 impl EventMessage {
-    pub fn new(msg_type: MessageType, sequence_id: SequenceId) -> Result<Self> {
+    pub fn new(
+        msg_type: MessageType,
+        sequence_id: SequenceId,
+        flags: MessageFlags,
+        payload: &[u8],
+    ) -> Result<Self> {
         match msg_type {
-            MessageType::Sync => Ok(Self::TwoStepSync(TwoStepSyncMessage::new(sequence_id))),
+            MessageType::Sync => {
+                if flags.contains(MessageFlags::TWO_STEP) {
+                    Ok(Self::TwoStepSync(TwoStepSyncMessage::new(sequence_id)))
+                } else {
+                    Ok(Self::OneStepSync(OneStepSyncMessage::new(
+                        sequence_id,
+                        WireTimeStamp::new(
+                            &payload[0..10]
+                                .try_into()
+                                .map_err(|_| ParseError::BadLength)?,
+                        )
+                        .timestamp()?,
+                    )))
+                }
+            }
             MessageType::DelayRequest => Ok(Self::DelayReq(DelayRequestMessage::new(sequence_id))),
             _ => Err(ProtocolError::UnknownMessageType.into()),
         }
@@ -131,6 +166,7 @@ impl EventMessage {
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         match self {
             EventMessage::DelayReq(msg) => msg.serialize(buf),
+            EventMessage::OneStepSync(msg) => msg.serialize(buf),
             EventMessage::TwoStepSync(msg) => msg.serialize(buf),
         }
     }
@@ -272,6 +308,39 @@ impl AnnounceMessage {
         payload_buf[13..29].copy_from_slice(&self.foreign_clock_ds.to_bytes());
 
         payload.finalize(30)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OneStepSyncMessage {
+    sequence_id: SequenceId,
+    origin_timestamp: TimeStamp,
+}
+
+impl OneStepSyncMessage {
+    pub fn new(sequence_id: SequenceId, origin_timestamp: TimeStamp) -> Self {
+        Self {
+            sequence_id,
+            origin_timestamp,
+        }
+    }
+
+    pub fn master_slave_offset(&self, ingress_timestamp: TimeStamp) -> TimeInterval {
+        ingress_timestamp - self.origin_timestamp
+    }
+
+    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+        let mut payload = buf
+            .typed(MessageType::Sync, ControlField::Sync)
+            .flagged(MessageFlags::empty())
+            .sequenced(self.sequence_id)
+            .with_log_message_interval(LogMessageInterval::new(0x7F))
+            .payload();
+
+        let payload_buf = payload.buf();
+        payload_buf[..10].copy_from_slice(&self.origin_timestamp.to_wire());
+
+        payload.finalize(10)
     }
 }
 
@@ -521,6 +590,21 @@ mod tests {
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, GeneralMessage::Announce(announce));
+    }
+
+    #[test]
+    fn one_step_sync_message_wire_roundtrip() {
+        let sync = OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 2));
+        let mut buf = MessageBuffer::new(
+            TransportSpecific::new(),
+            PtpVersion::V2,
+            DomainNumber::new(0),
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
+        );
+        let wire = sync.serialize(&mut buf);
+        let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
+
+        assert_eq!(parsed, EventMessage::OneStepSync(sync));
     }
 
     #[test]

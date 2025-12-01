@@ -210,6 +210,9 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         use PortState::*;
 
         match (self, msg) {
+            (Slave(port), OneStepSync(msg)) => {
+                port.process_one_step_sync(msg, source_port_identity, ingress_timestamp)
+            }
             (Slave(port), TwoStepSync(msg)) => {
                 port.process_two_step_sync(msg, source_port_identity, ingress_timestamp)
             }
