@@ -7,7 +7,7 @@ use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
     OneStepSyncMessage, SequenceId, TwoStepSyncMessage,
 };
-use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
+use crate::port::{Port, PortIdentity, PortTimingPolicy, SendResult, Timeout};
 use crate::portstate::{PortState, StateDecision};
 use crate::sync::MasterEstimate;
 use crate::time::{Duration, Instant, TimeStamp};
@@ -156,12 +156,14 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         None
     }
 
-    pub fn send_delay_request(&mut self) {
+    pub fn send_delay_request(&mut self) -> SendResult {
         let delay_request = self.delay_cycle.delay_request();
-        let _ = self.port.send_event(EventMessage::DelayReq(delay_request));
+        self.port
+            .send_event(EventMessage::DelayReq(delay_request))?;
         self.delay_cycle
             .next(self.timing_policy.min_delay_request_interval());
         self.log.message_sent("DelayReq");
+        Ok(())
     }
 
     pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {

@@ -262,10 +262,10 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
                 Ok(()) => None,
                 Err(_) => Some(StateDecision::FaultDetected),
             },
-            (Slave(port), DelayRequestTimeout) => {
-                port.send_delay_request();
-                None
-            }
+            (Slave(port), DelayRequestTimeout) => match port.send_delay_request() {
+                Ok(()) => None,
+                Err(_) => Some(StateDecision::FaultDetected),
+            },
             (Master(port), SyncTimeout) => match port.send_sync() {
                 Ok(()) => None,
                 Err(_) => Some(StateDecision::FaultDetected),
@@ -1379,6 +1379,51 @@ mod tests {
         );
 
         let transition = master.dispatch_system(SystemMessage::SyncTimeout);
+
+        assert!(matches!(transition, Some(StateDecision::FaultDetected)));
+    }
+
+    #[test]
+    fn portstate_slave_enters_faulty_on_delay_request_send_failure() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::mid_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+
+        let domain_port = DomainPort::new(
+            &local_clock,
+            FailingPort,
+            FakeTimerHost::new(),
+            FakeTimestamping::new(),
+            DomainNumber::new(0),
+            PortNumber::new(1),
+        );
+
+        let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
+        let bmca = ParentTrackingBmca::new(
+            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            parent_port_identity,
+        );
+
+        let announce_receipt_timeout = domain_port.timeout(
+            SystemMessage::AnnounceReceiptTimeout,
+            Duration::from_secs(10),
+        );
+        let delay_timeout =
+            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+
+        let mut slave = PortState::Slave(SlavePort::new(
+            domain_port,
+            bmca,
+            announce_receipt_timeout,
+            delay_cycle,
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        ));
+
+        let transition = slave.dispatch_system(SystemMessage::DelayRequestTimeout);
 
         assert!(matches!(transition, Some(StateDecision::FaultDetected)));
     }
