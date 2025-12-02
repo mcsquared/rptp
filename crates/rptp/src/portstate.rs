@@ -253,10 +253,10 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         use SystemMessage::*;
 
         match (self, msg) {
-            (Master(port), AnnounceSendTimeout) => {
-                port.send_announce();
-                None
-            }
+            (Master(port), AnnounceSendTimeout) => match port.send_announce() {
+                Ok(()) => None,
+                Err(_) => Some(StateDecision::FaultDetected),
+            },
             (Slave(port), DelayRequestTimeout) => {
                 port.send_delay_request();
                 None
@@ -293,13 +293,12 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
 mod tests {
     use super::*;
 
-    use crate::bmca::BmcaMasterDecisionPoint;
-    use crate::bmca::{DefaultDS, IncrementalBmca};
+    use crate::bmca::{BmcaMasterDecisionPoint, DefaultDS, IncrementalBmca, NoopBmca};
     use crate::clock::{LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
-    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
+    use crate::test_support::{FailingPort, FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
 
     #[test]
     fn portstate_listening_to_master_transition() {
@@ -1256,6 +1255,33 @@ mod tests {
         let result = master.apply(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
+    }
+
+    #[test]
+    fn portstate_master_enters_faulty_on_announce_send_failure() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+
+        let mut master = PortState::master(
+            DomainPort::new(
+                &local_clock,
+                FailingPort, // Port that always fails to send messages
+                FakeTimerHost::new(),
+                FakeTimestamping::new(),
+                DomainNumber::new(0),
+                PortNumber::new(1),
+            ),
+            LocalMasterTrackingBmca::new(NoopBmca),
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        let transition = master.dispatch_system(SystemMessage::AnnounceSendTimeout);
+
+        assert!(matches!(transition, Some(StateDecision::FaultDetected)));
     }
 
     #[test]

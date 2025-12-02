@@ -3,7 +3,7 @@ use std::cell::Cell;
 use crate::buffer::UnvalidatedMessage;
 use crate::clock::{Clock, ClockIdentity, SynchronizableClock};
 use crate::message::MessageHeader;
-use crate::port::{PhysicalPort, PortIdentity, PortNumber, Timeout, TimerHost};
+use crate::port::{PhysicalPort, PortIdentity, PortNumber, SendError, SendResult, Timeout, TimerHost};
 use crate::result::Result;
 use crate::time::TimeStamp;
 use crate::timestamping::TxTimestamping;
@@ -204,10 +204,11 @@ impl PhysicalPort for FakePort {
             .push(EventMessage::try_from(buf).unwrap());
     }
 
-    fn send_general(&self, buf: &[u8]) {
+    fn send_general(&self, buf: &[u8]) -> SendResult {
         self.general_messages
             .borrow_mut()
             .push(GeneralMessage::try_from(buf).unwrap());
+        Ok(())
     }
 }
 
@@ -218,10 +219,23 @@ impl PhysicalPort for &FakePort {
             .push(EventMessage::try_from(buf).unwrap());
     }
 
-    fn send_general(&self, buf: &[u8]) {
+    fn send_general(&self, buf: &[u8]) -> SendResult {
         self.general_messages
             .borrow_mut()
             .push(GeneralMessage::try_from(buf).unwrap());
+        Ok(())
+    }
+}
+
+pub struct FailingPort;
+
+impl PhysicalPort for FailingPort {
+    fn send_event(&self, _buf: &[u8]) {
+        // For now, event messages are not used to drive failures in tests.
+    }
+
+    fn send_general(&self, _buf: &[u8]) -> SendResult {
+        Err(SendError)
     }
 }
 

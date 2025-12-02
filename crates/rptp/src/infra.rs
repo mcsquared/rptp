@@ -7,7 +7,7 @@ pub mod infra_support {
     };
     use crate::clock::{Clock, LocalClock, SynchronizableClock};
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-    use crate::port::{Port, PortIdentity};
+    use crate::port::{Port, PortIdentity, SendResult};
     use crate::time::{Duration, TimeStamp};
 
     impl Clock for Rc<dyn SynchronizableClock> {
@@ -29,7 +29,7 @@ pub mod infra_support {
             self.as_ref().send_event(msg)
         }
 
-        fn send_general(&self, msg: GeneralMessage) {
+        fn send_general(&self, msg: GeneralMessage) -> SendResult {
             self.as_ref().send_general(msg)
         }
 

@@ -11,13 +11,18 @@ use crate::result::{ProtocolError, Result};
 use crate::time::{Duration, Instant, LogInterval, TimeStamp};
 use crate::timestamping::TxTimestamping;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SendError;
+
+pub type SendResult = core::result::Result<(), SendError>;
+
 pub trait Timeout {
     fn restart(&self, timeout: Duration);
 }
 
 pub trait PhysicalPort {
     fn send_event(&self, buf: &[u8]);
-    fn send_general(&self, buf: &[u8]);
+    fn send_general(&self, buf: &[u8]) -> SendResult;
 }
 
 pub trait TimerHost {
@@ -33,7 +38,7 @@ pub trait Port {
 
     fn local_clock(&self) -> &LocalClock<Self::Clock>;
     fn send_event(&self, msg: EventMessage);
-    fn send_general(&self, msg: GeneralMessage);
+    fn send_general(&self, msg: GeneralMessage) -> SendResult;
     fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout;
 
     fn update_steps_removed(&self, steps_removed: StepsRemoved) {
@@ -223,7 +228,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestampi
         self.timestamping.stamp_egress(msg);
     }
 
-    fn send_general(&self, msg: GeneralMessage) {
+    fn send_general(&self, msg: GeneralMessage) -> SendResult {
         let mut buf = MessageBuffer::new(
             TransportSpecific::new(),
             PtpVersion::V2,
@@ -231,7 +236,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestampi
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
         );
         let finalized = msg.serialize(&mut buf);
-        self.physical_port.send_general(finalized.as_ref());
+        self.physical_port.send_general(finalized.as_ref())
     }
 
     fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
@@ -400,8 +405,9 @@ mod tests {
         fn send_event(&self, buf: &[u8]) {
             self.sent.borrow_mut().push(buf.to_vec());
         }
-        fn send_general(&self, buf: &[u8]) {
+        fn send_general(&self, buf: &[u8]) -> SendResult {
             self.sent.borrow_mut().push(buf.to_vec());
+            Ok(())
         }
     }
 
@@ -471,7 +477,7 @@ mod tests {
         );
 
         let follow = FollowUpMessage::new(7.into(), TimeStamp::new(1, 2));
-        port.send_general(GeneralMessage::FollowUp(follow));
+        let _ = port.send_general(GeneralMessage::FollowUp(follow));
         let bufs = sent.borrow();
         assert!(!bufs.is_empty());
         let bytes = &bufs[0];

@@ -7,7 +7,7 @@ use crate::message::{
     AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId,
     TwoStepSyncMessage,
 };
-use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
+use crate::port::{Port, PortIdentity, PortTimingPolicy, SendResult, Timeout};
 use crate::portstate::{PortState, StateDecision};
 use crate::time::{Duration, Instant, LogInterval, TimeStamp};
 
@@ -41,12 +41,13 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         }
     }
 
-    pub fn send_announce(&mut self) {
+    pub fn send_announce(&mut self) -> SendResult {
         let announce_message = self.announce_cycle.announce(&self.port.local_clock());
         self.port
-            .send_general(GeneralMessage::Announce(announce_message));
+            .send_general(GeneralMessage::Announce(announce_message))?;
         self.announce_cycle.next();
         self.log.message_sent("Announce");
+        Ok(())
     }
 
     pub fn process_announce(
@@ -73,7 +74,8 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         ingress_timestamp: TimeStamp,
     ) -> Option<StateDecision> {
         self.log.message_received("DelayReq");
-        self.port
+        let _ = self
+            .port
             .send_general(GeneralMessage::DelayResp(req.response(ingress_timestamp)));
 
         None
@@ -92,7 +94,8 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         sync: TwoStepSyncMessage,
         egress_timestamp: TimeStamp,
     ) -> Option<StateDecision> {
-        self.port
+        let _ = self
+            .port
             .send_general(GeneralMessage::FollowUp(sync.follow_up(egress_timestamp)));
         self.log.message_sent("FollowUp");
         None

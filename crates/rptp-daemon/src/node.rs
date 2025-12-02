@@ -11,7 +11,9 @@ use rptp::port::TimerHost;
 use rptp::{
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{DomainMessage, SystemMessage},
-    port::{DomainNumber, DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
+    port::{
+        DomainNumber, DomainPort, PhysicalPort, PortMap, SendResult, SingleDomainPortMap, Timeout,
+    },
     result::{Error as RptpError, ProtocolError},
     time::{Duration, Instant},
     timestamping::TxTimestamping,
@@ -133,8 +135,18 @@ impl<N: NetworkSocket> PhysicalPort for TokioPhysicalPort<N> {
         let _ = self.event_socket.try_send(buf);
     }
 
-    fn send_general(&self, buf: &[u8]) {
-        let _ = self.general_socket.try_send(buf);
+    fn send_general(&self, buf: &[u8]) -> SendResult {
+        match self.general_socket.try_send(buf) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::warn!(
+                    target: "rptp::tx::general",
+                    error = %e,
+                    "general socket send error"
+                );
+                Err(rptp::port::SendError)
+            }
+        }
     }
 }
 
