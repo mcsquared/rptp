@@ -216,7 +216,12 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
             (Slave(port), TwoStepSync(msg)) => {
                 port.process_two_step_sync(msg, source_port_identity, ingress_timestamp)
             }
-            (Master(port), DelayReq(msg)) => port.process_delay_request(msg, ingress_timestamp),
+            (Master(port), DelayReq(msg)) => {
+                match port.process_delay_request(msg, ingress_timestamp) {
+                    Ok(()) => None,
+                    Err(_) => Some(StateDecision::FaultDetected),
+                }
+            }
             _ => None,
         }
     }
@@ -300,7 +305,7 @@ mod tests {
     use crate::clock::{LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NoopPortLog;
-    use crate::message::{TimestampMessage, TwoStepSyncMessage};
+    use crate::message::{DelayRequestMessage, TimestampMessage, TwoStepSyncMessage};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::test_support::{FailingPort, FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
     use crate::time::TimeStamp;
@@ -1285,6 +1290,37 @@ mod tests {
         );
 
         let transition = master.dispatch_system(SystemMessage::AnnounceSendTimeout);
+
+        assert!(matches!(transition, Some(StateDecision::FaultDetected)));
+    }
+
+    #[test]
+    fn portstate_master_enters_faulty_on_delay_response_send_failure() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+
+        let mut master = PortState::master(
+            DomainPort::new(
+                &local_clock,
+                FailingPort,
+                FakeTimerHost::new(),
+                FakeTimestamping::new(),
+                DomainNumber::new(0),
+                PortNumber::new(1),
+            ),
+            LocalMasterTrackingBmca::new(NoopBmca),
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        let transition = master.dispatch_event(
+            EventMessage::DelayReq(DelayRequestMessage::new(0.into())),
+            PortIdentity::fake(),
+            TimeStamp::new(0, 0),
+        );
 
         assert!(matches!(transition, Some(StateDecision::FaultDetected)));
     }

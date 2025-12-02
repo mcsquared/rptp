@@ -72,13 +72,10 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         &mut self,
         req: DelayRequestMessage,
         ingress_timestamp: TimeStamp,
-    ) -> Option<StateDecision> {
+    ) -> SendResult {
         self.log.message_received("DelayReq");
-        let _ = self
-            .port
-            .send_general(GeneralMessage::DelayResp(req.response(ingress_timestamp)));
-
-        None
+        self.port
+            .send_general(GeneralMessage::DelayResp(req.response(ingress_timestamp)))
     }
 
     pub fn send_sync(&mut self) {
@@ -229,7 +226,9 @@ mod tests {
 
         timer_host.take_system_messages();
 
-        master.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
+        assert!(master
+            .process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0))
+            .is_ok());
 
         let messages = port.take_general_messages();
         assert!(
