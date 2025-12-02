@@ -324,6 +324,7 @@ mod tests {
     use rptp::bmca::{
         DefaultDS, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1, Priority2,
     };
+    use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
     use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved};
     use rptp::message::{EventMessage, GeneralMessage, OneStepSyncMessage, TwoStepSyncMessage};
     use rptp::port::{
@@ -343,6 +344,62 @@ mod tests {
     use std::collections::VecDeque;
     use std::net::SocketAddr;
     use std::time::Duration as StdDuration;
+
+    struct MasterTestNode<'a, C: SynchronizableClock, N: NetworkSocket> {
+        portsloop: TokioPortsLoop<'a, C, N, FakeTimestamping>,
+    }
+
+    impl<'a, C: SynchronizableClock, N: NetworkSocket> MasterTestNode<'a, C, N> {
+        async fn new(
+            local_clock: &'a LocalClock<C>,
+            event_socket: Rc<N>,
+            general_socket: Rc<N>,
+        ) -> std::io::Result<Self> {
+            let domain_number = DomainNumber::new(0);
+
+            let (system_tx, system_rx) = mpsc::unbounded_channel();
+            let tx_timestamping = FakeTimestamping::new();
+            let physical_port =
+                TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+            let port_number = PortNumber::new(1);
+            let domain_port = Box::new(DomainPort::new(
+                &local_clock,
+                physical_port,
+                TokioTimerHost::new(domain_number, system_tx.clone()),
+                tx_timestamping,
+                domain_number,
+                port_number,
+            ));
+            let bmca = LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                SortedForeignClockRecordsVec::new(),
+            ));
+            let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
+            let log = TracingPortLog::new(port_identity);
+            let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
+            let portmap = SingleDomainPortMap::new(domain_number, port_state);
+
+            let rx_timestamping = FakeTimestamping::new();
+            let rx_timestamping: &'static dyn RxTimestamping = Box::leak(Box::new(rx_timestamping));
+
+            let portsloop = TokioPortsLoop::new(
+                portmap,
+                event_socket,
+                general_socket,
+                rx_timestamping,
+                system_rx,
+            )
+            .await?;
+
+            Ok(Self { portsloop })
+        }
+
+        async fn run_until<F>(self, shutdown: F) -> std::io::Result<()>
+        where
+            F: std::future::Future<Output = ()>,
+        {
+            self.portsloop.run_until(shutdown).await
+        }
+    }
 
     #[test]
     fn tokio_node_state_size() {
@@ -605,16 +662,6 @@ mod tests {
 
     #[tokio::test]
     async fn ports_loop_handles_unknown_domain_event_message() -> std::io::Result<()> {
-        use rptp::bmca::LocalMasterTrackingBmca;
-        use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
-
-        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
-        let (general_socket_impl, _) = InjectingNetworkSocket::new();
-        let event_socket = Rc::new(event_socket_impl);
-        let general_socket = Rc::new(general_socket_impl);
-
-        let domain_number = DomainNumber::new(0);
-
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::new(
@@ -626,32 +673,13 @@ mod tests {
             StepsRemoved::new(0),
         );
 
-        let (system_tx, system_rx) = mpsc::unbounded_channel();
-        let tx_timestamping = FakeTimestamping::new();
-        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let port_number = PortNumber::new(1);
-        let domain_port = Box::new(DomainPort::new(
-            &local_clock,
-            physical_port,
-            TokioTimerHost::new(domain_number, system_tx.clone()),
-            tx_timestamping,
-            domain_number,
-            port_number,
-        ));
-        let bmca =
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
-        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
-        let log = TracingPortLog::new(port_identity);
-        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
-        let portmap = SingleDomainPortMap::new(domain_number, port_state);
+        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket_impl, _) = InjectingNetworkSocket::new();
 
-        let rx_timestamping = FakeTimestamping::new();
-        let portsloop = TokioPortsLoop::new(
-            portmap,
-            event_socket.clone(),
-            general_socket.clone(),
-            &rx_timestamping,
-            system_rx,
+        let node = MasterTestNode::new(
+            &local_clock,
+            Rc::new(event_socket_impl),
+            Rc::new(general_socket_impl),
         )
         .await?;
 
@@ -660,7 +688,7 @@ mod tests {
             TransportSpecific::new(),
             PtpVersion::V2,
             DomainNumber::new(7),
-            port_identity,
+            PortIdentity::fake(),
         );
         let sync_msg = TwoStepSyncMessage::new(1.into());
         let wire = sync_msg.serialize(&mut msg_buf);
@@ -670,23 +698,13 @@ mod tests {
             .push_back(wire.as_ref().to_vec());
 
         let shutdown = time::sleep(StdDuration::from_millis(20));
-        portsloop.run_until(shutdown).await?;
+        node.run_until(shutdown).await?;
 
         Ok(())
     }
 
     #[tokio::test]
     async fn ports_loop_handles_unsupported_ptp_version_event_message() -> std::io::Result<()> {
-        use rptp::bmca::LocalMasterTrackingBmca;
-        use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
-
-        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
-        let (general_socket_impl, _) = InjectingNetworkSocket::new();
-        let event_socket = Rc::new(event_socket_impl);
-        let general_socket = Rc::new(general_socket_impl);
-
-        let domain_number = DomainNumber::new(0);
-
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::new(
@@ -698,32 +716,13 @@ mod tests {
             StepsRemoved::new(0),
         );
 
-        let (system_tx, system_rx) = mpsc::unbounded_channel();
-        let tx_timestamping = FakeTimestamping::new();
-        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let port_number = PortNumber::new(1);
-        let domain_port = Box::new(DomainPort::new(
-            &local_clock,
-            physical_port,
-            TokioTimerHost::new(domain_number, system_tx.clone()),
-            tx_timestamping,
-            domain_number,
-            port_number,
-        ));
-        let bmca =
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
-        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
-        let log = TracingPortLog::new(port_identity);
-        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
-        let portmap = SingleDomainPortMap::new(domain_number, port_state);
+        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket_impl, _) = InjectingNetworkSocket::new();
 
-        let rx_timestamping = FakeTimestamping::new();
-        let portsloop = TokioPortsLoop::new(
-            portmap,
-            event_socket.clone(),
-            general_socket.clone(),
-            &rx_timestamping,
-            system_rx,
+        let node = MasterTestNode::new(
+            &local_clock,
+            Rc::new(event_socket_impl),
+            Rc::new(general_socket_impl),
         )
         .await?;
 
@@ -731,8 +730,8 @@ mod tests {
         let mut msg_buf = MessageBuffer::new(
             TransportSpecific::new(),
             PtpVersion::V2,
-            domain_number,
-            port_identity,
+            DomainNumber::new(0),
+            PortIdentity::fake(),
         );
         let sync_msg = TwoStepSyncMessage::new(2.into());
         let wire = sync_msg.serialize(&mut msg_buf);
@@ -742,22 +741,13 @@ mod tests {
         event_queue.lock().unwrap().push_back(bytes);
 
         let shutdown = time::sleep(StdDuration::from_millis(20));
-        portsloop.run_until(shutdown).await?;
+        node.run_until(shutdown).await?;
 
         Ok(())
     }
 
     #[tokio::test]
     async fn ports_loop_handles_header_too_short_event_message() -> std::io::Result<()> {
-        use rptp::bmca::LocalMasterTrackingBmca;
-
-        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
-        let (general_socket_impl, _) = InjectingNetworkSocket::new();
-        let event_socket = Rc::new(event_socket_impl);
-        let general_socket = Rc::new(general_socket_impl);
-
-        let domain_number = DomainNumber::new(0);
-
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::new(
@@ -769,32 +759,13 @@ mod tests {
             StepsRemoved::new(0),
         );
 
-        let (system_tx, system_rx) = mpsc::unbounded_channel();
-        let tx_timestamping = FakeTimestamping::new();
-        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let port_number = PortNumber::new(1);
-        let domain_port = Box::new(DomainPort::new(
-            &local_clock,
-            physical_port,
-            TokioTimerHost::new(domain_number, system_tx.clone()),
-            tx_timestamping,
-            domain_number,
-            port_number,
-        ));
-        let bmca =
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
-        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
-        let log = TracingPortLog::new(port_identity);
-        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
-        let portmap = SingleDomainPortMap::new(domain_number, port_state);
+        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket_impl, _) = InjectingNetworkSocket::new();
 
-        let rx_timestamping = FakeTimestamping::new();
-        let portsloop = TokioPortsLoop::new(
-            portmap,
-            event_socket.clone(),
-            general_socket.clone(),
-            &rx_timestamping,
-            system_rx,
+        let node = MasterTestNode::new(
+            &local_clock,
+            Rc::new(event_socket_impl),
+            Rc::new(general_socket_impl),
         )
         .await?;
 
@@ -802,23 +773,13 @@ mod tests {
         event_queue.lock().unwrap().push_back(vec![0u8; 10]);
 
         let shutdown = time::sleep(StdDuration::from_millis(20));
-        portsloop.run_until(shutdown).await?;
+        node.run_until(shutdown).await?;
 
         Ok(())
     }
 
     #[tokio::test]
     async fn ports_loop_handles_length_mismatch_event_message() -> std::io::Result<()> {
-        use rptp::bmca::LocalMasterTrackingBmca;
-        use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
-
-        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
-        let (general_socket_impl, _) = InjectingNetworkSocket::new();
-        let event_socket = Rc::new(event_socket_impl);
-        let general_socket = Rc::new(general_socket_impl);
-
-        let domain_number = DomainNumber::new(0);
-
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::new(
@@ -830,32 +791,13 @@ mod tests {
             StepsRemoved::new(0),
         );
 
-        let (system_tx, system_rx) = mpsc::unbounded_channel();
-        let tx_timestamping = FakeTimestamping::new();
-        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let port_number = PortNumber::new(1);
-        let domain_port = Box::new(DomainPort::new(
-            &local_clock,
-            physical_port,
-            TokioTimerHost::new(domain_number, system_tx.clone()),
-            tx_timestamping,
-            domain_number,
-            port_number,
-        ));
-        let bmca =
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
-        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
-        let log = TracingPortLog::new(port_identity);
-        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
-        let portmap = SingleDomainPortMap::new(domain_number, port_state);
+        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket_impl, _) = InjectingNetworkSocket::new();
 
-        let rx_timestamping = FakeTimestamping::new();
-        let portsloop = TokioPortsLoop::new(
-            portmap,
-            event_socket.clone(),
-            general_socket.clone(),
-            &rx_timestamping,
-            system_rx,
+        let node = MasterTestNode::new(
+            &local_clock,
+            Rc::new(event_socket_impl),
+            Rc::new(general_socket_impl),
         )
         .await?;
 
@@ -863,8 +805,8 @@ mod tests {
         let mut msg_buf = MessageBuffer::new(
             TransportSpecific::new(),
             PtpVersion::V2,
-            domain_number,
-            port_identity,
+            DomainNumber::new(0),
+            PortIdentity::fake(),
         );
         let sync_msg = TwoStepSyncMessage::new(10.into());
         let wire = sync_msg.serialize(&mut msg_buf);
@@ -876,23 +818,13 @@ mod tests {
         event_queue.lock().unwrap().push_back(bytes);
 
         let shutdown = time::sleep(StdDuration::from_millis(20));
-        portsloop.run_until(shutdown).await?;
+        node.run_until(shutdown).await?;
 
         Ok(())
     }
 
     #[tokio::test]
     async fn ports_loop_handles_short_payload_event_message() -> std::io::Result<()> {
-        use rptp::bmca::LocalMasterTrackingBmca;
-        use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
-
-        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
-        let (general_socket_impl, _) = InjectingNetworkSocket::new();
-        let event_socket = Rc::new(event_socket_impl);
-        let general_socket = Rc::new(general_socket_impl);
-
-        let domain_number = DomainNumber::new(0);
-
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::new(
@@ -904,32 +836,13 @@ mod tests {
             StepsRemoved::new(0),
         );
 
-        let (system_tx, system_rx) = mpsc::unbounded_channel();
-        let tx_timestamping = FakeTimestamping::new();
-        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let port_number = PortNumber::new(1);
-        let domain_port = Box::new(DomainPort::new(
-            &local_clock,
-            physical_port,
-            TokioTimerHost::new(domain_number, system_tx.clone()),
-            tx_timestamping,
-            domain_number,
-            port_number,
-        ));
-        let bmca =
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
-        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
-        let log = TracingPortLog::new(port_identity);
-        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
-        let portmap = SingleDomainPortMap::new(domain_number, port_state);
+        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket_impl, _) = InjectingNetworkSocket::new();
 
-        let rx_timestamping = FakeTimestamping::new();
-        let portsloop = TokioPortsLoop::new(
-            portmap,
-            event_socket.clone(),
-            general_socket.clone(),
-            &rx_timestamping,
-            system_rx,
+        let node = MasterTestNode::new(
+            &local_clock,
+            Rc::new(event_socket_impl),
+            Rc::new(general_socket_impl),
         )
         .await?;
 
@@ -938,8 +851,8 @@ mod tests {
         let mut msg_buf = MessageBuffer::new(
             TransportSpecific::new(),
             PtpVersion::V2,
-            domain_number,
-            port_identity,
+            DomainNumber::new(0),
+            PortIdentity::fake(),
         );
         let sync_msg = OneStepSyncMessage::new(11.into(), TimeStamp::new(1, 2));
         let wire = sync_msg.serialize(&mut msg_buf);
@@ -953,7 +866,7 @@ mod tests {
         event_queue.lock().unwrap().push_back(bytes);
 
         let shutdown = time::sleep(StdDuration::from_millis(20));
-        portsloop.run_until(shutdown).await?;
+        node.run_until(shutdown).await?;
 
         Ok(())
     }
