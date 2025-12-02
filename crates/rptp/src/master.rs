@@ -93,12 +93,11 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         &mut self,
         sync: TwoStepSyncMessage,
         egress_timestamp: TimeStamp,
-    ) -> Option<StateDecision> {
-        let _ = self
-            .port
-            .send_general(GeneralMessage::FollowUp(sync.follow_up(egress_timestamp)));
+    ) -> SendResult {
+        self.port
+            .send_general(GeneralMessage::FollowUp(sync.follow_up(egress_timestamp)))?;
         self.log.message_sent("FollowUp");
-        None
+        Ok(())
     }
 
     pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
@@ -350,7 +349,9 @@ mod tests {
 
         timer_host.take_system_messages();
 
-        master.send_follow_up(TwoStepSyncMessage::new(0.into()), TimeStamp::new(0, 0));
+        assert!(master
+            .send_follow_up(TwoStepSyncMessage::new(0.into()), TimeStamp::new(0, 0))
+            .is_ok());
 
         let messages = port.take_general_messages();
         assert!(
