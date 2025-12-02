@@ -262,7 +262,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortMap for SingleDomainPortMap<P, B, L> {
         if self.domain_number == domain_number {
             Ok(&mut self.port_state)
         } else {
-            Err(ProtocolError::DomainNotFound.into())
+            Err(ProtocolError::DomainNotFound(domain_number.as_u8()).into())
         }
     }
 }

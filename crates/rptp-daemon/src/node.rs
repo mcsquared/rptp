@@ -12,6 +12,7 @@ use rptp::{
     infra::infra_support::SortedForeignClockRecordsVec,
     message::{DomainMessage, SystemMessage},
     port::{DomainNumber, DomainPort, PhysicalPort, PortMap, SingleDomainPortMap, Timeout},
+    result::{Error as RptpError, ProtocolError},
     time::{Duration, Instant},
     timestamping::TxTimestamping,
 };
@@ -199,22 +200,60 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
                     if let Ok((size, _peer)) = recv {
                         let length_checked = match UnvalidatedMessage::new(&event_buf[..size])
                             .length_checked_v2() {
-                                Ok(msg) => msg,
-                                Err(e) => {
-                                    tracing::trace!(?e, "dropping malformed event message");
-                                    continue;
-                                }
-                            };
+                            Ok(msg) => msg,
+                            Err(e) => {
+                                tracing::trace!(target: "rptp::rx::event", error = %e, "dropping malformed event message");
+                                continue;
+                            }
+                        };
 
                         let domain_msg = DomainMessage::new(length_checked);
                         if let Err(e) = domain_msg.dispatch_event(
                             &mut self.portmap,
                             self.timestamping.ingress_stamp()
                         ) {
-                            tracing::debug!(?e, "event message domain/protocol error");
+                            match &e {
+                                RptpError::Protocol(ProtocolError::DomainNotFound(_)) => {
+                                    // Other PTP domains on the same network are expected; keep this quiet.
+                                    tracing::trace!(
+                                        target: "rptp::rx::event",
+                                        error = %e,
+                                        "dropping event message for unknown domain"
+                                    );
+                                }
+                                RptpError::Protocol(ProtocolError::UnsupportedPtpVersion(_)) => {
+                                    // PTPv1 or other versions are expected noise on some networks.
+                                    tracing::trace!(
+                                        target: "rptp::rx::event",
+                                        error = %e,
+                                        "dropping event message with unsupported PTP version"
+                                    );
+                                }
+                                RptpError::Protocol(ProtocolError::UnknownMessageType(_)) => {
+                                    tracing::trace!(
+                                        target: "rptp::rx::event",
+                                        error = %e,
+                                        "dropping event message with unknown type"
+                                    );
+                                }
+                                RptpError::Parse(_) => {
+                                    tracing::trace!(
+                                        target: "rptp::rx::event",
+                                        error = %e,
+                                        "dropping event message with parse error"
+                                    );
+                                }
+                                _ => {
+                                    tracing::debug!(
+                                        target: "rptp::rx::event",
+                                        error = %e,
+                                        "event message domain/protocol error"
+                                    );
+                                }
+                            }
                         }
                     } else if let Err(e) = recv {
-                        tracing::warn!("event socket receive error: {}", e);
+                        tracing::warn!(target: "rptp::rx::event", error = %e, "event socket receive error");
                         // TODO: extended & more granular receive error handling
                     }
                 }
@@ -223,19 +262,55 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
                     if let Ok((size, _peer)) = recv {
                         let length_checked = match UnvalidatedMessage::new(&general_buf[..size])
                             .length_checked_v2() {
-                                Ok(msg) => msg,
-                                Err(e) => {
-                                    tracing::trace!(?e, "dropping malformed general message");
-                                    continue;
-                                }
-                            };
+                            Ok(msg) => msg,
+                            Err(e) => {
+                                tracing::trace!(target: "rptp::rx::general", error = %e, "dropping malformed general message");
+                                continue;
+                            }
+                        };
 
                         let domain_msg = DomainMessage::new(length_checked);
                         if let Err(e) = domain_msg.dispatch_general(&mut self.portmap, now) {
-                            tracing::debug!(?e, "general message domain/protocol error");
+                            match &e {
+                                RptpError::Protocol(ProtocolError::DomainNotFound(_)) => {
+                                    tracing::trace!(
+                                        target: "rptp::rx::general",
+                                        error = %e,
+                                        "dropping general message for unknown domain"
+                                    );
+                                }
+                                RptpError::Protocol(ProtocolError::UnsupportedPtpVersion(_)) => {
+                                    tracing::trace!(
+                                        target: "rptp::rx::general",
+                                        error = %e,
+                                        "dropping general message with unsupported PTP version"
+                                    );
+                                }
+                                RptpError::Protocol(ProtocolError::UnknownMessageType(_)) => {
+                                    tracing::trace!(
+                                        target: "rptp::rx::general",
+                                        error = %e,
+                                        "dropping general message with unknown type"
+                                    );
+                                }
+                                RptpError::Parse(_) => {
+                                    tracing::trace!(
+                                        target: "rptp::rx::general",
+                                        error = %e,
+                                        "dropping general message with parse error"
+                                    );
+                                }
+                                _ => {
+                                    tracing::debug!(
+                                        target: "rptp::rx::general",
+                                        error = %e,
+                                        "general message domain/protocol error"
+                                    );
+                                }
+                            }
                         }
                     } else if let Err(e) = recv {
-                        tracing::warn!("general socket receive error: {}", e);
+                        tracing::warn!(target: "rptp::rx::general", error = %e, "general socket receive error");
                         // TODO: extended & more granular receive error handling
                     }
                 }
@@ -277,8 +352,6 @@ async fn terminate() {
 mod tests {
     use super::*;
 
-    use std::time::Duration as StdDuration;
-
     use futures::FutureExt;
     use tokio::time;
 
@@ -286,7 +359,7 @@ mod tests {
         DefaultDS, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1, Priority2,
     };
     use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved};
-    use rptp::message::{EventMessage, GeneralMessage};
+    use rptp::message::{EventMessage, GeneralMessage, OneStepSyncMessage, TwoStepSyncMessage};
     use rptp::port::{
         DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber, PortTimingPolicy,
     };
@@ -297,9 +370,13 @@ mod tests {
     use rptp::time::TimeStamp;
 
     use crate::log::TracingPortLog;
-    use crate::net::{FakeNetworkSocket, MulticastSocket};
+    use crate::net::{FakeNetworkSocket, MulticastSocket, NetworkSocket};
     use crate::timestamping::ClockTimestamping;
     use crate::virtualclock::VirtualClock;
+
+    use std::collections::VecDeque;
+    use std::net::SocketAddr;
+    use std::time::Duration as StdDuration;
 
     #[test]
     fn tokio_node_state_size() {
@@ -326,6 +403,55 @@ mod tests {
     impl RxTimestamping for FakeTimestamping {
         fn ingress_stamp(&self) -> TimeStamp {
             TimeStamp::new(0, 0)
+        }
+    }
+
+    struct InjectingNetworkSocket {
+        queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    }
+
+    impl InjectingNetworkSocket {
+        fn new() -> (Self, Arc<Mutex<VecDeque<Vec<u8>>>>) {
+            let queue = Arc::new(Mutex::new(VecDeque::new()));
+            (
+                Self {
+                    queue: queue.clone(),
+                },
+                queue,
+            )
+        }
+    }
+
+    impl NetworkSocket for InjectingNetworkSocket {
+        fn recv<'a>(
+            &'a self,
+            buf: &'a mut [u8],
+        ) -> impl std::future::Future<Output = std::io::Result<(usize, SocketAddr)>> + 'a {
+            async move {
+                loop {
+                    if let Some(msg) = {
+                        let mut q = self.queue.lock().unwrap();
+                        q.pop_front()
+                    } {
+                        let len = msg.len().min(buf.len());
+                        buf[..len].copy_from_slice(&msg[..len]);
+                        return Ok((len, SocketAddr::from(([127, 0, 0, 1], 0))));
+                    } else {
+                        time::sleep(StdDuration::from_millis(1)).await;
+                    }
+                }
+            }
+        }
+
+        fn send<'a>(
+            &'a self,
+            bytes: &'a [u8],
+        ) -> impl std::future::Future<Output = std::io::Result<usize>> + 'a {
+            async move { Ok(bytes.len()) }
+        }
+
+        fn try_send(&self, bytes: &[u8]) -> std::io::Result<usize> {
+            Ok(bytes.len())
         }
     }
 
@@ -508,6 +634,361 @@ mod tests {
         portsloop.run_until(cond).await?;
 
         assert!(delay_request_count >= 5);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ports_loop_handles_unknown_domain_event_message() -> std::io::Result<()> {
+        use rptp::bmca::LocalMasterTrackingBmca;
+        use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
+
+        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket_impl, _) = InjectingNetworkSocket::new();
+        let event_socket = Rc::new(event_socket_impl);
+        let general_socket = Rc::new(general_socket_impl);
+
+        let domain_number = DomainNumber::new(0);
+
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::new(
+                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x03]),
+                Priority1::new(127),
+                Priority2::new(127),
+                ClockQuality::new(248, 0xFE, 0xFFFF),
+            ),
+            StepsRemoved::new(0),
+        );
+
+        let (system_tx, system_rx) = mpsc::unbounded_channel();
+        let tx_timestamping = FakeTimestamping::new();
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+        let port_number = PortNumber::new(1);
+        let domain_port = Box::new(DomainPort::new(
+            &local_clock,
+            physical_port,
+            TokioTimerHost::new(domain_number, system_tx.clone()),
+            tx_timestamping,
+            domain_number,
+            port_number,
+        ));
+        let bmca =
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
+        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
+        let log = TracingPortLog::new(port_identity);
+        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
+        let portmap = SingleDomainPortMap::new(domain_number, port_state);
+
+        let rx_timestamping = FakeTimestamping::new();
+        let portsloop = TokioPortsLoop::new(
+            portmap,
+            event_socket.clone(),
+            general_socket.clone(),
+            &rx_timestamping,
+            system_rx,
+        )
+        .await?;
+
+        // Build a valid PTPv2 Sync message for a different domain (e.g., 7).
+        let mut msg_buf = MessageBuffer::new(
+            TransportSpecific::new(),
+            PtpVersion::V2,
+            DomainNumber::new(7),
+            port_identity,
+        );
+        let sync_msg = TwoStepSyncMessage::new(1.into());
+        let wire = sync_msg.serialize(&mut msg_buf);
+        event_queue
+            .lock()
+            .unwrap()
+            .push_back(wire.as_ref().to_vec());
+
+        let shutdown = time::sleep(StdDuration::from_millis(20));
+        portsloop.run_until(shutdown).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ports_loop_handles_unsupported_ptp_version_event_message() -> std::io::Result<()> {
+        use rptp::bmca::LocalMasterTrackingBmca;
+        use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
+
+        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket_impl, _) = InjectingNetworkSocket::new();
+        let event_socket = Rc::new(event_socket_impl);
+        let general_socket = Rc::new(general_socket_impl);
+
+        let domain_number = DomainNumber::new(0);
+
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::new(
+                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x04]),
+                Priority1::new(127),
+                Priority2::new(127),
+                ClockQuality::new(248, 0xFE, 0xFFFF),
+            ),
+            StepsRemoved::new(0),
+        );
+
+        let (system_tx, system_rx) = mpsc::unbounded_channel();
+        let tx_timestamping = FakeTimestamping::new();
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+        let port_number = PortNumber::new(1);
+        let domain_port = Box::new(DomainPort::new(
+            &local_clock,
+            physical_port,
+            TokioTimerHost::new(domain_number, system_tx.clone()),
+            tx_timestamping,
+            domain_number,
+            port_number,
+        ));
+        let bmca =
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
+        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
+        let log = TracingPortLog::new(port_identity);
+        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
+        let portmap = SingleDomainPortMap::new(domain_number, port_state);
+
+        let rx_timestamping = FakeTimestamping::new();
+        let portsloop = TokioPortsLoop::new(
+            portmap,
+            event_socket.clone(),
+            general_socket.clone(),
+            &rx_timestamping,
+            system_rx,
+        )
+        .await?;
+
+        // Build a valid PTPv2 Sync message for domain 0, then corrupt the version field.
+        let mut msg_buf = MessageBuffer::new(
+            TransportSpecific::new(),
+            PtpVersion::V2,
+            domain_number,
+            port_identity,
+        );
+        let sync_msg = TwoStepSyncMessage::new(2.into());
+        let wire = sync_msg.serialize(&mut msg_buf);
+        let mut bytes = wire.as_ref().to_vec();
+        // Overwrite the PTP version field (offset 1) with an unsupported value.
+        bytes[1] = 1;
+        event_queue.lock().unwrap().push_back(bytes);
+
+        let shutdown = time::sleep(StdDuration::from_millis(20));
+        portsloop.run_until(shutdown).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ports_loop_handles_header_too_short_event_message() -> std::io::Result<()> {
+        use rptp::bmca::LocalMasterTrackingBmca;
+
+        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket_impl, _) = InjectingNetworkSocket::new();
+        let event_socket = Rc::new(event_socket_impl);
+        let general_socket = Rc::new(general_socket_impl);
+
+        let domain_number = DomainNumber::new(0);
+
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::new(
+                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x05]),
+                Priority1::new(127),
+                Priority2::new(127),
+                ClockQuality::new(248, 0xFE, 0xFFFF),
+            ),
+            StepsRemoved::new(0),
+        );
+
+        let (system_tx, system_rx) = mpsc::unbounded_channel();
+        let tx_timestamping = FakeTimestamping::new();
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+        let port_number = PortNumber::new(1);
+        let domain_port = Box::new(DomainPort::new(
+            &local_clock,
+            physical_port,
+            TokioTimerHost::new(domain_number, system_tx.clone()),
+            tx_timestamping,
+            domain_number,
+            port_number,
+        ));
+        let bmca =
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
+        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
+        let log = TracingPortLog::new(port_identity);
+        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
+        let portmap = SingleDomainPortMap::new(domain_number, port_state);
+
+        let rx_timestamping = FakeTimestamping::new();
+        let portsloop = TokioPortsLoop::new(
+            portmap,
+            event_socket.clone(),
+            general_socket.clone(),
+            &rx_timestamping,
+            system_rx,
+        )
+        .await?;
+
+        // Inject a buffer that is shorter than the PTP header (34 bytes).
+        event_queue.lock().unwrap().push_back(vec![0u8; 10]);
+
+        let shutdown = time::sleep(StdDuration::from_millis(20));
+        portsloop.run_until(shutdown).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ports_loop_handles_length_mismatch_event_message() -> std::io::Result<()> {
+        use rptp::bmca::LocalMasterTrackingBmca;
+        use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
+
+        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket_impl, _) = InjectingNetworkSocket::new();
+        let event_socket = Rc::new(event_socket_impl);
+        let general_socket = Rc::new(general_socket_impl);
+
+        let domain_number = DomainNumber::new(0);
+
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::new(
+                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x06]),
+                Priority1::new(127),
+                Priority2::new(127),
+                ClockQuality::new(248, 0xFE, 0xFFFF),
+            ),
+            StepsRemoved::new(0),
+        );
+
+        let (system_tx, system_rx) = mpsc::unbounded_channel();
+        let tx_timestamping = FakeTimestamping::new();
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+        let port_number = PortNumber::new(1);
+        let domain_port = Box::new(DomainPort::new(
+            &local_clock,
+            physical_port,
+            TokioTimerHost::new(domain_number, system_tx.clone()),
+            tx_timestamping,
+            domain_number,
+            port_number,
+        ));
+        let bmca =
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
+        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
+        let log = TracingPortLog::new(port_identity);
+        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
+        let portmap = SingleDomainPortMap::new(domain_number, port_state);
+
+        let rx_timestamping = FakeTimestamping::new();
+        let portsloop = TokioPortsLoop::new(
+            portmap,
+            event_socket.clone(),
+            general_socket.clone(),
+            &rx_timestamping,
+            system_rx,
+        )
+        .await?;
+
+        // Build a valid PTPv2 TwoStepSync message, then corrupt the length field.
+        let mut msg_buf = MessageBuffer::new(
+            TransportSpecific::new(),
+            PtpVersion::V2,
+            domain_number,
+            port_identity,
+        );
+        let sync_msg = TwoStepSyncMessage::new(10.into());
+        let wire = sync_msg.serialize(&mut msg_buf);
+        let mut bytes = wire.as_ref().to_vec();
+        let len = bytes.len() as u16;
+        let bad_len = len.wrapping_add(1);
+        bytes[2] = (bad_len >> 8) as u8;
+        bytes[3] = (bad_len & 0xFF) as u8;
+        event_queue.lock().unwrap().push_back(bytes);
+
+        let shutdown = time::sleep(StdDuration::from_millis(20));
+        portsloop.run_until(shutdown).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ports_loop_handles_short_payload_event_message() -> std::io::Result<()> {
+        use rptp::bmca::LocalMasterTrackingBmca;
+        use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
+
+        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket_impl, _) = InjectingNetworkSocket::new();
+        let event_socket = Rc::new(event_socket_impl);
+        let general_socket = Rc::new(general_socket_impl);
+
+        let domain_number = DomainNumber::new(0);
+
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::new(
+                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x07]),
+                Priority1::new(127),
+                Priority2::new(127),
+                ClockQuality::new(248, 0xFE, 0xFFFF),
+            ),
+            StepsRemoved::new(0),
+        );
+
+        let (system_tx, system_rx) = mpsc::unbounded_channel();
+        let tx_timestamping = FakeTimestamping::new();
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+        let port_number = PortNumber::new(1);
+        let domain_port = Box::new(DomainPort::new(
+            &local_clock,
+            physical_port,
+            TokioTimerHost::new(domain_number, system_tx.clone()),
+            tx_timestamping,
+            domain_number,
+            port_number,
+        ));
+        let bmca =
+            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
+        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
+        let log = TracingPortLog::new(port_identity);
+        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
+        let portmap = SingleDomainPortMap::new(domain_number, port_state);
+
+        let rx_timestamping = FakeTimestamping::new();
+        let portsloop = TokioPortsLoop::new(
+            portmap,
+            event_socket.clone(),
+            general_socket.clone(),
+            &rx_timestamping,
+            system_rx,
+        )
+        .await?;
+
+        // Build a valid PTPv2 OneStepSync message, then truncate the payload
+        // so that the header length matches but the payload is too short.
+        let mut msg_buf = MessageBuffer::new(
+            TransportSpecific::new(),
+            PtpVersion::V2,
+            domain_number,
+            port_identity,
+        );
+        let sync_msg = OneStepSyncMessage::new(11.into(), TimeStamp::new(1, 2));
+        let wire = sync_msg.serialize(&mut msg_buf);
+        let mut bytes = wire.as_ref().to_vec();
+        // Ensure length is at least header (34) + some payload, but less than 34 + 10.
+        let truncated_len = 40usize;
+        bytes.truncate(truncated_len);
+        let len_field = truncated_len as u16;
+        bytes[2] = (len_field >> 8) as u8;
+        bytes[3] = (len_field & 0xFF) as u8;
+        event_queue.lock().unwrap().push_back(bytes);
+
+        let shutdown = time::sleep(StdDuration::from_millis(20));
+        portsloop.run_until(shutdown).await?;
+
         Ok(())
     }
 }

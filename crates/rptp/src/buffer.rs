@@ -31,7 +31,10 @@ impl<'a> UnvalidatedMessage<'a> {
 
     pub fn length_checked_v2(self) -> Result<LengthCheckedMessage<'a>> {
         if self.buf.len() < PTP_HEADER_LEN {
-            return Err(ParseError::BadLength.into());
+            return Err(ParseError::HeaderTooShort {
+                found: self.buf.len(),
+            }
+            .into());
         }
 
         let v = PtpVersion(self.buf[PTP_VERSION_OFFSET] & 0x0F);
@@ -42,12 +45,20 @@ impl<'a> UnvalidatedMessage<'a> {
         let expected = u16::from_be_bytes(
             self.buf[PTP_LENGTH_RANGE]
                 .try_into()
-                .map_err(|_| ParseError::BadLength)?,
+                .map_err(|_| ParseError::PayloadTooShort {
+                    field: "PTP length header",
+                    expected: PTP_LENGTH_RANGE.len(),
+                    found: self.buf[PTP_LENGTH_RANGE].len(),
+                })?,
         ) as usize;
         let found = self.buf.len();
 
         if expected != found {
-            return Err(ParseError::BadLength.into());
+            return Err(ParseError::LengthMismatch {
+                declared: expected,
+                actual: found,
+            }
+            .into());
         }
 
         Ok(LengthCheckedMessage::new(self.buf))
@@ -221,7 +232,7 @@ impl MessageType {
             0x08 => Ok(MessageType::FollowUp),
             0x09 => Ok(MessageType::DelayResponse),
             0x0B => Ok(MessageType::Announce),
-            _ => Err(ProtocolError::UnknownMessageType.into()),
+            _ => Err(ProtocolError::UnknownMessageType(n).into()),
         }
     }
 }
@@ -253,6 +264,7 @@ mod tests {
         TwoStepSyncMessage,
     };
     use crate::port::PortNumber;
+    use crate::result::{Error, ParseError, ProtocolError};
     use crate::time::TimeStamp;
 
     #[test]
@@ -348,5 +360,73 @@ mod tests {
         assert_eq!(len, bytes.len());
         assert_eq!(bytes[0] & 0x0F, 0x0B);
         assert_eq!(bytes[32], 0x05);
+    }
+
+    #[test]
+    fn unvalidated_message_header_too_short() {
+        let buf = [0u8; PTP_HEADER_LEN - 1];
+        let res = UnvalidatedMessage::new(&buf).length_checked_v2();
+
+        match res {
+            Err(e) => assert_eq!(
+                e,
+                Error::Parse(ParseError::HeaderTooShort {
+                    found: PTP_HEADER_LEN - 1
+                })
+            ),
+            Ok(_) => panic!("expected HeaderTooShort error"),
+        }
+    }
+
+    #[test]
+    fn unvalidated_message_unsupported_version() {
+        let mut buf = [0u8; PTP_HEADER_LEN];
+        buf[PTP_VERSION_OFFSET] = 1; // not V2
+        buf[PTP_LENGTH_RANGE]
+            .copy_from_slice(&(PTP_HEADER_LEN as u16).to_be_bytes());
+
+        let res = UnvalidatedMessage::new(&buf).length_checked_v2();
+
+        match res {
+            Err(e) => assert_eq!(
+                e,
+                Error::Protocol(ProtocolError::UnsupportedPtpVersion(1))
+            ),
+            Ok(_) => panic!("expected UnsupportedPtpVersion error"),
+        }
+    }
+
+    #[test]
+    fn unvalidated_message_length_mismatch() {
+        let mut buf = [0u8; PTP_HEADER_LEN + 1];
+        buf[PTP_VERSION_OFFSET] = PtpVersion::V2.as_u8();
+        buf[PTP_LENGTH_RANGE]
+            .copy_from_slice(&(PTP_HEADER_LEN as u16).to_be_bytes());
+
+        let res = UnvalidatedMessage::new(&buf).length_checked_v2();
+
+        match res {
+            Err(e) => assert_eq!(
+                e,
+                Error::Parse(ParseError::LengthMismatch {
+                    declared: PTP_HEADER_LEN,
+                    actual: PTP_HEADER_LEN + 1,
+                })
+            ),
+            Ok(_) => panic!("expected LengthMismatch error"),
+        }
+    }
+
+    #[test]
+    fn message_type_from_nibble_unknown() {
+        let res = MessageType::from_nibble(0x07);
+
+        match res {
+            Err(e) => assert_eq!(
+                e,
+                Error::Protocol(ProtocolError::UnknownMessageType(0x07))
+            ),
+            Ok(_) => panic!("expected UnknownMessageType error"),
+        }
     }
 }
