@@ -198,10 +198,11 @@ impl FakePort {
 }
 
 impl PhysicalPort for FakePort {
-    fn send_event(&self, buf: &[u8]) {
+    fn send_event(&self, buf: &[u8]) -> SendResult {
         self.event_messages
             .borrow_mut()
             .push(EventMessage::try_from(buf).unwrap());
+        Ok(())
     }
 
     fn send_general(&self, buf: &[u8]) -> SendResult {
@@ -213,10 +214,11 @@ impl PhysicalPort for FakePort {
 }
 
 impl PhysicalPort for &FakePort {
-    fn send_event(&self, buf: &[u8]) {
+    fn send_event(&self, buf: &[u8]) -> SendResult {
         self.event_messages
             .borrow_mut()
             .push(EventMessage::try_from(buf).unwrap());
+        Ok(())
     }
 
     fn send_general(&self, buf: &[u8]) -> SendResult {
@@ -230,8 +232,8 @@ impl PhysicalPort for &FakePort {
 pub struct FailingPort;
 
 impl PhysicalPort for FailingPort {
-    fn send_event(&self, _buf: &[u8]) {
-        // For now, event messages are not used to drive failures in tests.
+    fn send_event(&self, _buf: &[u8]) -> SendResult {
+        Err(SendError)
     }
 
     fn send_general(&self, _buf: &[u8]) -> SendResult {

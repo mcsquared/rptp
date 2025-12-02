@@ -131,8 +131,18 @@ impl<N: NetworkSocket> TokioPhysicalPort<N> {
 }
 
 impl<N: NetworkSocket> PhysicalPort for TokioPhysicalPort<N> {
-    fn send_event(&self, buf: &[u8]) {
-        let _ = self.event_socket.try_send(buf);
+    fn send_event(&self, buf: &[u8]) -> SendResult {
+        match self.event_socket.try_send(buf) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::warn!(
+                    target: "rptp::tx::event",
+                    error = %e,
+                    "event socket send error"
+                );
+                Err(rptp::port::SendError)
+            }
+        }
     }
 
     fn send_general(&self, buf: &[u8]) -> SendResult {

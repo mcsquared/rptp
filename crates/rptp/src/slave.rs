@@ -158,7 +158,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
 
     pub fn send_delay_request(&mut self) {
         let delay_request = self.delay_cycle.delay_request();
-        self.port.send_event(EventMessage::DelayReq(delay_request));
+        let _ = self.port.send_event(EventMessage::DelayReq(delay_request));
         self.delay_cycle
             .next(self.timing_policy.min_delay_request_interval());
         self.log.message_sent("DelayReq");

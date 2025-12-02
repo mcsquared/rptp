@@ -78,12 +78,13 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
             .send_general(GeneralMessage::DelayResp(req.response(ingress_timestamp)))
     }
 
-    pub fn send_sync(&mut self) {
+    pub fn send_sync(&mut self) -> SendResult {
         let sync_message = self.sync_cycle.two_step_sync();
         self.port
-            .send_event(EventMessage::TwoStepSync(sync_message));
+            .send_event(EventMessage::TwoStepSync(sync_message))?;
         self.sync_cycle.next(self.timing_policy.sync_interval());
         self.log.message_sent("TwoStepSync");
+        Ok(())
     }
 
     pub fn send_follow_up(

@@ -21,7 +21,7 @@ pub trait Timeout {
 }
 
 pub trait PhysicalPort {
-    fn send_event(&self, buf: &[u8]);
+    fn send_event(&self, buf: &[u8]) -> SendResult;
     fn send_general(&self, buf: &[u8]) -> SendResult;
 }
 
@@ -37,7 +37,7 @@ pub trait Port {
     type Timeout: Timeout;
 
     fn local_clock(&self) -> &LocalClock<Self::Clock>;
-    fn send_event(&self, msg: EventMessage);
+    fn send_event(&self, msg: EventMessage) -> SendResult;
     fn send_general(&self, msg: GeneralMessage) -> SendResult;
     fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout;
 
@@ -216,7 +216,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestampi
         &self.local_clock
     }
 
-    fn send_event(&self, msg: EventMessage) {
+    fn send_event(&self, msg: EventMessage) -> SendResult {
         let mut buf = MessageBuffer::new(
             TransportSpecific::new(),
             PtpVersion::V2,
@@ -224,8 +224,11 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestampi
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
         );
         let finalized = msg.serialize(&mut buf);
-        self.physical_port.send_event(finalized.as_ref());
-        self.timestamping.stamp_egress(msg);
+        let res = self.physical_port.send_event(finalized.as_ref());
+        if res.is_ok() {
+            self.timestamping.stamp_egress(msg);
+        }
+        res
     }
 
     fn send_general(&self, msg: GeneralMessage) -> SendResult {
@@ -402,8 +405,9 @@ mod tests {
     }
 
     impl PhysicalPort for CapturePort {
-        fn send_event(&self, buf: &[u8]) {
+        fn send_event(&self, buf: &[u8]) -> SendResult {
             self.sent.borrow_mut().push(buf.to_vec());
+            Ok(())
         }
         fn send_general(&self, buf: &[u8]) -> SendResult {
             self.sent.borrow_mut().push(buf.to_vec());
@@ -438,7 +442,9 @@ mod tests {
             port_number,
         );
 
-        port.send_event(EventMessage::DelayReq(DelayRequestMessage::new(42.into())));
+        assert!(port
+            .send_event(EventMessage::DelayReq(DelayRequestMessage::new(42.into())))
+            .is_ok());
         let bufs = sent.borrow();
         assert!(!bufs.is_empty());
         let bytes = &bufs[0];

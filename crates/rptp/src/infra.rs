@@ -25,7 +25,7 @@ pub mod infra_support {
             self.as_ref().local_clock()
         }
 
-        fn send_event(&self, msg: EventMessage) {
+        fn send_event(&self, msg: EventMessage) -> SendResult {
             self.as_ref().send_event(msg)
         }
 

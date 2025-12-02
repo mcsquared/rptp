@@ -266,10 +266,10 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
                 port.send_delay_request();
                 None
             }
-            (Master(port), SyncTimeout) => {
-                port.send_sync();
-                None
-            }
+            (Master(port), SyncTimeout) => match port.send_sync() {
+                Ok(()) => None,
+                Err(_) => Some(StateDecision::FaultDetected),
+            },
             (Master(port), Timestamp(msg)) => match msg.event_msg {
                 EventMessage::TwoStepSync(sync_msg) => {
                     match port.send_follow_up(sync_msg, msg.egress_timestamp) {
@@ -1352,6 +1352,33 @@ mod tests {
             TimestampMessage::new(EventMessage::TwoStepSync(sync_msg), TimeStamp::new(0, 0));
 
         let transition = master.dispatch_system(SystemMessage::Timestamp(ts_msg));
+
+        assert!(matches!(transition, Some(StateDecision::FaultDetected)));
+    }
+
+    #[test]
+    fn portstate_master_enters_faulty_on_sync_send_failure() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            DefaultDS::high_grade_test_clock(),
+            StepsRemoved::new(0),
+        );
+
+        let mut master = PortState::master(
+            DomainPort::new(
+                &local_clock,
+                FailingPort,
+                FakeTimerHost::new(),
+                FakeTimestamping::new(),
+                DomainNumber::new(0),
+                PortNumber::new(1),
+            ),
+            LocalMasterTrackingBmca::new(NoopBmca),
+            NoopPortLog,
+            PortTimingPolicy::default(),
+        );
+
+        let transition = master.dispatch_system(SystemMessage::SyncTimeout);
 
         assert!(matches!(transition, Some(StateDecision::FaultDetected)));
     }
