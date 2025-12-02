@@ -138,6 +138,11 @@ impl<N: NetworkSocket> PhysicalPort for TokioPhysicalPort<N> {
     }
 }
 
+enum RxKind {
+    Event,
+    General,
+}
+
 pub struct TokioPortsLoop<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping> {
     portmap: SingleDomainPortMap<
         Box<DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, TS>>,
@@ -198,60 +203,8 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
             tokio::select! {
                 recv = self.event_socket.recv(&mut event_buf) => {
                     if let Ok((size, _peer)) = recv {
-                        let length_checked = match UnvalidatedMessage::new(&event_buf[..size])
-                            .length_checked_v2() {
-                            Ok(msg) => msg,
-                            Err(e) => {
-                                tracing::trace!(target: "rptp::rx::event", error = %e, "dropping malformed event message");
-                                continue;
-                            }
-                        };
-
-                        let domain_msg = DomainMessage::new(length_checked);
-                        if let Err(e) = domain_msg.dispatch_event(
-                            &mut self.portmap,
-                            self.timestamping.ingress_stamp()
-                        ) {
-                            match &e {
-                                RptpError::Protocol(ProtocolError::DomainNotFound(_)) => {
-                                    // Other PTP domains on the same network are expected; keep this quiet.
-                                    tracing::trace!(
-                                        target: "rptp::rx::event",
-                                        error = %e,
-                                        "dropping event message for unknown domain"
-                                    );
-                                }
-                                RptpError::Protocol(ProtocolError::UnsupportedPtpVersion(_)) => {
-                                    // PTPv1 or other versions are expected noise on some networks.
-                                    tracing::trace!(
-                                        target: "rptp::rx::event",
-                                        error = %e,
-                                        "dropping event message with unsupported PTP version"
-                                    );
-                                }
-                                RptpError::Protocol(ProtocolError::UnknownMessageType(_)) => {
-                                    tracing::trace!(
-                                        target: "rptp::rx::event",
-                                        error = %e,
-                                        "dropping event message with unknown type"
-                                    );
-                                }
-                                RptpError::Parse(_) => {
-                                    tracing::trace!(
-                                        target: "rptp::rx::event",
-                                        error = %e,
-                                        "dropping event message with parse error"
-                                    );
-                                }
-                                _ => {
-                                    tracing::debug!(
-                                        target: "rptp::rx::event",
-                                        error = %e,
-                                        "event message domain/protocol error"
-                                    );
-                                }
-                            }
-                        }
+                        let now = Instant::from_nanos(start.elapsed().as_nanos() as u64);
+                        self.process_datagram(RxKind::Event, &event_buf, size, now);
                     } else if let Err(e) = recv {
                         tracing::warn!(target: "rptp::rx::event", error = %e, "event socket receive error");
                         // TODO: extended & more granular receive error handling
@@ -260,55 +213,7 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
                 recv = self.general_socket.recv(&mut general_buf) => {
                     let now = Instant::from_nanos(start.elapsed().as_nanos() as u64);
                     if let Ok((size, _peer)) = recv {
-                        let length_checked = match UnvalidatedMessage::new(&general_buf[..size])
-                            .length_checked_v2() {
-                            Ok(msg) => msg,
-                            Err(e) => {
-                                tracing::trace!(target: "rptp::rx::general", error = %e, "dropping malformed general message");
-                                continue;
-                            }
-                        };
-
-                        let domain_msg = DomainMessage::new(length_checked);
-                        if let Err(e) = domain_msg.dispatch_general(&mut self.portmap, now) {
-                            match &e {
-                                RptpError::Protocol(ProtocolError::DomainNotFound(_)) => {
-                                    tracing::trace!(
-                                        target: "rptp::rx::general",
-                                        error = %e,
-                                        "dropping general message for unknown domain"
-                                    );
-                                }
-                                RptpError::Protocol(ProtocolError::UnsupportedPtpVersion(_)) => {
-                                    tracing::trace!(
-                                        target: "rptp::rx::general",
-                                        error = %e,
-                                        "dropping general message with unsupported PTP version"
-                                    );
-                                }
-                                RptpError::Protocol(ProtocolError::UnknownMessageType(_)) => {
-                                    tracing::trace!(
-                                        target: "rptp::rx::general",
-                                        error = %e,
-                                        "dropping general message with unknown type"
-                                    );
-                                }
-                                RptpError::Parse(_) => {
-                                    tracing::trace!(
-                                        target: "rptp::rx::general",
-                                        error = %e,
-                                        "dropping general message with parse error"
-                                    );
-                                }
-                                _ => {
-                                    tracing::debug!(
-                                        target: "rptp::rx::general",
-                                        error = %e,
-                                        "general message domain/protocol error"
-                                    );
-                                }
-                            }
-                        }
+                        self.process_datagram(RxKind::General, &general_buf, size, now);
                     } else if let Err(e) = recv {
                         tracing::warn!(target: "rptp::rx::general", error = %e, "general socket receive error");
                         // TODO: extended & more granular receive error handling
@@ -332,6 +237,67 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
                     return Ok(());
                 }
             }
+        }
+    }
+
+    fn process_datagram(&mut self, kind: RxKind, buf: &[u8], size: usize, now: Instant) {
+        let label = match kind {
+            RxKind::Event => "event",
+            RxKind::General => "general",
+        };
+
+        let length_checked = match UnvalidatedMessage::new(&buf[..size]).length_checked_v2() {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::trace!(
+                    target: "rptp::rx",
+                    error = %e,
+                    "dropping malformed {label} message"
+                );
+                return;
+            }
+        };
+
+        let domain_msg = DomainMessage::new(length_checked);
+        let res = match kind {
+            RxKind::Event => {
+                domain_msg.dispatch_event(&mut self.portmap, self.timestamping.ingress_stamp())
+            }
+            RxKind::General => domain_msg.dispatch_general(&mut self.portmap, now),
+        };
+
+        if let Err(e) = res {
+            self.log_rx_error(label, &e);
+        }
+    }
+
+    fn log_rx_error(&self, label: &str, e: &RptpError) {
+        match e {
+            RptpError::Protocol(ProtocolError::DomainNotFound(_)) => tracing::trace!(
+                target: "rptp::rx",
+                error = %e,
+                "dropping {label} message for unknown domain"
+            ),
+            RptpError::Protocol(ProtocolError::UnsupportedPtpVersion(_)) => tracing::trace!(
+                target: "rptp::rx",
+                error = %e,
+                "dropping {label} message with unsupported PTP version"
+            ),
+            RptpError::Protocol(ProtocolError::UnknownMessageType(_)) => tracing::trace!(
+                target: "rptp::rx",
+                error = %e,
+                "dropping {label} message with unknown type"
+            ),
+            RptpError::Parse(_) => tracing::trace!(
+                target: "rptp::rx",
+                error = %e,
+                "dropping {label} message with parse error"
+            ),
+            _ => tracing::debug!(
+                target: "rptp::rx",
+                error = %e,
+                "{label} message domain/protocol error"
+            ),
         }
     }
 }
