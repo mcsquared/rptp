@@ -147,21 +147,9 @@ impl EventMessage {
                 if flags.contains(MessageFlags::TWO_STEP) {
                     Ok(Self::TwoStepSync(TwoStepSyncMessage::new(sequence_id)))
                 } else {
-                    let ts_bytes = payload.get(0..10).ok_or(ParseError::PayloadTooShort {
-                        field: "Sync.origin_timestamp",
-                        expected: 10,
-                        found: payload.len(),
-                    })?;
                     Ok(Self::OneStepSync(OneStepSyncMessage::new(
                         sequence_id,
-                        WireTimeStamp::new(ts_bytes.try_into().map_err(|_| {
-                            ParseError::PayloadTooShort {
-                                field: "Sync.origin_timestamp",
-                                expected: 10,
-                                found: ts_bytes.len(),
-                            }
-                        })?)
-                        .timestamp()?,
+                        SyncPayload::new(payload).origin_timestamp()?,
                     )))
                 }
             }
@@ -187,59 +175,21 @@ impl GeneralMessage {
         payload: &[u8],
     ) -> Result<Self> {
         match msg_type {
-            MessageType::Announce => Ok(Self::Announce(AnnounceMessage::new(
-                sequence_id,
-                log_message_interval,
-                {
-                    let fc_bytes = payload.get(13..29).ok_or(ParseError::PayloadTooShort {
-                        field: "Announce.foreign_clock_ds",
-                        expected: 16,
-                        found: payload.len().saturating_sub(13),
-                    })?;
-                    ForeignClockDS::from_slice(&fc_bytes.try_into().map_err(|_| {
-                        ParseError::PayloadTooShort {
-                            field: "Announce.foreign_clock_ds",
-                            expected: 16,
-                            found: fc_bytes.len(),
-                        }
-                    })?)
-                },
-            ))),
+            MessageType::Announce => {
+                let announce_payload = AnnouncePayload::new(payload);
+                Ok(Self::Announce(AnnounceMessage::new(
+                    sequence_id,
+                    log_message_interval,
+                    announce_payload.foreign_clock_ds()?,
+                )))
+            }
             MessageType::FollowUp => Ok(Self::FollowUp(FollowUpMessage::new(
                 sequence_id,
-                {
-                    let ts_bytes = payload.get(0..10).ok_or(ParseError::PayloadTooShort {
-                        field: "FollowUp.precise_origin_timestamp",
-                        expected: 10,
-                        found: payload.len(),
-                    })?;
-                    WireTimeStamp::new(ts_bytes.try_into().map_err(|_| {
-                        ParseError::PayloadTooShort {
-                            field: "FollowUp.precise_origin_timestamp",
-                            expected: 10,
-                            found: ts_bytes.len(),
-                        }
-                    })?)
-                }
-                .timestamp()?,
+                FollowUpPayload::new(payload).precise_origin_timestamp()?,
             ))),
             MessageType::DelayResponse => Ok(Self::DelayResp(DelayResponseMessage::new(
                 sequence_id,
-                {
-                    let ts_bytes = payload.get(0..10).ok_or(ParseError::PayloadTooShort {
-                        field: "DelayResponse.receive_timestamp",
-                        expected: 10,
-                        found: payload.len(),
-                    })?;
-                    WireTimeStamp::new(ts_bytes.try_into().map_err(|_| {
-                        ParseError::PayloadTooShort {
-                            field: "DelayResponse.receive_timestamp",
-                            expected: 10,
-                            found: ts_bytes.len(),
-                        }
-                    })?)
-                }
-                .timestamp()?,
+                DelayResponsePayload::new(payload).receive_timestamp()?,
             ))),
             _ => Err(ProtocolError::UnknownMessageType(msg_type.to_nibble()).into()),
         }
@@ -350,6 +300,122 @@ impl AnnounceMessage {
         payload_buf[13..29].copy_from_slice(&self.foreign_clock_ds.to_bytes());
 
         payload.finalize(30)
+    }
+}
+
+struct AnnouncePayload<'a> {
+    payload: &'a [u8],
+}
+
+impl<'a> AnnouncePayload<'a> {
+    fn new(payload: &'a [u8]) -> Self {
+        Self { payload }
+    }
+
+    fn foreign_clock_ds(&self) -> Result<ForeignClockDS> {
+        let fc_bytes = self
+            .payload
+            .get(13..29)
+            .ok_or(ParseError::PayloadTooShort {
+                field: "Announce.foreign_clock_ds",
+                expected: 16,
+                found: self.payload.len().saturating_sub(13),
+            })?;
+
+        Ok(ForeignClockDS::from_slice(fc_bytes.try_into().map_err(
+            |_| ParseError::PayloadTooShort {
+                field: "Announce.foreign_clock_ds",
+                expected: 16,
+                found: fc_bytes.len(),
+            },
+        )?))
+    }
+}
+
+struct SyncPayload<'a> {
+    payload: &'a [u8],
+}
+
+impl<'a> SyncPayload<'a> {
+    fn new(payload: &'a [u8]) -> Self {
+        Self { payload }
+    }
+
+    fn origin_timestamp(&self) -> Result<TimeStamp> {
+        let ts_bytes = self.payload.get(0..10).ok_or(ParseError::PayloadTooShort {
+            field: "Sync.origin_timestamp",
+            expected: 10,
+            found: self.payload.len(),
+        })?;
+
+        WireTimeStamp::new(
+            ts_bytes
+                .try_into()
+                .map_err(|_| ParseError::PayloadTooShort {
+                    field: "Sync.origin_timestamp",
+                    expected: 10,
+                    found: ts_bytes.len(),
+                })?,
+        )
+        .timestamp()
+    }
+}
+
+struct FollowUpPayload<'a> {
+    payload: &'a [u8],
+}
+
+impl<'a> FollowUpPayload<'a> {
+    fn new(payload: &'a [u8]) -> Self {
+        Self { payload }
+    }
+
+    fn precise_origin_timestamp(&self) -> Result<TimeStamp> {
+        let ts_bytes = self.payload.get(0..10).ok_or(ParseError::PayloadTooShort {
+            field: "FollowUp.precise_origin_timestamp",
+            expected: 10,
+            found: self.payload.len(),
+        })?;
+
+        WireTimeStamp::new(
+            ts_bytes
+                .try_into()
+                .map_err(|_| ParseError::PayloadTooShort {
+                    field: "FollowUp.precise_origin_timestamp",
+                    expected: 10,
+                    found: ts_bytes.len(),
+                })?,
+        )
+        .timestamp()
+    }
+}
+
+struct DelayResponsePayload<'a> {
+    payload: &'a [u8],
+}
+
+impl<'a> DelayResponsePayload<'a> {
+    fn new(payload: &'a [u8]) -> Self {
+        Self { payload }
+    }
+
+    fn receive_timestamp(&self) -> Result<TimeStamp> {
+        let ts_bytes = self.payload.get(0..10).ok_or(ParseError::PayloadTooShort {
+            field: "DelayResponse.receive_timestamp",
+            expected: 10,
+            found: self.payload.len(),
+        })?;
+
+        WireTimeStamp::new(
+            ts_bytes
+                .try_into()
+                .map_err(|_| ParseError::PayloadTooShort {
+                    field: "DelayResponse.receive_timestamp",
+                    expected: 10,
+                    found: ts_bytes.len(),
+                })?,
+        )
+        .timestamp()
     }
 }
 
