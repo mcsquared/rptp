@@ -1,8 +1,7 @@
 use std::cell::Cell;
 
-use crate::buffer::UnvalidatedMessage;
+use crate::buffer::{MessageHeader, UnvalidatedMessage};
 use crate::clock::{Clock, ClockIdentity, SynchronizableClock};
-use crate::message::MessageHeader;
 use crate::port::{
     PhysicalPort, PortIdentity, PortNumber, SendError, SendResult, Timeout, TimerHost,
 };

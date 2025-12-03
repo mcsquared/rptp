@@ -1,68 +1,13 @@
 use crate::{
     bmca::{Bmca, ForeignClockDS},
     buffer::{
-        ControlField, FinalizedBuffer, LengthCheckedMessage, MessageBuffer, MessageFlags,
-        MessageType, PTP_DOMAIN_NUMBER_OFFSET, PTP_FLAGS_RANGE, PTP_LOG_INTERVAL_OFFSET,
-        PTP_MSG_TYPE_OFFSET, PTP_PAYLOAD_OFFSET, PTP_SEQUENCE_ID_RANGE,
-        PTP_SOURCE_PORT_IDENTITY_RANGE,
+        AnnouncePayload, ControlField, DelayResponsePayload, FinalizedBuffer, FollowUpPayload,
+        LengthCheckedMessage, MessageBuffer, MessageFlags, MessageHeader, MessageType, SyncPayload,
     },
-    port::{DomainNumber, PortIdentity, PortMap},
+    port::{PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Instant, LogMessageInterval, TimeInterval, TimeStamp},
 };
-
-pub(crate) struct MessageHeader<'a> {
-    length_checked: LengthCheckedMessage<'a>,
-}
-
-impl<'a> MessageHeader<'a> {
-    pub fn new(length_checked: LengthCheckedMessage<'a>) -> Self {
-        Self { length_checked }
-    }
-
-    pub fn message_type(&self) -> Result<MessageType> {
-        let nibble = self.length_checked.buf()[PTP_MSG_TYPE_OFFSET] & 0x0F;
-        MessageType::from_nibble(nibble)
-    }
-
-    fn domain_number(&self) -> DomainNumber {
-        DomainNumber::new(self.length_checked.buf()[PTP_DOMAIN_NUMBER_OFFSET])
-    }
-
-    pub fn sequence_id(&self) -> SequenceId {
-        let id = u16::from_be_bytes(
-            self.length_checked.buf()[PTP_SEQUENCE_ID_RANGE]
-                .try_into()
-                .unwrap(),
-        );
-        SequenceId::new(id)
-    }
-
-    pub fn flags(&self) -> MessageFlags {
-        let flags = u16::from_be_bytes(
-            self.length_checked.buf()[PTP_FLAGS_RANGE]
-                .try_into()
-                .unwrap(),
-        );
-        MessageFlags::from_bits_truncate(flags)
-    }
-
-    fn source_port_identity(&self) -> PortIdentity {
-        PortIdentity::from_slice(
-            self.length_checked.buf()[PTP_SOURCE_PORT_IDENTITY_RANGE]
-                .try_into()
-                .unwrap(),
-        )
-    }
-
-    pub fn log_message_interval(&self) -> LogMessageInterval {
-        LogMessageInterval::new(self.length_checked.buf()[PTP_LOG_INTERVAL_OFFSET] as i8)
-    }
-
-    pub fn payload(&self) -> &'a [u8] {
-        &self.length_checked.buf()[PTP_PAYLOAD_OFFSET..]
-    }
-}
 
 pub struct DomainMessage<'a> {
     header: MessageHeader<'a>,
@@ -303,122 +248,6 @@ impl AnnounceMessage {
     }
 }
 
-struct AnnouncePayload<'a> {
-    payload: &'a [u8],
-}
-
-impl<'a> AnnouncePayload<'a> {
-    fn new(payload: &'a [u8]) -> Self {
-        Self { payload }
-    }
-
-    fn foreign_clock_ds(&self) -> Result<ForeignClockDS> {
-        let fc_bytes = self
-            .payload
-            .get(13..29)
-            .ok_or(ParseError::PayloadTooShort {
-                field: "Announce.foreign_clock_ds",
-                expected: 16,
-                found: self.payload.len().saturating_sub(13),
-            })?;
-
-        Ok(ForeignClockDS::from_slice(fc_bytes.try_into().map_err(
-            |_| ParseError::PayloadTooShort {
-                field: "Announce.foreign_clock_ds",
-                expected: 16,
-                found: fc_bytes.len(),
-            },
-        )?))
-    }
-}
-
-struct SyncPayload<'a> {
-    payload: &'a [u8],
-}
-
-impl<'a> SyncPayload<'a> {
-    fn new(payload: &'a [u8]) -> Self {
-        Self { payload }
-    }
-
-    fn origin_timestamp(&self) -> Result<TimeStamp> {
-        let ts_bytes = self.payload.get(0..10).ok_or(ParseError::PayloadTooShort {
-            field: "Sync.origin_timestamp",
-            expected: 10,
-            found: self.payload.len(),
-        })?;
-
-        WireTimeStamp::new(
-            ts_bytes
-                .try_into()
-                .map_err(|_| ParseError::PayloadTooShort {
-                    field: "Sync.origin_timestamp",
-                    expected: 10,
-                    found: ts_bytes.len(),
-                })?,
-        )
-        .timestamp()
-    }
-}
-
-struct FollowUpPayload<'a> {
-    payload: &'a [u8],
-}
-
-impl<'a> FollowUpPayload<'a> {
-    fn new(payload: &'a [u8]) -> Self {
-        Self { payload }
-    }
-
-    fn precise_origin_timestamp(&self) -> Result<TimeStamp> {
-        let ts_bytes = self.payload.get(0..10).ok_or(ParseError::PayloadTooShort {
-            field: "FollowUp.precise_origin_timestamp",
-            expected: 10,
-            found: self.payload.len(),
-        })?;
-
-        WireTimeStamp::new(
-            ts_bytes
-                .try_into()
-                .map_err(|_| ParseError::PayloadTooShort {
-                    field: "FollowUp.precise_origin_timestamp",
-                    expected: 10,
-                    found: ts_bytes.len(),
-                })?,
-        )
-        .timestamp()
-    }
-}
-
-struct DelayResponsePayload<'a> {
-    payload: &'a [u8],
-}
-
-impl<'a> DelayResponsePayload<'a> {
-    fn new(payload: &'a [u8]) -> Self {
-        Self { payload }
-    }
-
-    fn receive_timestamp(&self) -> Result<TimeStamp> {
-        let ts_bytes = self.payload.get(0..10).ok_or(ParseError::PayloadTooShort {
-            field: "DelayResponse.receive_timestamp",
-            expected: 10,
-            found: self.payload.len(),
-        })?;
-
-        WireTimeStamp::new(
-            ts_bytes
-                .try_into()
-                .map_err(|_| ParseError::PayloadTooShort {
-                    field: "DelayResponse.receive_timestamp",
-                    expected: 10,
-                    found: ts_bytes.len(),
-                })?,
-        )
-        .timestamp()
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OneStepSyncMessage {
     sequence_id: SequenceId,
@@ -602,49 +431,6 @@ impl TimestampMessage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WireTimeStamp<'a> {
-    buf: &'a [u8; 10],
-}
-
-impl<'a> WireTimeStamp<'a> {
-    pub fn new(buf: &'a [u8; 10]) -> Self {
-        Self { buf }
-    }
-
-    pub fn timestamp(&self) -> Result<TimeStamp> {
-        let secs_msb = u16::from_be_bytes(self.buf[0..2].try_into().map_err(|_| {
-            ParseError::PayloadTooShort {
-                field: "WireTimeStamp.seconds_msb",
-                expected: 2,
-                found: 2,
-            }
-        })?);
-        let secs_lsb = u32::from_be_bytes(self.buf[2..6].try_into().map_err(|_| {
-            ParseError::PayloadTooShort {
-                field: "WireTimeStamp.seconds_lsb",
-                expected: 4,
-                found: 4,
-            }
-        })?);
-
-        let seconds = ((secs_msb as u64) << 32) | (secs_lsb as u64);
-        let nanos = u32::from_be_bytes(self.buf[6..10].try_into().map_err(|_| {
-            ParseError::PayloadTooShort {
-                field: "WireTimeStamp.nanos",
-                expected: 4,
-                found: 4,
-            }
-        })?);
-
-        if nanos < 1_000_000_000 {
-            Ok(TimeStamp::new(seconds, nanos))
-        } else {
-            Err(ProtocolError::InvalidTimestamp { nanos }.into())
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MessageWindow<M> {
     current: Option<M>,
 }
@@ -680,12 +466,12 @@ impl<M> Default for MessageWindow<M> {
 mod tests {
     use super::*;
 
-    use crate::buffer::{PTP_HEADER_LEN, PTP_LENGTH_RANGE, PTP_VERSION_OFFSET, UnvalidatedMessage};
+    use crate::buffer::UnvalidatedMessage;
 
     use crate::bmca::{Priority1, Priority2};
     use crate::buffer::{PtpVersion, TransportSpecific};
     use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved};
-    use crate::port::PortNumber;
+    use crate::port::{DomainNumber, PortNumber};
     use crate::time::LogMessageInterval;
 
     #[test]
@@ -790,43 +576,6 @@ mod tests {
     }
 
     #[test]
-    fn wire_timestamp_roundtrip() {
-        let ts = TimeStamp::new(42, 500_000_000);
-        let wire = ts.to_wire();
-        let parsed = WireTimeStamp::new(&wire).timestamp();
-
-        assert_eq!(parsed, Ok(ts));
-    }
-
-    #[test]
-    fn wire_timestamp_valid_nanos() {
-        let wire = [
-            0, 0, 0, 0, 0, 42, // seconds
-            0, 0, 0, 42, // nanoseconds
-        ];
-        let parsed = WireTimeStamp::new(&wire).timestamp();
-
-        assert_eq!(parsed, Ok(TimeStamp::new(42, 42)));
-    }
-
-    #[test]
-    fn wire_timestamp_invalid_nanos() {
-        let wire = [
-            0, 0, 0, 0, 0, 42, // seconds
-            0x3B, 0x9A, 0xCA, 0x00, // nanoseconds (1_000_000_000)
-        ];
-        let parsed = WireTimeStamp::new(&wire).timestamp();
-
-        assert_eq!(
-            parsed,
-            Err(ProtocolError::InvalidTimestamp {
-                nanos: 1_000_000_000
-            }
-            .into())
-        );
-    }
-
-    #[test]
     fn event_message_new_reports_short_sync_payload() {
         let payload = [0u8; 5]; // less than 10 bytes required for origin_timestamp
 
@@ -895,14 +644,14 @@ mod tests {
             }
         }
 
-        let mut buf = [0u8; PTP_HEADER_LEN + 10];
-        buf[PTP_VERSION_OFFSET] = PtpVersion::V2.as_u8();
+        let mut buf = [0u8; 34 + 10];
+        buf[1] = PtpVersion::V2.as_u8();
         let total_len = buf.len() as u16;
-        buf[PTP_LENGTH_RANGE].copy_from_slice(&total_len.to_be_bytes());
+        buf[2..4].copy_from_slice(&total_len.to_be_bytes());
 
         // Message type nibble: Sync and some domain number
-        buf[PTP_MSG_TYPE_OFFSET] |= MessageType::Sync.to_nibble();
-        buf[PTP_DOMAIN_NUMBER_OFFSET] = 42;
+        buf[0] |= MessageType::Sync.to_nibble();
+        buf[4] = 42;
 
         let length_checked = UnvalidatedMessage::new(&buf)
             .length_checked_v2()

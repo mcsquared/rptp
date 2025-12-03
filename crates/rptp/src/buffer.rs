@@ -1,24 +1,25 @@
+use crate::bmca::ForeignClockDS;
 use crate::message::SequenceId;
 use crate::port::DomainNumber;
 use crate::port::PortIdentity;
 use crate::result::{ParseError, ProtocolError, Result};
-use crate::time::LogMessageInterval;
+use crate::time::{LogMessageInterval, TimeStamp};
 
 use bitflags::bitflags;
 
 const PTP_TRANSPORT_SPECIFIC_OFFSET: usize = 0;
 
-pub(crate) const PTP_HEADER_LEN: usize = 34;
-pub(crate) const PTP_LENGTH_RANGE: core::ops::Range<usize> = 2..4;
-pub(crate) const PTP_MSG_TYPE_OFFSET: usize = 0;
-pub(crate) const PTP_VERSION_OFFSET: usize = 1;
-pub(crate) const PTP_DOMAIN_NUMBER_OFFSET: usize = 4;
-pub(crate) const PTP_FLAGS_RANGE: core::ops::Range<usize> = 6..8;
-pub(crate) const PTP_SOURCE_PORT_IDENTITY_RANGE: core::ops::Range<usize> = 20..30;
-pub(crate) const PTP_SEQUENCE_ID_RANGE: core::ops::Range<usize> = 30..32;
-pub(crate) const PTP_CONTROL_FIELD_OFFSET: usize = 32;
-pub(crate) const PTP_LOG_INTERVAL_OFFSET: usize = 33;
-pub(crate) const PTP_PAYLOAD_OFFSET: usize = 34;
+const PTP_HEADER_LEN: usize = 34;
+const PTP_LENGTH_RANGE: core::ops::Range<usize> = 2..4;
+const PTP_MSG_TYPE_OFFSET: usize = 0;
+const PTP_VERSION_OFFSET: usize = 1;
+const PTP_DOMAIN_NUMBER_OFFSET: usize = 4;
+const PTP_FLAGS_RANGE: core::ops::Range<usize> = 6..8;
+const PTP_SOURCE_PORT_IDENTITY_RANGE: core::ops::Range<usize> = 20..30;
+const PTP_SEQUENCE_ID_RANGE: core::ops::Range<usize> = 30..32;
+const PTP_CONTROL_FIELD_OFFSET: usize = 32;
+const PTP_LOG_INTERVAL_OFFSET: usize = 33;
+const PTP_PAYLOAD_OFFSET: usize = 34;
 
 pub struct UnvalidatedMessage<'a> {
     buf: &'a [u8],
@@ -74,6 +75,218 @@ impl<'a> LengthCheckedMessage<'a> {
 
     pub(crate) fn buf(&self) -> &'a [u8] {
         self.buf
+    }
+}
+
+pub(crate) struct MessageHeader<'a> {
+    length_checked: LengthCheckedMessage<'a>,
+}
+
+impl<'a> MessageHeader<'a> {
+    pub fn new(length_checked: LengthCheckedMessage<'a>) -> Self {
+        Self { length_checked }
+    }
+
+    pub fn message_type(&self) -> Result<MessageType> {
+        let nibble = self.length_checked.buf()[PTP_MSG_TYPE_OFFSET] & 0x0F;
+        MessageType::from_nibble(nibble)
+    }
+
+    pub fn domain_number(&self) -> DomainNumber {
+        DomainNumber::new(self.length_checked.buf()[PTP_DOMAIN_NUMBER_OFFSET])
+    }
+
+    pub fn sequence_id(&self) -> SequenceId {
+        let id = u16::from_be_bytes(
+            self.length_checked.buf()[PTP_SEQUENCE_ID_RANGE]
+                .try_into()
+                .unwrap(),
+        );
+        SequenceId::new(id)
+    }
+
+    pub fn flags(&self) -> MessageFlags {
+        let flags = u16::from_be_bytes(
+            self.length_checked.buf()[PTP_FLAGS_RANGE]
+                .try_into()
+                .unwrap(),
+        );
+        MessageFlags::from_bits_truncate(flags)
+    }
+
+    pub fn source_port_identity(&self) -> PortIdentity {
+        PortIdentity::from_slice(
+            self.length_checked.buf()[PTP_SOURCE_PORT_IDENTITY_RANGE]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    pub fn log_message_interval(&self) -> LogMessageInterval {
+        LogMessageInterval::new(self.length_checked.buf()[PTP_LOG_INTERVAL_OFFSET] as i8)
+    }
+
+    pub fn payload(&self) -> &'a [u8] {
+        &self.length_checked.buf()[PTP_PAYLOAD_OFFSET..]
+    }
+}
+
+pub(crate) struct AnnouncePayload<'a> {
+    payload: &'a [u8],
+}
+
+impl<'a> AnnouncePayload<'a> {
+    pub fn new(payload: &'a [u8]) -> Self {
+        Self { payload }
+    }
+
+    pub fn foreign_clock_ds(&self) -> Result<ForeignClockDS> {
+        let fc_bytes = self
+            .payload
+            .get(13..29)
+            .ok_or(ParseError::PayloadTooShort {
+                field: "Announce.foreign_clock_ds",
+                expected: 16,
+                found: self.payload.len().saturating_sub(13),
+            })?;
+
+        Ok(ForeignClockDS::from_slice(fc_bytes.try_into().map_err(
+            |_| ParseError::PayloadTooShort {
+                field: "Announce.foreign_clock_ds",
+                expected: 16,
+                found: fc_bytes.len(),
+            },
+        )?))
+    }
+}
+
+pub(crate) struct SyncPayload<'a> {
+    payload: &'a [u8],
+}
+
+impl<'a> SyncPayload<'a> {
+    pub fn new(payload: &'a [u8]) -> Self {
+        Self { payload }
+    }
+
+    pub fn origin_timestamp(&self) -> Result<TimeStamp> {
+        let ts_bytes = self.payload.get(0..10).ok_or(ParseError::PayloadTooShort {
+            field: "Sync.origin_timestamp",
+            expected: 10,
+            found: self.payload.len(),
+        })?;
+
+        WireTimeStamp::new(
+            ts_bytes
+                .try_into()
+                .map_err(|_| ParseError::PayloadTooShort {
+                    field: "Sync.origin_timestamp",
+                    expected: 10,
+                    found: ts_bytes.len(),
+                })?,
+        )
+        .timestamp()
+    }
+}
+
+pub(crate) struct FollowUpPayload<'a> {
+    payload: &'a [u8],
+}
+
+impl<'a> FollowUpPayload<'a> {
+    pub fn new(payload: &'a [u8]) -> Self {
+        Self { payload }
+    }
+
+    pub fn precise_origin_timestamp(&self) -> Result<TimeStamp> {
+        let ts_bytes = self.payload.get(0..10).ok_or(ParseError::PayloadTooShort {
+            field: "FollowUp.precise_origin_timestamp",
+            expected: 10,
+            found: self.payload.len(),
+        })?;
+
+        WireTimeStamp::new(
+            ts_bytes
+                .try_into()
+                .map_err(|_| ParseError::PayloadTooShort {
+                    field: "FollowUp.precise_origin_timestamp",
+                    expected: 10,
+                    found: ts_bytes.len(),
+                })?,
+        )
+        .timestamp()
+    }
+}
+
+pub(crate) struct DelayResponsePayload<'a> {
+    payload: &'a [u8],
+}
+
+impl<'a> DelayResponsePayload<'a> {
+    pub fn new(payload: &'a [u8]) -> Self {
+        Self { payload }
+    }
+
+    pub fn receive_timestamp(&self) -> Result<TimeStamp> {
+        let ts_bytes = self.payload.get(0..10).ok_or(ParseError::PayloadTooShort {
+            field: "DelayResponse.receive_timestamp",
+            expected: 10,
+            found: self.payload.len(),
+        })?;
+
+        WireTimeStamp::new(
+            ts_bytes
+                .try_into()
+                .map_err(|_| ParseError::PayloadTooShort {
+                    field: "DelayResponse.receive_timestamp",
+                    expected: 10,
+                    found: ts_bytes.len(),
+                })?,
+        )
+        .timestamp()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WireTimeStamp<'a> {
+    buf: &'a [u8; 10],
+}
+
+impl<'a> WireTimeStamp<'a> {
+    pub fn new(buf: &'a [u8; 10]) -> Self {
+        Self { buf }
+    }
+
+    pub fn timestamp(&self) -> Result<TimeStamp> {
+        let secs_msb = u16::from_be_bytes(self.buf[0..2].try_into().map_err(|_| {
+            ParseError::PayloadTooShort {
+                field: "WireTimeStamp.seconds_msb",
+                expected: 2,
+                found: 2,
+            }
+        })?);
+        let secs_lsb = u32::from_be_bytes(self.buf[2..6].try_into().map_err(|_| {
+            ParseError::PayloadTooShort {
+                field: "WireTimeStamp.seconds_lsb",
+                expected: 4,
+                found: 4,
+            }
+        })?);
+
+        let seconds = ((secs_msb as u64) << 32) | (secs_lsb as u64);
+        let nanos = u32::from_be_bytes(self.buf[6..10].try_into().map_err(|_| {
+            ParseError::PayloadTooShort {
+                field: "WireTimeStamp.nanos",
+                expected: 4,
+                found: 4,
+            }
+        })?);
+
+        if nanos < 1_000_000_000 {
+            Ok(TimeStamp::new(seconds, nanos))
+        } else {
+            Err(ProtocolError::InvalidTimestamp { nanos }.into())
+        }
     }
 }
 
@@ -420,5 +633,42 @@ mod tests {
             Err(e) => assert_eq!(e, Error::Protocol(ProtocolError::UnknownMessageType(0x07))),
             Ok(_) => panic!("expected UnknownMessageType error"),
         }
+    }
+
+    #[test]
+    fn wire_timestamp_roundtrip() {
+        let ts = TimeStamp::new(42, 500_000_000);
+        let wire = ts.to_wire();
+        let parsed = WireTimeStamp::new(&wire).timestamp();
+
+        assert_eq!(parsed, Ok(ts));
+    }
+
+    #[test]
+    fn wire_timestamp_valid_nanos() {
+        let wire = [
+            0, 0, 0, 0, 0, 42, // seconds
+            0, 0, 0, 42, // nanoseconds
+        ];
+        let parsed = WireTimeStamp::new(&wire).timestamp();
+
+        assert_eq!(parsed, Ok(TimeStamp::new(42, 42)));
+    }
+
+    #[test]
+    fn wire_timestamp_invalid_nanos() {
+        let wire = [
+            0, 0, 0, 0, 0, 42, // seconds
+            0x3B, 0x9A, 0xCA, 0x00, // nanoseconds (1_000_000_000)
+        ];
+        let parsed = WireTimeStamp::new(&wire).timestamp();
+
+        assert_eq!(
+            parsed,
+            Err(ProtocolError::InvalidTimestamp {
+                nanos: 1_000_000_000
+            }
+            .into())
+        );
     }
 }
