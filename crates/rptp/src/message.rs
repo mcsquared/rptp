@@ -670,6 +670,12 @@ impl<M> MessageWindow<M> {
     }
 }
 
+impl<M> Default for MessageWindow<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -697,7 +703,7 @@ mod tests {
         );
 
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
@@ -712,7 +718,7 @@ mod tests {
     fn one_step_sync_message_wire_roundtrip() {
         let sync = OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
@@ -727,7 +733,7 @@ mod tests {
     fn two_step_sync_message_wire_roundtrip() {
         let sync = TwoStepSyncMessage::new(42.into());
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
@@ -742,7 +748,7 @@ mod tests {
     fn follow_up_message_wire_roundtrip() {
         let follow_up = FollowUpMessage::new(42.into(), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
@@ -757,7 +763,7 @@ mod tests {
     fn delay_request_message_wire_roundtrip() {
         let delay_req = DelayRequestMessage::new(42.into());
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
@@ -772,7 +778,7 @@ mod tests {
     fn delay_response_message_wire_roundtrip() {
         let delay_resp = DelayResponseMessage::new(42.into(), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),

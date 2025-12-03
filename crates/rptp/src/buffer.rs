@@ -42,15 +42,13 @@ impl<'a> UnvalidatedMessage<'a> {
             return Err(ProtocolError::UnsupportedPtpVersion(v.as_u8()).into());
         }
 
-        let expected = u16::from_be_bytes(
-            self.buf[PTP_LENGTH_RANGE]
-                .try_into()
-                .map_err(|_| ParseError::PayloadTooShort {
-                    field: "PTP length header",
-                    expected: PTP_LENGTH_RANGE.len(),
-                    found: self.buf[PTP_LENGTH_RANGE].len(),
-                })?,
-        ) as usize;
+        let expected = u16::from_be_bytes(self.buf[PTP_LENGTH_RANGE].try_into().map_err(|_| {
+            ParseError::PayloadTooShort {
+                field: "PTP length header",
+                expected: PTP_LENGTH_RANGE.len(),
+                found: self.buf[PTP_LENGTH_RANGE].len(),
+            }
+        })?) as usize;
         let found = self.buf.len();
 
         if expected != found {
@@ -83,12 +81,14 @@ impl<'a> LengthCheckedMessage<'a> {
 pub struct TransportSpecific;
 
 impl TransportSpecific {
-    pub const fn new() -> Self {
-        Self
-    }
-
     pub const fn to_wire(self) -> u8 {
         0
+    }
+}
+
+impl Default for TransportSpecific {
+    fn default() -> Self {
+        Self
     }
 }
 
@@ -271,7 +271,7 @@ mod tests {
     fn buffer_integrity_two_step_sync() {
         let msg = TwoStepSyncMessage::new(7.into());
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
@@ -288,7 +288,7 @@ mod tests {
     fn buffer_integrity_follow_up() {
         let msg = FollowUpMessage::new(9.into(), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
@@ -305,7 +305,7 @@ mod tests {
     fn buffer_integrity_delay_resp() {
         let msg = DelayResponseMessage::new(11.into(), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
@@ -322,7 +322,7 @@ mod tests {
     fn buffer_integrity_delay_req() {
         let msg = DelayRequestMessage::new(13.into());
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
@@ -349,7 +349,7 @@ mod tests {
             ),
         );
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
@@ -382,16 +382,12 @@ mod tests {
     fn unvalidated_message_unsupported_version() {
         let mut buf = [0u8; PTP_HEADER_LEN];
         buf[PTP_VERSION_OFFSET] = 1; // not V2
-        buf[PTP_LENGTH_RANGE]
-            .copy_from_slice(&(PTP_HEADER_LEN as u16).to_be_bytes());
+        buf[PTP_LENGTH_RANGE].copy_from_slice(&(PTP_HEADER_LEN as u16).to_be_bytes());
 
         let res = UnvalidatedMessage::new(&buf).length_checked_v2();
 
         match res {
-            Err(e) => assert_eq!(
-                e,
-                Error::Protocol(ProtocolError::UnsupportedPtpVersion(1))
-            ),
+            Err(e) => assert_eq!(e, Error::Protocol(ProtocolError::UnsupportedPtpVersion(1))),
             Ok(_) => panic!("expected UnsupportedPtpVersion error"),
         }
     }
@@ -400,8 +396,7 @@ mod tests {
     fn unvalidated_message_length_mismatch() {
         let mut buf = [0u8; PTP_HEADER_LEN + 1];
         buf[PTP_VERSION_OFFSET] = PtpVersion::V2.as_u8();
-        buf[PTP_LENGTH_RANGE]
-            .copy_from_slice(&(PTP_HEADER_LEN as u16).to_be_bytes());
+        buf[PTP_LENGTH_RANGE].copy_from_slice(&(PTP_HEADER_LEN as u16).to_be_bytes());
 
         let res = UnvalidatedMessage::new(&buf).length_checked_v2();
 
@@ -422,10 +417,7 @@ mod tests {
         let res = MessageType::from_nibble(0x07);
 
         match res {
-            Err(e) => assert_eq!(
-                e,
-                Error::Protocol(ProtocolError::UnknownMessageType(0x07))
-            ),
+            Err(e) => assert_eq!(e, Error::Protocol(ProtocolError::UnknownMessageType(0x07))),
             Ok(_) => panic!("expected UnknownMessageType error"),
         }
     }

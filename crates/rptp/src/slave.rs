@@ -482,25 +482,25 @@ mod tests {
             parent,
             TimeStamp::new(2, 0),
         );
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         // Record a delay request timestamp to allow sm_offset calculation
         let transition =
             slave.process_delay_request(DelayRequestMessage::new(2.into()), TimeStamp::new(0, 0));
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         // Send FollowUp and DelayResp from a non-parent; these should be ignored
         let transition = slave.process_follow_up(
             FollowUpMessage::new(1.into(), TimeStamp::new(1, 0)),
             non_parent,
         );
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         let transition = slave.process_delay_response(
             DelayResponseMessage::new(2.into(), TimeStamp::new(2, 0)),
             non_parent,
         );
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         // With correct filtering, the local clock should remain unchanged
         assert_eq!(local_clock.now(), TimeStamp::new(0, 0));
@@ -555,7 +555,7 @@ mod tests {
         // Send a FollowUp from the parent first (ms offset incomplete without sync)
         let transition =
             slave.process_follow_up(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0)), parent);
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         // Now send TwoStepSync from a non-parent; should be ignored
         let transition = slave.process_two_step_sync(
@@ -563,18 +563,18 @@ mod tests {
             non_parent,
             TimeStamp::new(2, 0),
         );
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         // Even if delay path completes, estimate should not trigger without accepted sync
         let transition =
             slave.process_delay_request(DelayRequestMessage::new(2.into()), TimeStamp::new(0, 0));
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         let transition = slave.process_delay_response(
             DelayResponseMessage::new(2.into(), TimeStamp::new(2, 0)),
             parent,
         );
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         // Local clock remains unchanged
         assert_eq!(local_clock.now(), TimeStamp::new(0, 0));
@@ -628,23 +628,23 @@ mod tests {
             parent,
             TimeStamp::new(1, 0),
         );
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         let transition = slave.process_follow_up(
             FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)),
             parent,
         );
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         let transition =
             slave.process_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         let transition = slave.process_delay_response(
             DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)),
             parent,
         );
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         // Local clock disciplined to the estimate
         assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
@@ -775,7 +775,7 @@ mod tests {
             new_parent,
             Instant::from_secs(0),
         );
-        assert!(matches!(decision, None)); // first announce from new parent is ignored
+        assert!(decision.is_none()); // first announce from new parent is ignored
 
         let decision = slave.process_announce(
             AnnounceMessage::new(

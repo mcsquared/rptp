@@ -213,12 +213,12 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestampi
     type Timeout = T::Timeout;
 
     fn local_clock(&self) -> &LocalClock<Self::Clock> {
-        &self.local_clock
+        self.local_clock
     }
 
     fn send_event(&self, msg: EventMessage) -> SendResult {
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             self.domain_number,
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
@@ -233,7 +233,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestampi
 
     fn send_general(&self, msg: GeneralMessage) -> SendResult {
         let mut buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             self.domain_number,
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
@@ -298,10 +298,11 @@ impl<P: Port, B: Bmca, L: PortLog> PortIngress for Option<PortState<P, B, L>> {
         msg: EventMessage,
         timestamp: TimeStamp,
     ) {
-        if let Some(state) = self.as_mut() {
-            if let Some(decision) = state.dispatch_event(msg, source_port_identity, timestamp) {
-                *self = self.take().map(|state| state.apply(decision));
-            }
+        if let Some(decision) = self
+            .as_mut()
+            .and_then(|state| state.dispatch_event(msg, source_port_identity, timestamp))
+        {
+            *self = self.take().map(|state| state.apply(decision));
         }
     }
 
@@ -311,18 +312,17 @@ impl<P: Port, B: Bmca, L: PortLog> PortIngress for Option<PortState<P, B, L>> {
         msg: GeneralMessage,
         now: Instant,
     ) {
-        if let Some(state) = self.as_mut() {
-            if let Some(decision) = state.dispatch_general(msg, source_port_identity, now) {
-                *self = self.take().map(|state| state.apply(decision));
-            }
+        if let Some(decision) = self
+            .as_mut()
+            .and_then(|state| state.dispatch_general(msg, source_port_identity, now))
+        {
+            *self = self.take().map(|state| state.apply(decision));
         }
     }
 
     fn process_system_message(&mut self, msg: SystemMessage) {
-        if let Some(state) = self.as_mut() {
-            if let Some(decision) = state.dispatch_system(msg) {
-                *self = self.take().map(|state| state.apply(decision));
-            }
+        if let Some(decision) = self.as_mut().and_then(|state| state.dispatch_system(msg)) {
+            *self = self.take().map(|state| state.apply(decision));
         }
     }
 }
@@ -442,9 +442,10 @@ mod tests {
             port_number,
         );
 
-        assert!(port
-            .send_event(EventMessage::DelayReq(DelayRequestMessage::new(42.into())))
-            .is_ok());
+        assert!(
+            port.send_event(EventMessage::DelayReq(DelayRequestMessage::new(42.into())))
+                .is_ok()
+        );
         let bufs = sent.borrow();
         assert!(!bufs.is_empty());
         let bytes = &bufs[0];

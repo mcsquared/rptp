@@ -30,6 +30,7 @@ pub enum StateDecision {
 }
 
 // Port states as defined in IEEE 1588 Section 9.2.5, figure 24
+#[allow(clippy::large_enum_variant)]
 pub enum PortState<P: Port, B: Bmca, L: PortLog> {
     Initializing(InitializingPort<P, B, L>),
     Listening(ListeningPort<P, B, L>),
@@ -196,7 +197,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
                 PortState::PreMaster(pre_master) => pre_master.qualified(),
                 _ => panic!("QualificationTimeoutExpired can only be applied in PreMaster state"),
             },
-            StateDecision::FaultDetected => PortState::Faulty(FaultyPort::new()),
+            StateDecision::FaultDetected => PortState::Faulty(FaultyPort::default()),
         }
     }
 
@@ -1492,7 +1493,7 @@ mod tests {
             DomainPort<FakeClock, FakePort, FakeTimerHost, FakeTimestamping>,
             IncrementalBmca<SortedForeignClockRecordsVec>,
             NoopPortLog,
-        > = PortState::Faulty(FaultyPort::new());
+        > = PortState::Faulty(FaultyPort::default());
 
         let result = faulty.apply(StateDecision::FaultDetected);
 

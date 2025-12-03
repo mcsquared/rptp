@@ -15,8 +15,8 @@ pub struct FaultyPort<P: Port, B: Bmca, L: PortLog> {
     _log: PhantomData<L>,
 }
 
-impl<P: Port, B: Bmca, L: PortLog> FaultyPort<P, B, L> {
-    pub fn new() -> Self {
+impl<P: Port, B: Bmca, L: PortLog> Default for FaultyPort<P, B, L> {
+    fn default() -> Self {
         Self {
             _port: PhantomData,
             _bmca: PhantomData,

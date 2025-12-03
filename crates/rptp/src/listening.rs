@@ -163,7 +163,7 @@ mod tests {
             Instant::from_secs(0),
         );
 
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         let system_messages = timer_host.take_system_messages();
         assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
@@ -199,14 +199,14 @@ mod tests {
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
         let transition = listening.process_announce(
-            AnnounceMessage::new(0.into(), LogMessageInterval::new(0), foreign_clock.clone()),
+            AnnounceMessage::new(0.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
             Instant::from_secs(0),
         );
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         let transition = listening.process_announce(
-            AnnounceMessage::new(1.into(), LogMessageInterval::new(0), foreign_clock.clone()),
+            AnnounceMessage::new(1.into(), LogMessageInterval::new(0), foreign_clock),
             PortIdentity::fake(),
             Instant::from_secs(0),
         );
@@ -255,7 +255,7 @@ mod tests {
             PortIdentity::fake(),
             Instant::from_secs(0),
         );
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
 
         let transition = listening.process_announce(
             AnnounceMessage::new(1.into(), LogMessageInterval::new(0), foreign_clock),

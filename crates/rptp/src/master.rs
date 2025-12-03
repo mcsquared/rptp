@@ -42,7 +42,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
     }
 
     pub fn send_announce(&mut self) -> SendResult {
-        let announce_message = self.announce_cycle.announce(&self.port.local_clock());
+        let announce_message = self.announce_cycle.announce(self.port.local_clock());
         self.port
             .send_general(GeneralMessage::Announce(announce_message))?;
         self.announce_cycle.next();
@@ -227,9 +227,11 @@ mod tests {
 
         timer_host.take_system_messages();
 
-        assert!(master
-            .process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0))
-            .is_ok());
+        assert!(
+            master
+                .process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0))
+                .is_ok()
+        );
 
         let messages = port.take_general_messages();
         assert!(
@@ -349,9 +351,11 @@ mod tests {
 
         timer_host.take_system_messages();
 
-        assert!(master
-            .send_follow_up(TwoStepSyncMessage::new(0.into()), TimeStamp::new(0, 0))
-            .is_ok());
+        assert!(
+            master
+                .send_follow_up(TwoStepSyncMessage::new(0.into()), TimeStamp::new(0, 0))
+                .is_ok()
+        );
 
         let messages = port.take_general_messages();
         assert!(
@@ -474,7 +478,7 @@ mod tests {
             PortIdentity::fake(),
             Instant::from_secs(0),
         );
-        assert!(matches!(decision, None));
+        assert!(decision.is_none());
 
         let decision = master.process_announce(
             AnnounceMessage::new(43.into(), LogMessageInterval::new(0), foreign_clock_ds),
@@ -540,7 +544,7 @@ mod tests {
             Instant::from_secs(0),
         );
 
-        assert!(matches!(decision, None));
+        assert!(decision.is_none());
         assert!(timer_host.take_system_messages().is_empty());
     }
 
@@ -590,7 +594,7 @@ mod tests {
             Instant::from_secs(0),
         );
 
-        assert!(matches!(transition, None));
+        assert!(transition.is_none());
         assert!(timer_host.take_system_messages().is_empty());
     }
 
@@ -651,7 +655,7 @@ mod tests {
         );
 
         // expect no state change - master stays master when receiving worse announces
-        assert!(matches!(decision, None));
+        assert!(decision.is_none());
     }
 
     #[test]

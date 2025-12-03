@@ -140,6 +140,12 @@ impl MasterEstimate {
     }
 }
 
+impl Default for MasterEstimate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

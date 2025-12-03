@@ -45,15 +45,12 @@ impl MulticastSocket {
 }
 
 impl NetworkSocket for MulticastSocket {
-    fn recv<'a>(
-        &'a self,
-        buf: &'a mut [u8],
-    ) -> impl Future<Output = Result<(usize, SocketAddr)>> + 'a {
-        self.socket.recv_from(buf)
+    async fn recv(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
+        self.socket.recv_from(buf).await
     }
 
-    fn send<'a>(&'a self, bytes: &'a [u8]) -> impl Future<Output = Result<usize>> + 'a {
-        self.socket.send_to(bytes, self.dest)
+    async fn send(&self, bytes: &[u8]) -> Result<usize> {
+        self.socket.send_to(bytes, self.dest).await
     }
 
     fn try_send(&self, bytes: &[u8]) -> Result<usize> {
@@ -74,49 +71,36 @@ impl FakeNetworkSocket {
 }
 
 impl NetworkSocket for FakeNetworkSocket {
-    fn recv<'a>(
-        &'a self,
-        _buf: &'a mut [u8],
-    ) -> impl Future<Output = Result<(usize, SocketAddr)>> + 'a {
-        async {
-            std::future::pending::<()>().await;
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "not implemented",
-            ))
-        }
+    async fn recv<'a>(&'a self, _buf: &'a mut [u8]) -> Result<(usize, SocketAddr)> {
+        std::future::pending::<()>().await;
+        unreachable!()
     }
 
-    fn send<'a>(&'a self, bytes: &'a [u8]) -> impl Future<Output = Result<usize>> + 'a {
+    async fn send(&self, bytes: &[u8]) -> Result<usize> {
         let bytes = bytes.to_vec();
         let len = bytes.len();
         let tx = self.tx.clone();
-        async move {
-            tx.send(bytes)
-                .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "send failed"))?;
-            Ok(len)
-        }
+        tx.send(bytes)
+            .map_err(|_| std::io::Error::other("send failed"))?;
+        Ok(len)
     }
 
     fn try_send(&self, bytes: &[u8]) -> Result<usize> {
         let len = bytes.len();
         self.tx
             .send(bytes.to_vec())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "send failed"))?;
+            .map_err(|_| std::io::Error::other("send failed"))?;
         Ok(len)
     }
 }
 
 impl NetworkSocket for Rc<FakeNetworkSocket> {
-    fn recv<'a>(
-        &'a self,
-        buf: &'a mut [u8],
-    ) -> impl Future<Output = Result<(usize, SocketAddr)>> + 'a {
-        self.as_ref().recv(buf)
+    async fn recv(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
+        self.as_ref().recv(buf).await
     }
 
-    fn send<'a>(&'a self, bytes: &'a [u8]) -> impl Future<Output = Result<usize>> + 'a {
-        self.as_ref().send(bytes)
+    async fn send(&self, bytes: &[u8]) -> Result<usize> {
+        self.as_ref().send(bytes).await
     }
 
     fn try_send(&self, bytes: &[u8]) -> Result<usize> {

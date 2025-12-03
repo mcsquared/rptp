@@ -3,7 +3,9 @@ use std::cell::Cell;
 use crate::buffer::UnvalidatedMessage;
 use crate::clock::{Clock, ClockIdentity, SynchronizableClock};
 use crate::message::MessageHeader;
-use crate::port::{PhysicalPort, PortIdentity, PortNumber, SendError, SendResult, Timeout, TimerHost};
+use crate::port::{
+    PhysicalPort, PortIdentity, PortNumber, SendError, SendResult, Timeout, TimerHost,
+};
 use crate::result::Result;
 use crate::time::TimeStamp;
 use crate::timestamping::TxTimestamping;
@@ -78,6 +80,12 @@ impl FakeTimestamping {
     }
 }
 
+impl Default for FakeTimestamping {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TxTimestamping for FakeTimestamping {
     fn stamp_egress(&self, _msg: EventMessage) {
         // no-op
@@ -144,6 +152,12 @@ impl FakeTimerHost {
     }
 }
 
+impl Default for FakeTimerHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimerHost for FakeTimerHost {
     type Timeout = FakeTimeout;
 
@@ -194,6 +208,12 @@ impl FakePort {
 
     pub fn take_general_messages(&self) -> Vec<GeneralMessage> {
         self.general_messages.borrow_mut().drain(..).collect()
+    }
+}
+
+impl Default for FakePort {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

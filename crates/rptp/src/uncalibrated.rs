@@ -174,7 +174,7 @@ mod tests {
             new_parent,
             Instant::from_secs(0),
         );
-        assert!(matches!(decision, None)); // first announce from new parent is ignored
+        assert!(decision.is_none()); // first announce from new parent is ignored
 
         let decision = uncalibrated.process_announce(
             AnnounceMessage::new(

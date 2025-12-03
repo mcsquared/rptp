@@ -193,7 +193,7 @@ mod tests {
             better_port,
             Instant::from_secs(0),
         );
-        assert!(matches!(decision, None)); // first announce is not yet qualified
+        assert!(decision.is_none()); // first announce is not yet qualified
 
         // Receive second better announce
         let decision = pre_master.process_announce(

@@ -42,6 +42,12 @@ pub mod infra_support {
         records: Vec<ForeignClockRecord>,
     }
 
+    impl Default for SortedForeignClockRecordsVec {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl SortedForeignClockRecordsVec {
         pub fn new() -> Self {
             Self {
@@ -55,6 +61,10 @@ pub mod infra_support {
             };
             vec.sort_records();
             vec
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.records.is_empty()
         }
 
         pub fn len(&self) -> usize {

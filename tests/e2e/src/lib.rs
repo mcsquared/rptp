@@ -49,10 +49,10 @@ where
         Self { root, pairs }
     }
 
-    pub fn tar(mut self) -> io::Result<Vec<u8>> {
+    pub fn tar(self) -> io::Result<Vec<u8>> {
         let mut ar = Builder::new(Vec::new());
 
-        while let Some((from, to)) = self.pairs.next() {
+        for (from, to) in self.pairs {
             let from_abs = self.root.join(from.as_ref());
             let to = to.as_ref();
 
@@ -77,7 +77,7 @@ where
             }
         }
 
-        Ok(ar.into_inner()?)
+        ar.into_inner()
     }
 }
 
@@ -209,14 +209,14 @@ impl Drop for TestNetwork {
                     .enable_all()
                     .build()
                 {
-                    let _ = rt.block_on(async move {
+                    rt.block_on(async move {
                         match tokio::time::timeout(timeout, docker.remove_network(&name)).await {
                             Ok(Ok(_)) => {}
                             Ok(Err(e)) => {
                                 match e {
-                                    DockerResponseServerError { status_code, .. }
-                                        if status_code == 404 =>
-                                    {
+                                    DockerResponseServerError {
+                                        status_code: 404, ..
+                                    } => {
                                         // not found; already removed.
                                     }
                                     _ => {
@@ -237,9 +237,8 @@ impl Drop for TestNetwork {
                     });
                 }
             })
-            .and_then(|jh| {
+            .map(|jh| {
                 let _ = jh.join();
-                Ok(())
             });
     }
 }
@@ -271,7 +270,7 @@ impl TestContainer {
                 eprintln!("[e2e] wait_container error for {id}: {e}. Falling back to inspect.");
                 let info = self
                     .docker
-                    .inspect_container(&id, None::<InspectContainerOptions>)
+                    .inspect_container(id, None::<InspectContainerOptions>)
                     .await?;
                 info.state.and_then(|s| s.exit_code).unwrap_or_else(|| {
                     eprintln!("[e2e] inspect had no exit_code for {id}, defaulting to -1");

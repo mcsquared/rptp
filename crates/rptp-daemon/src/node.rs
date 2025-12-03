@@ -218,7 +218,7 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
         let port = self
             .portmap
             .port_by_domain(DomainNumber::new(0))
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "no port for domain 0"))?;
+            .map_err(|_| std::io::Error::other("no port for domain 0"))?;
         port.process_system_message(SystemMessage::Initialized);
 
         loop {
@@ -243,9 +243,8 @@ impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
                 }
                 msg = self.system_rx.recv() => {
                     if let Some((domain_number, msg)) = msg {
-                        self.portmap.port_by_domain(domain_number).and_then(|port| {
+                        self.portmap.port_by_domain(domain_number).map(|port| {
                             port.process_system_message(msg);
-                            Ok(())
                         }).ok();
                     }
                 }
@@ -385,7 +384,7 @@ mod tests {
                 TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
             let port_number = PortNumber::new(1);
             let domain_port = Box::new(DomainPort::new(
-                &local_clock,
+                local_clock,
                 physical_port,
                 TokioTimerHost::new(domain_number, system_tx.clone()),
                 tx_timestamping,
@@ -468,31 +467,23 @@ mod tests {
     }
 
     impl NetworkSocket for InjectingNetworkSocket {
-        fn recv<'a>(
-            &'a self,
-            buf: &'a mut [u8],
-        ) -> impl std::future::Future<Output = std::io::Result<(usize, SocketAddr)>> + 'a {
-            async move {
-                loop {
-                    if let Some(msg) = {
-                        let mut q = self.queue.lock().unwrap();
-                        q.pop_front()
-                    } {
-                        let len = msg.len().min(buf.len());
-                        buf[..len].copy_from_slice(&msg[..len]);
-                        return Ok((len, SocketAddr::from(([127, 0, 0, 1], 0))));
-                    } else {
-                        time::sleep(StdDuration::from_millis(1)).await;
-                    }
+        async fn recv(&self, buf: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
+            loop {
+                if let Some(msg) = {
+                    let mut q = self.queue.lock().unwrap();
+                    q.pop_front()
+                } {
+                    let len = msg.len().min(buf.len());
+                    buf[..len].copy_from_slice(&msg[..len]);
+                    return Ok((len, SocketAddr::from(([127, 0, 0, 1], 0))));
+                } else {
+                    time::sleep(StdDuration::from_millis(1)).await;
                 }
             }
         }
 
-        fn send<'a>(
-            &'a self,
-            bytes: &'a [u8],
-        ) -> impl std::future::Future<Output = std::io::Result<usize>> + 'a {
-            async move { Ok(bytes.len()) }
+        async fn send(&self, bytes: &[u8]) -> std::io::Result<usize> {
+            Ok(bytes.len())
         }
 
         fn try_send(&self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -707,7 +698,7 @@ mod tests {
 
         // Build a valid PTPv2 Sync message for a different domain (e.g., 7).
         let mut msg_buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(7),
             PortIdentity::fake(),
@@ -750,7 +741,7 @@ mod tests {
 
         // Build a valid PTPv2 Sync message for domain 0, then corrupt the version field.
         let mut msg_buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::fake(),
@@ -825,7 +816,7 @@ mod tests {
 
         // Build a valid PTPv2 TwoStepSync message, then corrupt the length field.
         let mut msg_buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::fake(),
@@ -871,7 +862,7 @@ mod tests {
         // Build a valid PTPv2 OneStepSync message, then truncate the payload
         // so that the header length matches but the payload is too short.
         let mut msg_buf = MessageBuffer::new(
-            TransportSpecific::new(),
+            TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
             PortIdentity::fake(),

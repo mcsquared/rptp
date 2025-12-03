@@ -28,11 +28,11 @@ impl TimeStamp {
             seconds = seconds.checked_add(1)?;
         }
 
-        if seconds < 0 || seconds >= (1 << 47) {
+        if !(0..(1 << 47)).contains(&seconds) {
             return None;
         }
 
-        Some(TimeStamp::new(seconds as u64, nanos as u32))
+        Some(TimeStamp::new(seconds as u64, nanos))
     }
 }
 
