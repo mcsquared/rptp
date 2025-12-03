@@ -2,7 +2,6 @@ use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
 use crate::bmca::{Bmca, QualificationTimeoutPolicy};
-use crate::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
 use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
@@ -10,6 +9,7 @@ use crate::portstate::PortState;
 use crate::result::{ProtocolError, Result};
 use crate::time::{Duration, Instant, LogInterval, TimeStamp};
 use crate::timestamping::TxTimestamping;
+use crate::wire::{MessageBuffer, PtpVersion, TransportSpecific};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SendError;

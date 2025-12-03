@@ -4,7 +4,7 @@ use std::time::Instant as StdInstant;
 
 use tokio::sync::mpsc;
 
-use rptp::buffer::UnvalidatedMessage;
+use rptp::wire::UnvalidatedMessage;
 use rptp::{
     message::{DomainMessage, SystemMessage},
     port::{DomainNumber, PhysicalPort, PortMap, SendResult, Timeout, TimerHost},
@@ -332,7 +332,6 @@ mod tests {
     use rptp::bmca::{
         DefaultDS, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1, Priority2,
     };
-    use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
     use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
     use rptp::infra::infra_support::SortedForeignClockRecordsVec;
     use rptp::message::{EventMessage, GeneralMessage, OneStepSyncMessage, TwoStepSyncMessage};
@@ -344,6 +343,7 @@ mod tests {
     use rptp::test_support::FakeClock;
     use rptp::test_support::FakeTimestamping;
     use rptp::time::TimeStamp;
+    use rptp::wire::{MessageBuffer, PtpVersion, TransportSpecific};
 
     use crate::log::TracingPortLog;
     use crate::net::{FakeNetworkSocket, MulticastSocket, NetworkSocket};

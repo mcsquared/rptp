@@ -1,6 +1,5 @@
 use std::cell::Cell;
 
-use crate::buffer::{MessageHeader, UnvalidatedMessage};
 use crate::clock::{Clock, ClockIdentity, SynchronizableClock};
 use crate::port::{
     PhysicalPort, PortIdentity, PortNumber, SendError, SendResult, Timeout, TimerHost,
@@ -8,6 +7,7 @@ use crate::port::{
 use crate::result::Result;
 use crate::time::TimeStamp;
 use crate::timestamping::TxTimestamping;
+use crate::wire::{MessageHeader, UnvalidatedMessage};
 
 use std::cell::RefCell;
 use std::rc::Rc;

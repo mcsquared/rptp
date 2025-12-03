@@ -1,12 +1,12 @@
 use crate::{
     bmca::{Bmca, ForeignClockDS},
-    buffer::{
-        AnnouncePayload, ControlField, DelayResponsePayload, FinalizedBuffer, FollowUpPayload,
-        LengthCheckedMessage, MessageBuffer, MessageFlags, MessageHeader, MessageType, SyncPayload,
-    },
     port::{PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Instant, LogMessageInterval, TimeInterval, TimeStamp},
+    wire::{
+        AnnouncePayload, ControlField, DelayResponsePayload, FinalizedBuffer, FollowUpPayload,
+        LengthCheckedMessage, MessageBuffer, MessageFlags, MessageHeader, MessageType, SyncPayload,
+    },
 };
 
 pub struct DomainMessage<'a> {
@@ -466,13 +466,13 @@ impl<M> Default for MessageWindow<M> {
 mod tests {
     use super::*;
 
-    use crate::buffer::UnvalidatedMessage;
+    use crate::wire::UnvalidatedMessage;
 
     use crate::bmca::{Priority1, Priority2};
-    use crate::buffer::{PtpVersion, TransportSpecific};
     use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved};
     use crate::port::{DomainNumber, PortNumber};
     use crate::time::LogMessageInterval;
+    use crate::wire::{PtpVersion, TransportSpecific};
 
     #[test]
     fn announce_message_wire_roundtrip() {

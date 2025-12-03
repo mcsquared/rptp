@@ -1,7 +1,6 @@
 #![cfg_attr(not(any(test, feature = "std")), no_std)]
 
 pub mod bmca;
-pub mod buffer;
 pub mod clock;
 pub mod faulty;
 pub mod initializing;
@@ -18,6 +17,7 @@ pub mod sync;
 pub mod time;
 pub mod timestamping;
 pub mod uncalibrated;
+pub mod wire;
 
 #[cfg(feature = "std")]
 pub mod infra;
