@@ -4,22 +4,14 @@ use std::time::Instant as StdInstant;
 
 use tokio::sync::mpsc;
 
-use rptp::bmca::IncrementalBmca;
 use rptp::buffer::UnvalidatedMessage;
-use rptp::clock::SynchronizableClock;
-use rptp::port::TimerHost;
 use rptp::{
-    infra::infra_support::SortedForeignClockRecordsVec,
     message::{DomainMessage, SystemMessage},
-    port::{
-        DomainNumber, DomainPort, PhysicalPort, PortMap, SendResult, SingleDomainPortMap, Timeout,
-    },
+    port::{DomainNumber, PhysicalPort, PortMap, SendResult, Timeout, TimerHost},
     result::{Error as RptpError, ProtocolError},
     time::{Duration, Instant},
-    timestamping::TxTimestamping,
 };
 
-use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
 use crate::timestamping::RxTimestamping;
 
@@ -165,30 +157,25 @@ enum RxKind {
     General,
 }
 
-pub struct TokioPortsLoop<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping> {
-    portmap: SingleDomainPortMap<
-        Box<DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, TS>>,
-        IncrementalBmca<SortedForeignClockRecordsVec>,
-        TracingPortLog,
-    >,
+pub struct TokioPortsLoop<P, N: NetworkSocket, R: RxTimestamping> {
+    portmap: P,
     event_socket: Rc<N>,
     general_socket: Rc<N>,
-    timestamping: &'a dyn RxTimestamping,
+    timestamping: R,
     system_rx: mpsc::UnboundedReceiver<(DomainNumber, SystemMessage)>,
 }
 
-impl<'a, C: SynchronizableClock, N: NetworkSocket, TS: TxTimestamping>
-    TokioPortsLoop<'a, C, N, TS>
+impl<P, N, R> TokioPortsLoop<P, N, R>
+where
+    P: PortMap,
+    N: NetworkSocket,
+    R: RxTimestamping,
 {
     pub async fn new(
-        portmap: SingleDomainPortMap<
-            Box<DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, TS>>,
-            IncrementalBmca<SortedForeignClockRecordsVec>,
-            TracingPortLog,
-        >,
+        portmap: P,
         event_socket: Rc<N>,
         general_socket: Rc<N>,
-        timestamping: &'a dyn RxTimestamping,
+        timestamping: R,
         system_rx: mpsc::UnboundedReceiver<(DomainNumber, SystemMessage)>,
     ) -> std::io::Result<Self> {
         Ok(Self {
@@ -346,7 +333,8 @@ mod tests {
         DefaultDS, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1, Priority2,
     };
     use rptp::buffer::{MessageBuffer, PtpVersion, TransportSpecific};
-    use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved};
+    use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
+    use rptp::infra::infra_support::SortedForeignClockRecordsVec;
     use rptp::message::{EventMessage, GeneralMessage, OneStepSyncMessage, TwoStepSyncMessage};
     use rptp::port::{
         DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber, PortTimingPolicy,
@@ -366,8 +354,19 @@ mod tests {
     use std::net::SocketAddr;
     use std::time::Duration as StdDuration;
 
+    use rptp::bmca::IncrementalBmca;
+    use rptp::port::SingleDomainPortMap;
+
+    type TestPortMap<'a, C, N> = SingleDomainPortMap<
+        Box<DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, FakeTimestamping>>,
+        IncrementalBmca<SortedForeignClockRecordsVec>,
+        TracingPortLog,
+    >;
+
+    type TestPortsLoop<'a, C, N> = TokioPortsLoop<TestPortMap<'a, C, N>, N, FakeTimestamping>;
+
     struct MasterTestNode<'a, C: SynchronizableClock, N: NetworkSocket> {
-        portsloop: TokioPortsLoop<'a, C, N, FakeTimestamping>,
+        portsloop: TestPortsLoop<'a, C, N>,
     }
 
     impl<'a, C: SynchronizableClock, N: NetworkSocket> MasterTestNode<'a, C, N> {
@@ -400,7 +399,6 @@ mod tests {
             let portmap = SingleDomainPortMap::new(domain_number, port_state);
 
             let rx_timestamping = FakeTimestamping::new();
-            let rx_timestamping: &'static dyn RxTimestamping = Box::leak(Box::new(rx_timestamping));
 
             let portsloop = TokioPortsLoop::new(
                 portmap,
@@ -530,11 +528,14 @@ mod tests {
         let log = TracingPortLog::new(port_identity);
         let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
+
+        let rx_timestamping = FakeTimestamping::new();
+
         let portsloop = TokioPortsLoop::new(
             portmap,
             event_socket,
             general_socket,
-            &timestamping,
+            rx_timestamping,
             system_rx,
         )
         .await?;
@@ -636,11 +637,12 @@ mod tests {
         ));
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let rx_timestamping = FakeTimestamping::new();
+
         let portsloop = TokioPortsLoop::new(
             portmap,
             event_socket,
             general_socket,
-            &rx_timestamping,
+            rx_timestamping,
             system_rx,
         )
         .await?;

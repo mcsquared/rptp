@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use rptp::clock::Clock;
 use tokio::sync::mpsc;
 
@@ -37,12 +39,6 @@ impl<C: Clock> TxTimestamping for ClockTimestamping<C> {
     }
 }
 
-impl<C: Clock> TxTimestamping for &ClockTimestamping<C> {
-    fn stamp_egress(&self, msg: EventMessage) {
-        (*self).stamp_egress(msg)
-    }
-}
-
 impl<C: Clock> RxTimestamping for ClockTimestamping<C> {
     fn ingress_stamp(&self) -> TimeStamp {
         self.clock.now()
@@ -52,5 +48,11 @@ impl<C: Clock> RxTimestamping for ClockTimestamping<C> {
 impl<C: Clock> RxTimestamping for &ClockTimestamping<C> {
     fn ingress_stamp(&self) -> TimeStamp {
         (*self).ingress_stamp()
+    }
+}
+
+impl<C: Clock> RxTimestamping for Rc<ClockTimestamping<C>> {
+    fn ingress_stamp(&self) -> TimeStamp {
+        (**self).ingress_stamp()
     }
 }

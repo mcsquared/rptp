@@ -14,6 +14,16 @@ use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
 use crate::node::{TokioPhysicalPort, TokioTimerHost};
 
+pub type OrdinaryBmca = IncrementalBmca<SortedForeignClockRecordsVec>;
+
+pub type OrdinaryPort<'a, C, N, TS> = DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, TS>;
+
+pub type OrdinaryPortState<'a, C, N, TS> =
+    PortState<Box<OrdinaryPort<'a, C, N, TS>>, OrdinaryBmca, TracingPortLog>;
+
+pub type OrdinaryPortMap<'a, C, N, TS> =
+    rptp::port::SingleDomainPortMap<Box<OrdinaryPort<'a, C, N, TS>>, OrdinaryBmca, TracingPortLog>;
+
 pub fn ordinary_clock_port<'a, C, N, TS: TxTimestamping>(
     local_clock: &'a LocalClock<C>,
     domain_number: DomainNumber,
@@ -22,18 +32,14 @@ pub fn ordinary_clock_port<'a, C, N, TS: TxTimestamping>(
     system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
     port_number: PortNumber,
     timestamping: TS,
-) -> PortState<
-    Box<DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, TS>>,
-    IncrementalBmca<SortedForeignClockRecordsVec>,
-    TracingPortLog,
->
+) -> OrdinaryPortState<'a, C, N, TS>
 where
     C: SynchronizableClock,
     N: NetworkSocket,
 {
     let physical_port = TokioPhysicalPort::new(event_socket, general_socket);
 
-    let bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+    let bmca = OrdinaryBmca::new(SortedForeignClockRecordsVec::new());
     let timer_host = TokioTimerHost::new(domain_number, system_tx);
 
     let domain_port = Box::new(DomainPort::new(
