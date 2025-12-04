@@ -175,9 +175,9 @@ impl<C: SynchronizableClock> LocalClock<C> {
 
     pub fn discipline(&self, estimate: TimeStamp) {
         // TODO: apply filtering, slew rate limiting, feed to servo, etc.
+        self.clock.step(estimate);
         self.metrics
             .record_offset_from_master(self.now() - estimate);
-        self.clock.step(estimate);
     }
 }
 
