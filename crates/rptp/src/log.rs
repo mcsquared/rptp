@@ -1,4 +1,5 @@
 use crate::port::ParentPortIdentity;
+use crate::time::TimeInterval;
 
 pub trait PortLog {
     fn message_sent(&self, msg: &str);
@@ -22,4 +23,16 @@ pub enum PortEvent {
     AnnounceReceiptTimeout,
     QualifiedMaster,
     Static(&'static str), // optional catch-all
+}
+
+pub static NOOP_CLOCK_METRICS: NoopClockMetrics = NoopClockMetrics;
+
+pub trait ClockMetrics {
+    fn record_offset_from_master(&self, offset: TimeInterval);
+}
+
+pub struct NoopClockMetrics;
+
+impl ClockMetrics for NoopClockMetrics {
+    fn record_offset_from_master(&self, _offset: TimeInterval) {}
 }

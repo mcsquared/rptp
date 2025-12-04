@@ -75,7 +75,7 @@ mod tests {
     use crate::bmca::{DefaultDS, IncrementalBmca};
     use crate::clock::{LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
-    use crate::log::NoopPortLog;
+    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
@@ -89,6 +89,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
@@ -120,6 +121,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let domain_port = DomainPort::new(
             &local_clock,
@@ -159,6 +161,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::low_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let better_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),

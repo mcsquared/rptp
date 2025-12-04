@@ -1029,6 +1029,7 @@ pub(crate) mod tests {
     use super::*;
 
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
+    use crate::log::NOOP_CLOCK_METRICS;
     use crate::port::PortNumber;
     use crate::test_support::FakeClock;
     use crate::time::{Duration, Instant};
@@ -1468,6 +1469,7 @@ pub(crate) mod tests {
             FakeClock::default(),
             DefaultDS::gm_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
@@ -1480,6 +1482,7 @@ pub(crate) mod tests {
             FakeClock::default(),
             DefaultDS::gm_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
@@ -1515,6 +1518,7 @@ pub(crate) mod tests {
             FakeClock::default(),
             DefaultDS::gm_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
@@ -1540,6 +1544,7 @@ pub(crate) mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
@@ -1565,6 +1570,7 @@ pub(crate) mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
@@ -1589,6 +1595,7 @@ pub(crate) mod tests {
             FakeClock::default(),
             DefaultDS::low_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
@@ -1646,6 +1653,7 @@ pub(crate) mod tests {
             FakeClock::default(),
             DefaultDS::low_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
@@ -1703,6 +1711,7 @@ pub(crate) mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
@@ -1715,6 +1724,7 @@ pub(crate) mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
@@ -1736,6 +1746,7 @@ pub(crate) mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 

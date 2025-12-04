@@ -334,6 +334,7 @@ mod tests {
     };
     use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
     use rptp::infra::infra_support::SortedForeignClockRecordsVec;
+    use rptp::log::NOOP_CLOCK_METRICS;
     use rptp::message::{EventMessage, GeneralMessage, OneStepSyncMessage, TwoStepSyncMessage};
     use rptp::port::{
         DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber, PortTimingPolicy,
@@ -508,6 +509,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
@@ -596,6 +598,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
@@ -686,6 +689,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
@@ -729,6 +733,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
@@ -772,6 +777,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
@@ -804,6 +810,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
@@ -849,6 +856,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();

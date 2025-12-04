@@ -305,7 +305,7 @@ mod tests {
     use crate::bmca::{BmcaMasterDecisionPoint, DefaultDS, IncrementalBmca, NoopBmca};
     use crate::clock::{LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
-    use crate::log::NoopPortLog;
+    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, TimestampMessage, TwoStepSyncMessage};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::test_support::{FailingPort, FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
@@ -317,6 +317,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let listening = PortState::listening(
@@ -344,6 +345,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let slave = PortState::slave(
@@ -374,6 +376,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let pre_master = PortState::pre_master(
@@ -402,6 +405,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let uncalibrated = PortState::uncalibrated(
@@ -432,6 +436,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let uncalibrated = PortState::uncalibrated(
@@ -462,6 +467,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let listening = PortState::listening(
@@ -492,6 +498,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let master = PortState::master(
@@ -523,6 +530,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let listening = PortState::listening(
@@ -552,6 +560,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let initializing = PortState::initializing(
@@ -580,6 +589,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let initializing = PortState::initializing(
@@ -606,6 +616,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let master = PortState::master(
@@ -634,6 +645,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let initializing = PortState::initializing(
@@ -660,6 +672,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let listening = PortState::listening(
@@ -686,6 +699,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let slave = PortState::slave(
@@ -715,6 +729,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let master = PortState::master(
@@ -741,6 +756,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let pre_master = PortState::pre_master(
@@ -768,6 +784,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let initializing = PortState::initializing(
@@ -797,6 +814,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let slave = PortState::slave(
@@ -831,6 +849,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let pre_master = PortState::pre_master(
@@ -863,6 +882,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let uncalibrated = PortState::uncalibrated(
@@ -897,6 +917,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let initializing = PortState::initializing(
@@ -927,6 +948,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let slave = PortState::slave(
@@ -960,6 +982,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let master = PortState::master(
@@ -991,6 +1014,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let pre_master = PortState::pre_master(
@@ -1020,6 +1044,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let uncalibrated = PortState::uncalibrated(
@@ -1054,6 +1079,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let listening = PortState::listening(
@@ -1080,6 +1106,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let slave = PortState::slave(
@@ -1109,6 +1136,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let master = PortState::master(
@@ -1135,6 +1163,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let pre_master = PortState::pre_master(
@@ -1163,6 +1192,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let initializing = PortState::initializing(
@@ -1190,6 +1220,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let listening = PortState::listening(
@@ -1217,6 +1248,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let slave = PortState::slave(
@@ -1247,6 +1279,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let master = PortState::master(
@@ -1274,6 +1307,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let mut master = PortState::master(
@@ -1301,6 +1335,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let mut master = PortState::master(
@@ -1332,6 +1367,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let mut master = PortState::master(
@@ -1363,6 +1399,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let mut master = PortState::master(
@@ -1390,6 +1427,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let domain_port = DomainPort::new(
@@ -1435,6 +1473,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let pre_master = PortState::pre_master(
@@ -1463,6 +1502,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let uncalibrated = PortState::uncalibrated(

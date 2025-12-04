@@ -179,7 +179,7 @@ mod tests {
     use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, IncrementalBmca};
     use crate::clock::{LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
-    use crate::log::NoopPortLog;
+    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{
         DelayResponseMessage, EventMessage, FollowUpMessage, GeneralMessage, SystemMessage,
         TwoStepSyncMessage,
@@ -195,6 +195,7 @@ mod tests {
             FakeClock::new(TimeStamp::new(0, 0)),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
@@ -250,6 +251,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
@@ -285,6 +287,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
@@ -319,6 +322,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
@@ -374,6 +378,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
@@ -407,6 +412,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let port = FakePort::new();
         let timer_host = FakeTimerHost::new();
@@ -444,6 +450,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
         let domain_port = DomainPort::new(
@@ -495,6 +502,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
         let prior_records = [ForeignClockRecord::qualified(
@@ -553,6 +561,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
         let port = FakePort::new();
@@ -603,6 +612,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
         let parent_port = PortIdentity::fake();
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
@@ -662,6 +672,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
+            &NOOP_CLOCK_METRICS,
         );
 
         let mut cycle = AnnounceCycle::new(

@@ -6,6 +6,7 @@ use tokio::time::{Duration, timeout};
 
 use rptp::bmca::{DefaultDS, Priority1, Priority2};
 use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved};
+use rptp::log::NOOP_CLOCK_METRICS;
 use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
 use rptp::test_support::FakeClock;
 use rptp::time::TimeStamp;
@@ -30,6 +31,7 @@ async fn main() -> std::io::Result<()> {
             ClockQuality::new(250, 0xFE, 0xFFFF),
         ),
         StepsRemoved::new(0),
+        &NOOP_CLOCK_METRICS,
     );
     let event_socket = Rc::new(MulticastSocket::event().await?);
     let general_socket = Rc::new(MulticastSocket::general().await?);
