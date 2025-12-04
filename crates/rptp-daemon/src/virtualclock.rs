@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::sync::Mutex;
 use std::time::Instant as StdInstant;
 
 use rptp::{
@@ -7,18 +7,18 @@ use rptp::{
 };
 
 pub struct VirtualClock {
-    start: RefCell<StdInstant>,
-    ts: RefCell<TimeStamp>,
-    rate: RefCell<f64>,
+    start: Mutex<StdInstant>,
+    ts: Mutex<TimeStamp>,
+    rate: Mutex<f64>,
     time_scale: TimeScale,
 }
 
 impl VirtualClock {
     pub fn new(start_ts: TimeStamp, rate: f64, time_scale: TimeScale) -> Self {
         Self {
-            start: RefCell::new(StdInstant::now()),
-            ts: RefCell::new(start_ts),
-            rate: RefCell::new(rate),
+            start: Mutex::new(StdInstant::now()),
+            ts: Mutex::new(start_ts),
+            rate: Mutex::new(rate),
             time_scale,
         }
     }
@@ -26,12 +26,15 @@ impl VirtualClock {
 
 impl Clock for VirtualClock {
     fn now(&self) -> TimeStamp {
-        let dt = self.start.borrow().elapsed();
-        let dt_nanos = dt.as_nanos() as f64 * *self.rate.borrow();
+        let start = self.start.lock().unwrap();
+        let rate = *self.rate.lock().unwrap();
+        let base = *self.ts.lock().unwrap();
+
+        let dt = start.elapsed();
+        let dt_nanos = dt.as_nanos() as f64 * rate;
         let dt_secs = (dt_nanos / 1_000_000_000.0) as i64;
         let dt_rem_nanos = (dt_nanos % 1_000_000_000.0) as u32;
 
-        let base = *self.ts.borrow();
         base.checked_add(TimeInterval::new(dt_secs, dt_rem_nanos))
             .unwrap_or(base)
     }
@@ -53,15 +56,15 @@ impl Clock for &VirtualClock {
 
 impl SynchronizableClock for VirtualClock {
     fn step(&self, to: TimeStamp) {
-        self.start.replace(StdInstant::now());
-        self.ts.replace(to);
+        *self.start.lock().unwrap() = StdInstant::now();
+        *self.ts.lock().unwrap() = to;
     }
 
     fn adjust(&self, rate: f64) {
         let current = self.now();
-        self.start.replace(StdInstant::now());
-        self.ts.replace(current);
-        self.rate.replace(rate);
+        *self.start.lock().unwrap() = StdInstant::now();
+        *self.ts.lock().unwrap() = current;
+        *self.rate.lock().unwrap() = rate;
     }
 }
 

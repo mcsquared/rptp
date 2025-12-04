@@ -1,0 +1,32 @@
+services:
+  demo:
+    build:
+      context: ../..
+      dockerfile: crates/grafana-prometheus-demo/Dockerfile
+    container_name: rptp-demo
+    ports:
+      - "9898:9898"
+
+  prometheus:
+    image: prom/prometheus
+    container_name: rptp-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - demo
+
+  grafana:
+    image: grafana/grafana
+    container_name: rptp-grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    environment:
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/rptp-dash.json
+    volumes:
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/dashboards:/var/lib/grafana/dashboards

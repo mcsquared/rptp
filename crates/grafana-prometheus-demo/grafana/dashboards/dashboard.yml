@@ -1,0 +1,9 @@
+apiVersion: 1
+providers:
+  - name: 'rptp-demo'
+    orgId: 1
+    folder: ''
+    type: file
+    updateIntervalSeconds: 1
+    options:
+      path: /var/lib/grafana/dashboards

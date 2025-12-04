@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/rptp",
     "crates/rptp-daemon",
+    "crates/grafana-prometheus-demo",
     "tests/e2e",
 ]
 exclude = [
