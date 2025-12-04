@@ -55,6 +55,8 @@ pub mod infra_support {
             }
         }
 
+        #[cfg(any(test, feature = "test-support"))]
+        #[allow(dead_code)]
         pub fn from_records(records: &[ForeignClockRecord]) -> Self {
             let mut vec = Self {
                 records: records.to_vec(),

@@ -548,6 +548,29 @@ impl ForeignClockRecord {
         }
     }
 
+    /// Create a record for a new foreign clock that is already qualified. This is mainly
+    /// useful for tests, where we want to set up qualified foreign clock records directly.
+    #[cfg(any(test, feature = "test-support"))]
+    #[allow(dead_code)]
+    pub(crate) fn qualified(
+        source_port_identity: PortIdentity,
+        foreign_clock_ds: ForeignClockDS,
+        log_announce_interval: LogInterval,
+        now: Instant,
+    ) -> Self {
+        let window = ForeignMasterTimeWindow::new(log_announce_interval).duration();
+
+        Self {
+            source_port_identity,
+            foreign_clock_ds,
+            qualification: SlidingWindowQualification {
+                last: now,
+                prev: Some(now),
+                window,
+            },
+        }
+    }
+
     /// Return `true` if this record originates from `source_port_identity`.
     pub fn same_source_as(&self, source_port_identity: &PortIdentity) -> bool {
         self.source_port_identity == *source_port_identity
@@ -1104,21 +1127,6 @@ pub(crate) mod tests {
         }
     }
 
-    impl ForeignClockRecord {
-        pub(crate) fn qualify(self) -> Self {
-            Self {
-                // TODO: this might make tests brittle to reach into internals of
-                //       the qualification state. Consider a better solution.
-                qualification: SlidingWindowQualification {
-                    last: self.qualification.last,
-                    prev: Some(self.qualification.last),
-                    window: self.qualification.window,
-                },
-                ..self
-            }
-        }
-    }
-
     #[test]
     fn sliding_window_qualification_requires_two_fast_announces() {
         let t0 = Instant::from_secs(0);
@@ -1407,21 +1415,19 @@ pub(crate) mod tests {
     #[test]
     fn full_bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
         let stale_records = vec![
-            ForeignClockRecord::new(
+            ForeignClockRecord::qualified(
                 PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
                 ForeignClockDS::high_grade_test_clock(),
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            )
-            .qualify(),
-            ForeignClockRecord::new(
+            ),
+            ForeignClockRecord::qualified(
                 PortIdentity::new(CLK_ID_MID, PortNumber::new(1)),
                 ForeignClockDS::mid_grade_test_clock(),
                 LogInterval::new(0),
                 Instant::from_secs(1),
-            )
-            .qualify(),
-            ForeignClockRecord::new(
+            ),
+            ForeignClockRecord::qualified(
                 PortIdentity::new(CLK_ID_MID, PortNumber::new(1)),
                 ForeignClockDS::low_grade_test_clock(),
                 LogInterval::new(0),

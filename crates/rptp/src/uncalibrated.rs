@@ -129,13 +129,12 @@ mod tests {
             PortNumber::new(1),
         );
         let foreign_clock_ds = ForeignClockDS::mid_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(
+        let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
             LogInterval::new(0),
             Instant::from_secs(0),
-        )
-        .qualify()];
+        )];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),
@@ -205,13 +204,12 @@ mod tests {
         );
         let parent_port = PortIdentity::fake();
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
-        let prior_records = [ForeignClockRecord::new(
+        let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
             LogInterval::new(0),
             Instant::from_secs(0),
-        )
-        .qualify()];
+        )];
         let domain_port = DomainPort::new(
             &local_clock,
             FakePort::new(),

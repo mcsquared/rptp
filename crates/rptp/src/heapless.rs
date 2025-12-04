@@ -24,7 +24,9 @@ impl<const N: usize> HeaplessSortedForeignClockRecords<N> {
         }
     }
 
-    pub fn from_records(records: &[ForeignClockRecord]) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    #[allow(dead_code)]
+    pub(crate) fn from_records(records: &[ForeignClockRecord]) -> Self {
         let mut vec = Vec::from_slice(records).unwrap_or_default();
         vec.sort_unstable();
         Self {
@@ -138,27 +140,24 @@ mod tests {
         let low_port_id = new_port_identity(3);
 
         let records = HeaplessSortedForeignClockRecords::<4>::from_records(&[
-            ForeignClockRecord::new(
+            ForeignClockRecord::qualified(
                 high_port_id,
                 high_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            )
-            .qualify(),
+            ),
             ForeignClockRecord::new(
                 low_port_id,
                 low_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            )
-            .qualify(),
+            ),
             ForeignClockRecord::new(
                 mid_port_id,
                 mid_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            )
-            .qualify(),
+            ),
         ]);
 
         let best_clock = records.first().and_then(|record| record.dataset());
@@ -181,20 +180,18 @@ mod tests {
 
         // Start with mid and low, both qualified.
         let mut records = HeaplessSortedForeignClockRecords::<2>::from_records(&[
-            ForeignClockRecord::new(
+            ForeignClockRecord::qualified(
                 mid_port_id,
                 mid_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            )
-            .qualify(),
-            ForeignClockRecord::new(
+            ),
+            ForeignClockRecord::qualified(
                 low_port_id,
                 low_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            )
-            .qualify(),
+            ),
         ]);
 
         // Insert a better clock; capacity is exceeded, so low should be removed.
@@ -256,20 +253,18 @@ mod tests {
 
         // Start with high and mid, both qualified.
         let mut records = HeaplessSortedForeignClockRecords::<2>::from_records(&[
-            ForeignClockRecord::new(
+            ForeignClockRecord::qualified(
                 high_port_id,
                 high_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            )
-            .qualify(),
-            ForeignClockRecord::new(
+            ),
+            ForeignClockRecord::qualified(
                 mid_port_id,
                 mid_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            )
-            .qualify(),
+            ),
         ]);
 
         // Insert a worse clock; capacity is exceeded, but no record should be replaced.
