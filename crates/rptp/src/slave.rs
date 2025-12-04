@@ -96,12 +96,8 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             return None;
         }
 
-        if let Some(estimate) = self
-            .master_estimate
-            .record_two_step_sync(sync, ingress_timestamp)
-        {
-            self.port.local_clock().discipline(estimate);
-        }
+        self.master_estimate
+            .record_two_step_sync(sync, ingress_timestamp);
 
         None
     }
@@ -129,12 +125,8 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         egress_timestamp: TimeStamp,
     ) -> Option<StateDecision> {
         self.log.message_received("DelayReq");
-        if let Some(estimate) = self
-            .master_estimate
-            .record_delay_request(req, egress_timestamp)
-        {
-            self.port.local_clock().discipline(estimate);
-        }
+        self.master_estimate
+            .record_delay_request(req, egress_timestamp);
 
         None
     }
