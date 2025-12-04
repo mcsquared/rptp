@@ -94,6 +94,14 @@ impl TimeInterval {
     pub fn half(self) -> Self {
         Self::from_total_nanos(self.total_nanos() / 2)
     }
+
+    /// Return this interval as fractional seconds in `f64` precision.
+    ///
+    /// The conversion is lossy for very large magnitudes but sufficient for
+    /// logging, metrics and servo calculations.
+    pub fn as_f64_seconds(&self) -> f64 {
+        self.total_nanos() as f64 / 1_000_000_000.0
+    }
 }
 
 impl core::ops::Sub for TimeInterval {
