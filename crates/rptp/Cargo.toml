@@ -13,9 +13,11 @@ rust-version = "1.89"
 
 [dependencies]
 bitflags = { version = "2", default-features = false }
+heapless = { version = "0.9", default-features = false, optional = true }
 
 [features]
-default = ["std"]
+default = ["std", "heapless-storage"]
 std = []
 test-support = ["std"]      # test_support module needs Rc/RefCell/Vec
 infra = ["std"]             # infra module needs Rc/Vec
+heapless-storage = ["heapless"]

@@ -22,5 +22,8 @@ pub mod wire;
 #[cfg(feature = "std")]
 pub mod infra;
 
+#[cfg(feature = "heapless-storage")]
+pub mod heapless;
+
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

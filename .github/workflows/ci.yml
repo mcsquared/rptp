@@ -19,13 +19,13 @@ jobs:
       run: cargo test --verbose
 
   no-std-build:
-    name: Build rptp (no_std, no tests)
+    name: Build rptp (no_std, heapless-storage)
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
     - name: Run tests
-      run: cargo build -p rptp --no-default-features
+      run: cargo build -p rptp --no-default-features --features heapless-storage
 
   clippy:
     name: Clippy

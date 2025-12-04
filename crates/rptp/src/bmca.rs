@@ -553,6 +553,12 @@ impl ForeignClockRecord {
         self.source_port_identity == *source_port_identity
     }
 
+    /// Return `true` if this record is better than `other` purely based on the data sets,
+    /// ignoring qualification status.
+    pub fn better_by_dataset_than(&self, other: &ForeignClockRecord) -> bool {
+        self.foreign_clock_ds.better_than(&other.foreign_clock_ds)
+    }
+
     /// Consider a fresh Announce for this foreign clock.
     ///
     /// The validation counter is incremented (saturating), and the underlying
