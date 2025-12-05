@@ -1,30 +1,30 @@
 use crate::bmca::Bmca;
 use crate::log::{PortEvent, PortLog};
-use crate::port::{Port, PortTimingPolicy};
-use crate::portstate::PortState;
+use crate::port::Port;
+use crate::portstate::{PortProfile, PortState};
 
 pub struct InitializingPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: B,
     log: L,
-    timing_policy: PortTimingPolicy,
+    profile: PortProfile,
 }
 
 impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
-    pub fn new(port: P, bmca: B, log: L, timing_policy: PortTimingPolicy) -> Self {
+    pub fn new(port: P, bmca: B, log: L, profile: PortProfile) -> Self {
         log.port_event(PortEvent::Static("Become InitializingPort"));
 
         Self {
             port,
             bmca,
             log,
-            timing_policy,
+            profile,
         }
     }
 
     pub fn initialized(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::Initialized);
-        PortState::listening(self.port, self.bmca, self.log, self.timing_policy)
+        self.profile.listening(self.port, self.bmca, self.log)
     }
 }
 
@@ -60,7 +60,7 @@ mod tests {
             ),
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         ));
 
         let transition = initializing.dispatch_system(SystemMessage::Initialized);

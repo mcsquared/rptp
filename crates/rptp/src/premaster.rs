@@ -1,8 +1,8 @@
 use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision, LocalMasterTrackingBmca};
 use crate::log::{PortEvent, PortLog};
 use crate::message::AnnounceMessage;
-use crate::port::{Port, PortIdentity, PortTimingPolicy};
-use crate::portstate::{PortState, StateDecision};
+use crate::port::{Port, PortIdentity};
+use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::time::Instant;
 
 pub struct PreMasterPort<P: Port, B: Bmca, L: PortLog> {
@@ -10,7 +10,7 @@ pub struct PreMasterPort<P: Port, B: Bmca, L: PortLog> {
     bmca: LocalMasterTrackingBmca<B>,
     _qualification_timeout: P::Timeout,
     log: L,
-    timing_policy: PortTimingPolicy,
+    profile: PortProfile,
 }
 
 impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
@@ -19,7 +19,7 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
         bmca: LocalMasterTrackingBmca<B>,
         _qualification_timeout: P::Timeout,
         log: L,
-        timing_policy: PortTimingPolicy,
+        profile: PortProfile,
     ) -> Self {
         log.port_event(PortEvent::Static("Become PreMasterPort"));
 
@@ -28,7 +28,7 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
             bmca,
             _qualification_timeout,
             log,
-            timing_policy,
+            profile,
         }
     }
 
@@ -52,19 +52,14 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
 
     pub fn qualified(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::QualifiedMaster);
-        PortState::master(self.port, self.bmca, self.log, self.timing_policy)
+        self.profile.master(self.port, self.bmca, self.log)
     }
 
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedSlave {
             parent: *decision.parent_port_identity(),
         });
-        decision.apply(
-            self.port,
-            self.bmca.into_inner(),
-            self.log,
-            self.timing_policy,
-        )
+        decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
     }
 }
 
@@ -108,7 +103,7 @@ mod tests {
             LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             qualification_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let messages = timer_host.take_system_messages();
@@ -139,7 +134,7 @@ mod tests {
             LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             qualification_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         ));
 
         let transition = pre_master.dispatch_system(SystemMessage::QualificationTimeout);
@@ -183,7 +178,7 @@ mod tests {
             LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             qualification_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Receive first better announce

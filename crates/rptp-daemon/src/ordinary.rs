@@ -6,8 +6,8 @@ use rptp::bmca::IncrementalBmca;
 use rptp::clock::{LocalClock, SynchronizableClock};
 use rptp::infra::infra_support::SortedForeignClockRecordsVec;
 use rptp::message::SystemMessage;
-use rptp::port::{DomainNumber, DomainPort, PortIdentity, PortNumber, PortTimingPolicy};
-use rptp::portstate::PortState;
+use rptp::port::{DomainNumber, DomainPort, PortIdentity, PortNumber};
+use rptp::portstate::{PortProfile, PortState};
 use rptp::timestamping::TxTimestamping;
 
 use crate::log::TracingPortLog;
@@ -54,5 +54,5 @@ where
     let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
     let log = TracingPortLog::new(port_identity);
 
-    PortState::initializing(domain_port, bmca, log, PortTimingPolicy::default())
+    PortProfile::default().initializing(domain_port, bmca, log)
 }

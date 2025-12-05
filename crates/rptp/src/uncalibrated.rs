@@ -4,25 +4,25 @@ use crate::bmca::{
 };
 use crate::log::{PortEvent, PortLog};
 use crate::message::AnnounceMessage;
-use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
-use crate::portstate::{PortState, StateDecision};
+use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity};
+use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::time::Instant;
 
 pub struct UncalibratedPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: ParentTrackingBmca<B>,
-    announce_receipt_timeout: P::Timeout,
+    announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     log: L,
-    timing_policy: PortTimingPolicy,
+    profile: PortProfile,
 }
 
 impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
     pub fn new(
         port: P,
         bmca: ParentTrackingBmca<B>,
-        announce_receipt_timeout: P::Timeout,
+        announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         log: L,
-        timing_policy: PortTimingPolicy,
+        profile: PortProfile,
     ) -> Self {
         log.port_event(PortEvent::Static("Become UncalibratedPort"));
 
@@ -31,7 +31,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
             bmca,
             announce_receipt_timeout,
             log,
-            timing_policy,
+            profile,
         }
     }
 
@@ -42,8 +42,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         now: Instant,
     ) -> Option<StateDecision> {
         self.log.message_received("Announce");
-        self.announce_receipt_timeout
-            .restart(self.timing_policy.announce_receipt_timeout_interval());
+        self.announce_receipt_timeout.restart();
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
@@ -68,35 +67,26 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         self.log.port_event(PortEvent::MasterClockSelected {
             parent: self.bmca.parent(),
         });
-        PortState::slave(self.port, self.bmca, self.log, self.timing_policy)
+        self.profile.slave(self.port, self.bmca, self.log)
     }
 
     pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::AnnounceReceiptTimeout);
         let local_tracking_bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
-        PortState::master(self.port, local_tracking_bmca, self.log, self.timing_policy)
+        self.profile
+            .master(self.port, local_tracking_bmca, self.log)
     }
 
     pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedMaster);
-        decision.apply(
-            self.port,
-            self.bmca.into_inner(),
-            self.log,
-            self.timing_policy,
-        )
+        decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
     }
 
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedSlave {
             parent: *decision.parent_port_identity(),
         });
-        decision.apply(
-            self.port,
-            self.bmca.into_inner(),
-            self.log,
-            self.timing_policy,
-        )
+        decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
     }
 }
 
@@ -144,8 +134,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -157,7 +150,7 @@ mod tests {
             ),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Receive two better announces from another parent port
@@ -220,8 +213,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -233,7 +229,7 @@ mod tests {
             ),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let decision = uncalibrated.process_announce(
@@ -261,8 +257,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -274,7 +273,7 @@ mod tests {
             ),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         ));
 
         let transition = uncalibrated.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
@@ -302,8 +301,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -315,7 +317,7 @@ mod tests {
             ),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
@@ -364,8 +366,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -377,7 +382,7 @@ mod tests {
             ),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let foreign_clock = ForeignClockDS::low_grade_test_clock();

@@ -21,8 +21,8 @@ use core::ops::Range;
 use crate::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::{AnnounceMessage, SequenceId};
-use crate::port::{ParentPortIdentity, Port, PortIdentity, PortTimingPolicy};
-use crate::portstate::PortState;
+use crate::port::{ParentPortIdentity, Port, PortIdentity};
+use crate::portstate::{PortProfile, PortState};
 use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
 /// Core BMCA trait implemented by BMCA strategies.
@@ -433,7 +433,7 @@ impl BmcaMasterDecision {
         port: P,
         bmca: B,
         log: L,
-        timing_policy: PortTimingPolicy,
+        profile: PortProfile,
     ) -> PortState<P, B, L> {
         let qualification_timeout_policy =
             QualificationTimeoutPolicy::new(self.decision_point, self.steps_removed);
@@ -443,7 +443,7 @@ impl BmcaMasterDecision {
 
         let bmca = LocalMasterTrackingBmca::new(bmca);
 
-        PortState::pre_master(port, bmca, log, timing_policy, qualification_timeout_policy)
+        profile.pre_master(port, bmca, log, qualification_timeout_policy)
     }
 }
 
@@ -509,14 +509,14 @@ impl BmcaSlaveDecision {
         port: P,
         bmca: B,
         log: L,
-        timing_policy: PortTimingPolicy,
+        profile: PortProfile,
     ) -> PortState<P, B, L> {
         let parent_tracking_bmca = ParentTrackingBmca::new(bmca, self.parent_port_identity);
 
         // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
         port.update_steps_removed(self.steps_removed);
 
-        PortState::uncalibrated(port, parent_tracking_bmca, log, timing_policy)
+        profile.uncalibrated(port, parent_tracking_bmca, log)
     }
 }
 

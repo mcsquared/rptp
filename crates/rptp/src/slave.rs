@@ -7,29 +7,29 @@ use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
     OneStepSyncMessage, SequenceId, TwoStepSyncMessage,
 };
-use crate::port::{Port, PortIdentity, PortTimingPolicy, SendResult, Timeout};
-use crate::portstate::{PortState, StateDecision};
+use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity, SendResult, Timeout};
+use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::sync::MasterEstimate;
-use crate::time::{Duration, Instant, TimeStamp};
+use crate::time::{Instant, LogInterval, TimeStamp};
 
 pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: ParentTrackingBmca<B>,
-    announce_receipt_timeout: P::Timeout,
+    announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     delay_cycle: DelayCycle<P::Timeout>,
     master_estimate: MasterEstimate,
     log: L,
-    timing_policy: PortTimingPolicy,
+    profile: PortProfile,
 }
 
 impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
     pub fn new(
         port: P,
         bmca: ParentTrackingBmca<B>,
-        announce_receipt_timeout: P::Timeout,
+        announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         delay_cycle: DelayCycle<P::Timeout>,
         log: L,
-        timing_policy: PortTimingPolicy,
+        profile: PortProfile,
     ) -> Self {
         log.port_event(PortEvent::Static("Become SlavePort"));
 
@@ -40,7 +40,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             delay_cycle,
             master_estimate: MasterEstimate::new(),
             log,
-            timing_policy,
+            profile,
         }
     }
 
@@ -51,8 +51,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         now: Instant,
     ) -> Option<StateDecision> {
         self.log.message_received("Announce");
-        self.announce_receipt_timeout
-            .restart(self.timing_policy.announce_receipt_timeout_interval());
+        self.announce_receipt_timeout.restart();
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
@@ -152,8 +151,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         let delay_request = self.delay_cycle.delay_request();
         self.port
             .send_event(EventMessage::DelayReq(delay_request))?;
-        self.delay_cycle
-            .next(self.timing_policy.min_delay_request_interval());
+        self.delay_cycle.next();
         self.log.message_sent("DelayReq");
         Ok(())
     }
@@ -161,7 +159,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
     pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::AnnounceReceiptTimeout);
         let bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
-        PortState::master(self.port, bmca, self.log, self.timing_policy)
+        self.profile.master(self.port, bmca, self.log)
     }
 
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
@@ -169,22 +167,12 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             parent: *decision.parent_port_identity(),
         });
 
-        decision.apply(
-            self.port,
-            self.bmca.into_inner(),
-            self.log,
-            self.timing_policy,
-        )
+        decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
     }
 
     pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedMaster);
-        decision.apply(
-            self.port,
-            self.bmca.into_inner(),
-            self.log,
-            self.timing_policy,
-        )
+        decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
     }
 }
 
@@ -192,18 +180,20 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
 pub struct DelayCycle<T: Timeout> {
     sequence_id: SequenceId,
     timeout: T,
+    log_interval: LogInterval,
 }
 
 impl<T: Timeout> DelayCycle<T> {
-    pub fn new(start: SequenceId, delay_request_timeout: T) -> Self {
+    pub fn new(start: SequenceId, delay_request_timeout: T, log_interval: LogInterval) -> Self {
         Self {
             sequence_id: start,
             timeout: delay_request_timeout,
+            log_interval,
         }
     }
 
-    pub fn next(&mut self, interval: Duration) {
-        self.timeout.restart(interval);
+    pub fn next(&mut self) {
+        self.timeout.restart(self.log_interval.duration());
         self.sequence_id = self.sequence_id.next();
     }
 
@@ -222,7 +212,6 @@ mod tests {
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
-    use crate::portstate::PortState;
     use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
@@ -249,13 +238,17 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
+            AnnounceReceiptTimeout::new(
+                FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
+                Duration::from_secs(5),
+            ),
             DelayCycle::new(
                 0.into(),
                 FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
             ),
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         slave.process_two_step_sync(
@@ -299,13 +292,17 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
-            FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
+            AnnounceReceiptTimeout::new(
+                FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
+                Duration::from_secs(5),
+            ),
             DelayCycle::new(
                 0.into(),
                 FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
             ),
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         slave.process_one_step_sync(
@@ -340,14 +337,13 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut slave = PortState::slave(
+        let mut slave = PortProfile::default().slave(
             domain_port,
             ParentTrackingBmca::new(
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
             NoopPortLog,
-            PortTimingPolicy::default(),
         );
 
         timer_host.take_system_messages();
@@ -376,14 +372,13 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut slave = PortState::slave(
+        let mut slave = PortProfile::default().slave(
             domain_port,
             ParentTrackingBmca::new(
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
             NoopPortLog,
-            PortTimingPolicy::default(),
         );
 
         slave.dispatch_system(SystemMessage::DelayRequestTimeout);
@@ -409,14 +404,13 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut slave = PortState::slave(
+        let mut slave = PortProfile::default().slave(
             domain_port,
             ParentTrackingBmca::new(
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
             NoopPortLog,
-            PortTimingPolicy::default(),
         );
 
         let transition = slave.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
@@ -443,13 +437,16 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
         let delay_timeout =
             domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         // Define a parent and a different non-parent identity
         let parent = PortIdentity::new(
@@ -471,7 +468,7 @@ mod tests {
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Record a TwoStepSync from the parent so a matching FollowUp could produce ms_offset
@@ -520,13 +517,16 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
         let delay_timeout =
             domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         // Define a parent and a different non-parent identity
         let parent = PortIdentity::new(
@@ -548,7 +548,7 @@ mod tests {
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Send a FollowUp from the parent first (ms offset incomplete without sync)
@@ -595,13 +595,16 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
         let delay_timeout =
             domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         // Parent identity
         let parent = PortIdentity::new(
@@ -619,7 +622,7 @@ mod tests {
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Matching conversation from the parent (numbers chosen to yield estimate 2s)
@@ -677,13 +680,16 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
         let delay_timeout =
             domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         let mut slave = SlavePort::new(
             domain_port,
@@ -694,7 +700,7 @@ mod tests {
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Receive a better announce from the same parent port
@@ -741,13 +747,16 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
         let delay_timeout =
             domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         let mut slave = SlavePort::new(
             domain_port,
@@ -758,7 +767,7 @@ mod tests {
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Receive two better announces from another parent port
@@ -824,13 +833,16 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
         let delay_timeout =
             domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         let mut slave = SlavePort::new(
             domain_port,
@@ -841,7 +853,7 @@ mod tests {
             announce_receipt_timeout,
             delay_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Receive a worse announce from the current parent
@@ -867,6 +879,7 @@ mod tests {
         let delay_cycle = DelayCycle::new(
             42.into(),
             FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
         );
         let delay_request = delay_cycle.delay_request();
 
@@ -878,14 +891,16 @@ mod tests {
         let mut delay_cycle = DelayCycle::new(
             42.into(),
             FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
         );
-        delay_cycle.next(Duration::from_secs(1));
+        delay_cycle.next();
 
         assert_eq!(
             delay_cycle,
             DelayCycle::new(
                 43.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout)
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0)
             )
         );
     }
@@ -895,14 +910,16 @@ mod tests {
         let mut delay_cycle = DelayCycle::new(
             u16::MAX.into(),
             FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
         );
-        delay_cycle.next(Duration::from_secs(1));
+        delay_cycle.next();
 
         assert_eq!(
             delay_cycle,
             DelayCycle::new(
                 0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout)
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
             )
         );
     }

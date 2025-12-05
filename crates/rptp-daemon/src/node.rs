@@ -337,13 +337,13 @@ mod tests {
     use rptp::log::NOOP_CLOCK_METRICS;
     use rptp::message::{EventMessage, GeneralMessage, OneStepSyncMessage, TwoStepSyncMessage};
     use rptp::port::{
-        DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber, PortTimingPolicy,
+        AnnounceReceiptTimeout, DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber,
     };
-    use rptp::portstate::PortState;
+    use rptp::portstate::{PortProfile, PortState};
     use rptp::slave::{DelayCycle, SlavePort};
     use rptp::test_support::FakeClock;
     use rptp::test_support::FakeTimestamping;
-    use rptp::time::TimeStamp;
+    use rptp::time::{LogInterval, TimeStamp};
     use rptp::wire::{MessageBuffer, PtpVersion, TransportSpecific};
 
     use crate::log::TracingPortLog;
@@ -396,7 +396,7 @@ mod tests {
             ));
             let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
             let log = TracingPortLog::new(port_identity);
-            let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
+            let port_state = PortProfile::default().master(domain_port, bmca, log);
             let portmap = SingleDomainPortMap::new(domain_number, port_state);
 
             let rx_timestamping = FakeTimestamping::new();
@@ -528,7 +528,7 @@ mod tests {
             LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
         let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
         let log = TracingPortLog::new(port_identity);
-        let port_state = PortState::master(domain_port, bmca, log, PortTimingPolicy::default());
+        let port_state = PortProfile::default().master(domain_port, bmca, log);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
 
         let rx_timestamping = FakeTimestamping::new();
@@ -620,13 +620,16 @@ mod tests {
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             parent_port_identity,
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(10),
+            ),
             Duration::from_secs(10),
         );
         let delay_timeout =
             domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout);
+        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
         let log = TracingPortLog::new(port_identity);
@@ -636,7 +639,7 @@ mod tests {
             announce_receipt_timeout,
             delay_cycle,
             log,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         ));
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let rx_timestamping = FakeTimestamping::new();

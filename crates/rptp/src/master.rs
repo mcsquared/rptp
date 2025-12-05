@@ -7,9 +7,9 @@ use crate::message::{
     AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId,
     TwoStepSyncMessage,
 };
-use crate::port::{Port, PortIdentity, PortTimingPolicy, SendResult, Timeout};
-use crate::portstate::{PortState, StateDecision};
-use crate::time::{Duration, Instant, LogInterval, TimeStamp};
+use crate::port::{Port, PortIdentity, SendResult, Timeout};
+use crate::portstate::{PortProfile, PortState, StateDecision};
+use crate::time::{Instant, LogInterval, TimeStamp};
 
 pub struct MasterPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
@@ -17,7 +17,7 @@ pub struct MasterPort<P: Port, B: Bmca, L: PortLog> {
     announce_cycle: AnnounceCycle<P::Timeout>,
     sync_cycle: SyncCycle<P::Timeout>,
     log: L,
-    timing_policy: PortTimingPolicy,
+    profile: PortProfile,
 }
 
 impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
@@ -27,7 +27,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         announce_cycle: AnnounceCycle<P::Timeout>,
         sync_cycle: SyncCycle<P::Timeout>,
         log: L,
-        timing_policy: PortTimingPolicy,
+        profile: PortProfile,
     ) -> Self {
         log.port_event(PortEvent::Static("Become MasterPort"));
 
@@ -37,7 +37,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
             announce_cycle,
             sync_cycle,
             log,
-            timing_policy,
+            profile,
         }
     }
 
@@ -82,7 +82,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         let sync_message = self.sync_cycle.two_step_sync();
         self.port
             .send_event(EventMessage::TwoStepSync(sync_message))?;
-        self.sync_cycle.next(self.timing_policy.sync_interval());
+        self.sync_cycle.next();
         self.log.message_sent("TwoStepSync");
         Ok(())
     }
@@ -100,12 +100,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
 
     pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedMaster);
-        decision.apply(
-            self.port,
-            self.bmca.into_inner(),
-            self.log,
-            self.timing_policy,
-        )
+        decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
     }
 
     pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
@@ -113,28 +108,23 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
             parent: *decision.parent_port_identity(),
         });
 
-        decision.apply(
-            self.port,
-            self.bmca.into_inner(),
-            self.log,
-            self.timing_policy,
-        )
+        decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AnnounceCycle<T: Timeout> {
     sequence_id: SequenceId,
-    log_interval: LogInterval,
     timeout: T,
+    log_interval: LogInterval,
 }
 
 impl<T: Timeout> AnnounceCycle<T> {
-    pub fn new(start: SequenceId, log_interval: LogInterval, timeout: T) -> Self {
+    pub fn new(start: SequenceId, timeout: T, log_interval: LogInterval) -> Self {
         Self {
             sequence_id: start,
-            log_interval,
             timeout,
+            log_interval,
         }
     }
 
@@ -152,18 +142,20 @@ impl<T: Timeout> AnnounceCycle<T> {
 pub struct SyncCycle<T: Timeout> {
     sequence_id: SequenceId,
     timeout: T,
+    log_interval: LogInterval,
 }
 
 impl<T: Timeout> SyncCycle<T> {
-    pub fn new(start: SequenceId, timeout: T) -> Self {
+    pub fn new(start: SequenceId, timeout: T, log_interval: LogInterval) -> Self {
         Self {
             sequence_id: start,
             timeout,
+            log_interval,
         }
     }
 
-    pub fn next(&mut self, interval: Duration) {
-        self.timeout.restart(interval);
+    pub fn next(&mut self) {
+        self.timeout.restart(self.log_interval.duration());
         self.sequence_id = self.sequence_id.next();
     }
 
@@ -185,7 +177,6 @@ mod tests {
         TwoStepSyncMessage,
     };
     use crate::port::{DomainNumber, DomainPort, PortNumber};
-    use crate::portstate::PortState;
     use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
@@ -209,12 +200,13 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
             domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
 
         let mut master = MasterPort::new(
@@ -223,7 +215,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         timer_host.take_system_messages();
@@ -264,11 +256,10 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut master = PortState::master(
+        let mut master = PortProfile::default().master(
             domain_port,
             LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
-            PortTimingPolicy::default(),
         );
 
         master.dispatch_system(SystemMessage::SyncTimeout);
@@ -300,11 +291,10 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut master = PortState::master(
+        let mut master = PortProfile::default().master(
             domain_port,
             LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
-            PortTimingPolicy::default(),
         );
 
         // Drain messages that could have been sent during initialization.
@@ -336,12 +326,13 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
             domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
 
         let mut master = MasterPort::new(
@@ -350,7 +341,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         timer_host.take_system_messages();
@@ -391,11 +382,10 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut master = PortState::master(
+        let mut master = PortProfile::default().master(
             domain_port,
             LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
-            PortTimingPolicy::default(),
         );
 
         timer_host.take_system_messages();
@@ -425,11 +415,10 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut master = PortState::master(
+        let mut master = PortProfile::default().master(
             domain_port,
             LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
             NoopPortLog,
-            PortTimingPolicy::default(),
         );
 
         master.dispatch_system(SystemMessage::AnnounceSendTimeout);
@@ -463,12 +452,13 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
             domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
 
         let mut master = MasterPort::new(
@@ -477,7 +467,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let decision = master.process_announce(
@@ -523,12 +513,13 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
             domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
 
         let mut master = MasterPort::new(
@@ -539,7 +530,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Drain any setup timers
@@ -576,12 +567,13 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
             domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
 
         let mut master = MasterPort::new(
@@ -590,7 +582,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Drain any setup timers
@@ -632,12 +624,13 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            LogInterval::new(0),
             domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
             domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            LogInterval::new(0),
         );
 
         let mut master = MasterPort::new(
@@ -648,7 +641,7 @@ mod tests {
             announce_cycle,
             sync_cycle,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         // Receive a better announce (but still lower quality than local high-grade clock)
@@ -677,8 +670,8 @@ mod tests {
 
         let mut cycle = AnnounceCycle::new(
             0.into(),
-            LogInterval::new(0),
             FakeTimeout::new(SystemMessage::AnnounceSendTimeout),
+            LogInterval::new(0),
         );
         let msg1 = cycle.announce(&local_clock);
         cycle.next();
@@ -704,7 +697,11 @@ mod tests {
 
     #[test]
     fn sync_cycle_message_produces_two_step_sync_message() {
-        let sync_cycle = SyncCycle::new(0.into(), FakeTimeout::new(SystemMessage::SyncTimeout));
+        let sync_cycle = SyncCycle::new(
+            0.into(),
+            FakeTimeout::new(SystemMessage::SyncTimeout),
+            LogInterval::new(0),
+        );
         let two_step_sync = sync_cycle.two_step_sync();
 
         assert_eq!(two_step_sync, TwoStepSyncMessage::new(0.into()));
@@ -712,12 +709,20 @@ mod tests {
 
     #[test]
     fn sync_cycle_next() {
-        let mut sync_cycle = SyncCycle::new(0.into(), FakeTimeout::new(SystemMessage::SyncTimeout));
-        sync_cycle.next(Duration::from_secs(1));
+        let mut sync_cycle = SyncCycle::new(
+            0.into(),
+            FakeTimeout::new(SystemMessage::SyncTimeout),
+            LogInterval::new(0),
+        );
+        sync_cycle.next();
 
         assert_eq!(
             sync_cycle,
-            SyncCycle::new(1.into(), FakeTimeout::new(SystemMessage::SyncTimeout))
+            SyncCycle::new(
+                1.into(),
+                FakeTimeout::new(SystemMessage::SyncTimeout),
+                LogInterval::new(0)
+            )
         );
     }
 
@@ -726,12 +731,17 @@ mod tests {
         let mut sync_cycle = SyncCycle::new(
             u16::MAX.into(),
             FakeTimeout::new(SystemMessage::SyncTimeout),
+            LogInterval::new(0),
         );
-        sync_cycle.next(Duration::from_secs(1));
+        sync_cycle.next();
 
         assert_eq!(
             sync_cycle,
-            SyncCycle::new(0.into(), FakeTimeout::new(SystemMessage::SyncTimeout))
+            SyncCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::SyncTimeout),
+                LogInterval::new(0)
+            )
         );
     }
 }

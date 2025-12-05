@@ -3,25 +3,25 @@ use crate::bmca::{
 };
 use crate::log::{PortEvent, PortLog};
 use crate::message::AnnounceMessage;
-use crate::port::{Port, PortIdentity, PortTimingPolicy, Timeout};
-use crate::portstate::{PortState, StateDecision};
+use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity};
+use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::time::Instant;
 
 pub struct ListeningPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: B,
-    announce_receipt_timeout: P::Timeout,
     log: L,
-    timing_policy: PortTimingPolicy,
+    announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
+    profile: PortProfile,
 }
 
 impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
     pub fn new(
         port: P,
         bmca: B,
-        announce_receipt_timeout: P::Timeout,
+        announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         log: L,
-        timing_policy: PortTimingPolicy,
+        profile: PortProfile,
     ) -> Self {
         log.port_event(PortEvent::Static("Become ListeningPort"));
 
@@ -30,7 +30,7 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
             bmca,
             announce_receipt_timeout,
             log,
-            timing_policy,
+            profile,
         }
     }
 
@@ -38,18 +38,18 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
         self.log.port_event(PortEvent::RecommendedSlave {
             parent: *decision.parent_port_identity(),
         });
-        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
+        decision.apply(self.port, self.bmca, self.log, self.profile)
     }
 
     pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedMaster);
-        decision.apply(self.port, self.bmca, self.log, self.timing_policy)
+        decision.apply(self.port, self.bmca, self.log, self.profile)
     }
 
     pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::AnnounceReceiptTimeout);
         let bmca = LocalMasterTrackingBmca::new(self.bmca);
-        PortState::master(self.port, bmca, self.log, self.timing_policy)
+        self.profile.master(self.port, bmca, self.log)
     }
 
     pub fn process_announce(
@@ -59,8 +59,7 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
         now: Instant,
     ) -> Option<StateDecision> {
         self.log.message_received("Announce");
-        self.announce_receipt_timeout
-            .restart(self.timing_policy.announce_receipt_timeout_interval());
+        self.announce_receipt_timeout.restart();
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
@@ -103,8 +102,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -113,7 +115,7 @@ mod tests {
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         ));
 
         let transition = listening.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
@@ -141,8 +143,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -151,7 +156,7 @@ mod tests {
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
@@ -187,8 +192,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
         let mut listening = ListeningPort::new(
@@ -196,7 +204,7 @@ mod tests {
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
@@ -236,8 +244,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -246,7 +257,7 @@ mod tests {
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let foreign_clock = ForeignClockDS::high_grade_test_clock();
@@ -292,8 +303,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -302,7 +316,7 @@ mod tests {
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
@@ -350,8 +364,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -360,7 +377,7 @@ mod tests {
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let foreign_clock = ForeignClockDS::low_grade_test_clock();
@@ -409,8 +426,11 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let announce_receipt_timeout = domain_port.timeout(
-            SystemMessage::AnnounceReceiptTimeout,
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            domain_port.timeout(
+                SystemMessage::AnnounceReceiptTimeout,
+                Duration::from_secs(5),
+            ),
             Duration::from_secs(5),
         );
 
@@ -419,7 +439,7 @@ mod tests {
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             announce_receipt_timeout,
             NoopPortLog,
-            PortTimingPolicy::default(),
+            PortProfile::default(),
         );
 
         let foreign_clock = ForeignClockDS::high_grade_test_clock();
