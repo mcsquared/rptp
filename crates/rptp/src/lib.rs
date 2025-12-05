@@ -12,6 +12,7 @@ pub mod port;
 pub mod portstate;
 pub mod premaster;
 pub mod result;
+pub mod servo;
 pub mod slave;
 pub mod sync;
 pub mod time;
