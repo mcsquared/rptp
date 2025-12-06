@@ -88,46 +88,29 @@ impl MasterEstimate {
         }
     }
 
-    pub fn record_one_step_sync(
-        &mut self,
-        sync: OneStepSyncMessage,
-        timestamp: TimeStamp,
-    ) -> Option<TimeStamp> {
+    pub fn record_one_step_sync(&mut self, sync: OneStepSyncMessage, timestamp: TimeStamp) {
         self.sync_exchange.record_one_step_sync(sync, timestamp);
         self.sync_ingress_timestamp.replace(timestamp);
-        self.estimate()
     }
 
-    pub fn record_two_step_sync(
-        &mut self,
-        sync: TwoStepSyncMessage,
-        timestamp: TimeStamp,
-    ) -> Option<TimeStamp> {
+    pub fn record_two_step_sync(&mut self, sync: TwoStepSyncMessage, timestamp: TimeStamp) {
         self.sync_exchange.record_two_step_sync(sync, timestamp);
         self.sync_ingress_timestamp.replace(timestamp);
-        self.estimate()
     }
 
-    pub fn record_follow_up(&mut self, follow_up: FollowUpMessage) -> Option<TimeStamp> {
+    pub fn record_follow_up(&mut self, follow_up: FollowUpMessage) {
         self.sync_exchange.record_follow_up(follow_up);
-        self.estimate()
     }
 
-    pub fn record_delay_request(
-        &mut self,
-        req: DelayRequestMessage,
-        timestamp: TimeStamp,
-    ) -> Option<TimeStamp> {
+    pub fn record_delay_request(&mut self, req: DelayRequestMessage, timestamp: TimeStamp) {
         self.delay_exchange.record_delay_request(req, timestamp);
-        self.estimate()
     }
 
-    pub fn record_delay_response(&mut self, resp: DelayResponseMessage) -> Option<TimeStamp> {
+    pub fn record_delay_response(&mut self, resp: DelayResponseMessage) {
         self.delay_exchange.record_delay_response(resp);
-        self.estimate()
     }
 
-    fn estimate(&self) -> Option<TimeStamp> {
+    pub fn estimate(&self) -> Option<TimeStamp> {
         let ms_offset = self.sync_exchange.master_slave_offset()?;
         let sm_offset = self.delay_exchange.slave_master_offset()?;
 

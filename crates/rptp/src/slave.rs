@@ -74,13 +74,11 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             return None;
         }
 
-        if let Some(estimate) = self
-            .master_estimate
-            .record_one_step_sync(sync, ingress_timestamp)
-        {
+        self.master_estimate
+            .record_one_step_sync(sync, ingress_timestamp);
+        if let Some(estimate) = self.master_estimate.estimate() {
             self.port.local_clock().discipline(estimate);
         }
-
         None
     }
 
@@ -111,7 +109,8 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             return None;
         }
 
-        if let Some(estimate) = self.master_estimate.record_follow_up(follow_up) {
+        self.master_estimate.record_follow_up(follow_up);
+        if let Some(estimate) = self.master_estimate.estimate() {
             self.port.local_clock().discipline(estimate);
         }
 
@@ -140,9 +139,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             return None;
         }
 
-        if let Some(estimate) = self.master_estimate.record_delay_response(resp) {
-            self.port.local_clock().discipline(estimate);
-        }
+        self.master_estimate.record_delay_response(resp);
 
         None
     }
@@ -251,6 +248,11 @@ mod tests {
             PortProfile::default(),
         );
 
+        slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
+        slave.process_delay_response(
+            DelayResponseMessage::new(0.into(), TimeStamp::new(2, 0)),
+            PortIdentity::fake(),
+        );
         slave.process_two_step_sync(
             TwoStepSyncMessage::new(0.into()),
             PortIdentity::fake(),
@@ -258,11 +260,6 @@ mod tests {
         );
         slave.process_follow_up(
             FollowUpMessage::new(0.into(), TimeStamp::new(1, 0)),
-            PortIdentity::fake(),
-        );
-        slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
-        slave.process_delay_response(
-            DelayResponseMessage::new(0.into(), TimeStamp::new(2, 0)),
             PortIdentity::fake(),
         );
 
@@ -305,15 +302,15 @@ mod tests {
             PortProfile::default(),
         );
 
-        slave.process_one_step_sync(
-            OneStepSyncMessage::new(0.into(), TimeStamp::new(1, 0)),
-            PortIdentity::fake(),
-            TimeStamp::new(1, 0),
-        );
         slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
         slave.process_delay_response(
             DelayResponseMessage::new(0.into(), TimeStamp::new(2, 0)),
             PortIdentity::fake(),
+        );
+        slave.process_one_step_sync(
+            OneStepSyncMessage::new(0.into(), TimeStamp::new(1, 0)),
+            PortIdentity::fake(),
+            TimeStamp::new(1, 0),
         );
 
         assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
@@ -625,6 +622,16 @@ mod tests {
             PortProfile::default(),
         );
 
+        let transition =
+            slave.process_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
+        assert!(transition.is_none());
+
+        let transition = slave.process_delay_response(
+            DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)),
+            parent,
+        );
+        assert!(transition.is_none());
+
         // Matching conversation from the parent (numbers chosen to yield estimate 2s)
         let transition = slave.process_two_step_sync(
             TwoStepSyncMessage::new(42.into()),
@@ -635,16 +642,6 @@ mod tests {
 
         let transition = slave.process_follow_up(
             FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)),
-            parent,
-        );
-        assert!(transition.is_none());
-
-        let transition =
-            slave.process_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        assert!(transition.is_none());
-
-        let transition = slave.process_delay_response(
-            DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)),
             parent,
         );
         assert!(transition.is_none());
