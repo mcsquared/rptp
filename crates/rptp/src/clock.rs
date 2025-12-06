@@ -4,9 +4,8 @@ use core::ops::Range;
 
 use crate::{
     bmca::{DefaultDS, ForeignClockDS},
-    log::ClockMetrics,
     message::{AnnounceMessage, SequenceId},
-    servo::SteppingServo,
+    servo::Servo,
     time::{LogMessageInterval, TimeStamp},
 };
 
@@ -123,21 +122,16 @@ pub struct LocalClock<C: SynchronizableClock> {
     clock: C,
     default_ds: DefaultDS,
     steps_removed: Cell<StepsRemoved>,
-    servo: SteppingServo,
+    servo: Servo,
 }
 
 impl<C: SynchronizableClock> LocalClock<C> {
-    pub fn new(
-        clock: C,
-        default_ds: DefaultDS,
-        steps_removed: StepsRemoved,
-        metrics: &'static dyn ClockMetrics,
-    ) -> Self {
+    pub fn new(clock: C, default_ds: DefaultDS, steps_removed: StepsRemoved, servo: Servo) -> Self {
         Self {
             clock,
             default_ds,
             steps_removed: Cell::new(steps_removed),
-            servo: SteppingServo::new(metrics),
+            servo,
         }
     }
 
@@ -175,7 +169,6 @@ impl<C: SynchronizableClock> LocalClock<C> {
     }
 
     pub fn discipline(&self, estimate: TimeStamp) {
-        // TODO: apply filtering, slew rate limiting, feed to servo, etc.
         self.servo.feed(&self.clock, estimate);
     }
 }

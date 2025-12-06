@@ -8,6 +8,7 @@ use rptp::bmca::{DefaultDS, Priority1, Priority2};
 use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved};
 use rptp::log::NOOP_CLOCK_METRICS;
 use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
+use rptp::servo::{Servo, SteppingServo};
 use rptp::test_support::FakeClock;
 use rptp::time::TimeStamp;
 use rptp_daemon::net::MulticastSocket;
@@ -31,7 +32,7 @@ async fn main() -> std::io::Result<()> {
             ClockQuality::new(240, 0xFE, 0xFFFF),
         ),
         StepsRemoved::new(0),
-        &NOOP_CLOCK_METRICS,
+        Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
     );
     let event_socket = Rc::new(MulticastSocket::event().await?);
     let general_socket = Rc::new(MulticastSocket::general().await?);

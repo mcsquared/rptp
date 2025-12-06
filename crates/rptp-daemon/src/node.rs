@@ -340,6 +340,7 @@ mod tests {
         AnnounceReceiptTimeout, DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber,
     };
     use rptp::portstate::{PortProfile, PortState};
+    use rptp::servo::{Servo, SteppingServo};
     use rptp::slave::{DelayCycle, SlavePort};
     use rptp::test_support::FakeClock;
     use rptp::test_support::FakeTimestamping;
@@ -509,7 +510,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
@@ -598,7 +599,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
@@ -692,7 +693,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
@@ -736,7 +737,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
@@ -780,7 +781,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
@@ -813,7 +814,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
@@ -859,7 +860,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();

@@ -353,6 +353,7 @@ mod tests {
     use crate::clock::{ClockQuality, StepsRemoved};
     use crate::log::NOOP_CLOCK_METRICS;
     use crate::message::{DelayRequestMessage, FollowUpMessage};
+    use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakeTimerHost, FakeTimestamping};
 
     struct CapturePort {
@@ -389,7 +390,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();
@@ -431,7 +432,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
             ),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();

@@ -75,6 +75,7 @@ mod tests {
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
     use crate::portstate::StateDecision;
+    use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogMessageInterval};
 
@@ -84,7 +85,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let timer_host = FakeTimerHost::new();
         let domain_port = DomainPort::new(
@@ -116,7 +117,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let domain_port = DomainPort::new(
             &local_clock,
@@ -156,7 +157,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::low_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let better_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),

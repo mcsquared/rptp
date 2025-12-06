@@ -367,6 +367,7 @@ mod tests {
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, TimestampMessage, TwoStepSyncMessage};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
+    use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FailingPort, FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
     use crate::time::TimeStamp;
 
@@ -376,7 +377,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let listening = PortProfile::default().listening(
@@ -403,7 +404,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let slave = PortProfile::default().slave(
@@ -433,7 +434,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let pre_master = PortProfile::default().pre_master(
@@ -461,7 +462,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let uncalibrated = PortProfile::default().uncalibrated(
@@ -491,7 +492,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let uncalibrated = PortProfile::default().uncalibrated(
@@ -521,7 +522,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let listening = PortProfile::default().listening(
@@ -551,7 +552,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let master = PortProfile::default().master(
@@ -582,7 +583,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let listening = PortProfile::default().listening(
@@ -611,7 +612,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let initializing = PortProfile::default().initializing(
@@ -639,7 +640,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let initializing = PortProfile::default().initializing(
@@ -665,7 +666,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let master = PortProfile::default().master(
@@ -693,7 +694,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let initializing = PortProfile::default().initializing(
@@ -719,7 +720,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let listening = PortProfile::default().listening(
@@ -745,7 +746,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let slave = PortProfile::default().slave(
@@ -774,7 +775,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let master = PortProfile::default().master(
@@ -800,7 +801,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let pre_master = PortProfile::default().pre_master(
@@ -827,7 +828,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let initializing = PortProfile::default().initializing(
@@ -856,7 +857,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let slave = PortProfile::default().slave(
@@ -890,7 +891,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let pre_master = PortProfile::default().pre_master(
@@ -922,7 +923,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let uncalibrated = PortProfile::default().uncalibrated(
@@ -956,7 +957,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let initializing = PortProfile::default().initializing(
@@ -986,7 +987,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let slave = PortProfile::default().slave(
@@ -1019,7 +1020,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let master = PortProfile::default().master(
@@ -1050,7 +1051,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let pre_master = PortProfile::default().pre_master(
@@ -1079,7 +1080,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let uncalibrated = PortProfile::default().uncalibrated(
@@ -1113,7 +1114,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let listening = PortProfile::default().listening(
@@ -1139,7 +1140,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let slave = PortProfile::default().slave(
@@ -1168,7 +1169,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let master = PortProfile::default().master(
@@ -1194,7 +1195,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let pre_master = PortProfile::default().pre_master(
@@ -1222,7 +1223,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let initializing = PortProfile::default().initializing(
@@ -1249,7 +1250,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let listening = PortProfile::default().listening(
@@ -1276,7 +1277,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let slave = PortProfile::default().slave(
@@ -1306,7 +1307,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let master = PortProfile::default().master(
@@ -1333,7 +1334,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let mut master = PortProfile::default().master(
@@ -1360,7 +1361,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let mut master = PortProfile::default().master(
@@ -1391,7 +1392,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let mut master = PortProfile::default().master(
@@ -1422,7 +1423,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let mut master = PortProfile::default().master(
@@ -1449,7 +1450,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let domain_port = DomainPort::new(
@@ -1498,7 +1499,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let pre_master = PortProfile::default().pre_master(
@@ -1526,7 +1527,7 @@ mod tests {
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
-            &NOOP_CLOCK_METRICS,
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let uncalibrated = PortProfile::default().uncalibrated(
