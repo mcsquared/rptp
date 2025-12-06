@@ -2,6 +2,7 @@ use crate::message::{
     DelayRequestMessage, DelayResponseMessage, FollowUpMessage, MessageWindow, OneStepSyncMessage,
     TwoStepSyncMessage,
 };
+use crate::servo::ServoSample;
 use crate::time::{TimeInterval, TimeStamp};
 
 struct SyncExchange {
@@ -73,13 +74,13 @@ impl DelayExchange {
     }
 }
 
-pub struct MasterEstimate {
+pub struct EndToEndDelayMechanism {
     sync_exchange: SyncExchange,
     delay_exchange: DelayExchange,
     sync_ingress_timestamp: Option<TimeStamp>,
 }
 
-impl MasterEstimate {
+impl EndToEndDelayMechanism {
     pub fn new() -> Self {
         Self {
             sync_exchange: SyncExchange::new(),
@@ -110,20 +111,20 @@ impl MasterEstimate {
         self.delay_exchange.record_delay_response(resp);
     }
 
-    pub fn estimate(&self) -> Option<TimeStamp> {
+    pub fn sample(&self) -> Option<ServoSample> {
         let ms_offset = self.sync_exchange.master_slave_offset()?;
         let sm_offset = self.delay_exchange.slave_master_offset()?;
 
         if let Some(sync_ingress) = self.sync_ingress_timestamp {
             let offset_from_master = (ms_offset - sm_offset).half();
-            Some(sync_ingress - offset_from_master)
+            Some(ServoSample::new(sync_ingress, offset_from_master))
         } else {
             None
         }
     }
 }
 
-impl Default for MasterEstimate {
+impl Default for EndToEndDelayMechanism {
     fn default() -> Self {
         Self::new()
     }
@@ -391,86 +392,116 @@ mod tests {
     }
 
     #[test]
-    fn master_estimate_yields_after_sync_and_delay_message_exchange() {
-        let mut estimate = MasterEstimate::new();
+    fn e2e_delay_mechanism_yields_after_sync_and_delay_message_exchange() {
+        let mut e2e = EndToEndDelayMechanism::new();
 
-        estimate.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(1, 0));
-        estimate.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
-        estimate.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        estimate.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(1, 0));
+        e2e.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
+        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
-        assert_eq!(estimate.estimate(), Some(TimeStamp::new(2, 0)));
+        assert_eq!(
+            e2e.sample(),
+            Some(ServoSample::new(
+                TimeStamp::new(1, 0),
+                TimeInterval::new(-1, 0)
+            ))
+        );
     }
 
     #[test]
-    fn master_estimate_yields_after_reversed_sync_follow_up_and_delay_message_exchange() {
-        let mut estimate = MasterEstimate::new();
+    fn e2e_delay_mechanism_yields_after_reversed_sync_follow_up_and_delay_message_exchange() {
+        let mut e2e = EndToEndDelayMechanism::new();
 
-        estimate.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
-        estimate.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(1, 0));
-        estimate.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        estimate.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        e2e.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(1, 0));
+        e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
+        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
-        assert_eq!(estimate.estimate(), Some(TimeStamp::new(2, 0)));
+        assert_eq!(
+            e2e.sample(),
+            Some(ServoSample::new(
+                TimeStamp::new(1, 0),
+                TimeInterval::new(-1, 0)
+            ))
+        );
     }
 
     #[test]
-    fn master_estimate_yields_with_one_step_sync() {
-        let mut estimate = MasterEstimate::new();
+    fn e2e_delay_mechanism_yields_with_one_step_sync() {
+        let mut e2e = EndToEndDelayMechanism::new();
 
-        estimate.record_one_step_sync(
+        e2e.record_one_step_sync(
             OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),
             TimeStamp::new(1, 0),
         );
-        estimate.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        estimate.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
+        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
-        assert_eq!(estimate.estimate(), Some(TimeStamp::new(2, 0)));
+        assert_eq!(
+            e2e.sample(),
+            Some(ServoSample::new(
+                TimeStamp::new(1, 0),
+                TimeInterval::new(-1, 0)
+            ))
+        );
     }
 
     #[test]
-    fn master_estimate_yields_with_one_step_sync_after_two_step() {
-        let mut estimate = MasterEstimate::new();
+    fn e2e_delay_mechanism_yields_with_one_step_sync_after_two_step() {
+        let mut e2e = EndToEndDelayMechanism::new();
 
-        estimate.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(0, 0));
-        estimate.record_one_step_sync(
+        e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(0, 0));
+        e2e.record_one_step_sync(
             OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),
             TimeStamp::new(1, 0),
         );
-        estimate.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        estimate.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
+        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
-        assert_eq!(estimate.estimate(), Some(TimeStamp::new(2, 0)));
+        assert_eq!(
+            e2e.sample(),
+            Some(ServoSample::new(
+                TimeStamp::new(1, 0),
+                TimeInterval::new(-1, 0)
+            ))
+        );
     }
 
     #[test]
-    fn master_estimate_two_step_sync_invalidates_prior_one_step_sync() {
-        let mut estimate = MasterEstimate::new();
+    fn e2e_delay_mechanism_two_step_sync_invalidates_prior_one_step_sync() {
+        let mut e2e = EndToEndDelayMechanism::new();
 
-        estimate.record_one_step_sync(
+        e2e.record_one_step_sync(
             OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),
             TimeStamp::new(1, 0),
         );
-        estimate.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(0, 0));
-        estimate.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        estimate.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(0, 0));
+        e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
+        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
-        assert_eq!(estimate.estimate(), None);
+        assert_eq!(e2e.sample(), None);
     }
 
     #[test]
-    fn master_estimate_yields_with_two_step_and_follow_up_after_one_step() {
-        let mut estimate = MasterEstimate::new();
+    fn e2e_delay_mechanism_yields_with_two_step_and_follow_up_after_one_step() {
+        let mut e2e = EndToEndDelayMechanism::new();
 
-        estimate.record_one_step_sync(
+        e2e.record_one_step_sync(
             OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),
             TimeStamp::new(1, 0),
         );
-        estimate.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
-        estimate.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
-        estimate.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        estimate.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(3, 0)));
+        e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
+        e2e.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
+        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(3, 0)));
 
-        assert_eq!(estimate.estimate(), Some(TimeStamp::new(3, 0)));
+        assert_eq!(
+            e2e.sample(),
+            Some(ServoSample::new(
+                TimeStamp::new(2, 0),
+                TimeInterval::new(-1, 0)
+            ))
+        );
     }
 }

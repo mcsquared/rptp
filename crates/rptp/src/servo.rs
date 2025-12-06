@@ -2,7 +2,31 @@ use core::cell::Cell;
 
 use crate::clock::SynchronizableClock;
 use crate::log::ClockMetrics;
-use crate::time::TimeStamp;
+use crate::time::{TimeInterval, TimeStamp};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ServoSample {
+    ingress: TimeStamp,
+    offset: TimeInterval,
+}
+
+impl ServoSample {
+    pub fn new(ingress: TimeStamp, offset: TimeInterval) -> Self {
+        Self { ingress, offset }
+    }
+
+    fn master_estimate(&self) -> TimeStamp {
+        self.ingress - self.offset
+    }
+
+    fn log(&self, metrics: &dyn ClockMetrics) {
+        metrics.record_offset_from_master(self.offset);
+    }
+
+    fn offset(&self) -> f64 {
+        self.offset.as_f64_seconds()
+    }
+}
 
 pub enum Servo {
     Stepping(SteppingServo),
@@ -10,10 +34,10 @@ pub enum Servo {
 }
 
 impl Servo {
-    pub fn feed<C: SynchronizableClock>(&self, clock: &C, estimate: TimeStamp) {
+    pub fn feed<C: SynchronizableClock>(&self, clock: &C, sample: ServoSample) {
         match self {
-            Servo::Stepping(servo) => servo.feed(clock, estimate),
-            Servo::PI(servo) => servo.feed(clock, estimate),
+            Servo::Stepping(servo) => servo.feed(clock, sample),
+            Servo::PI(servo) => servo.feed(clock, sample),
         }
     }
 }
@@ -27,10 +51,9 @@ impl SteppingServo {
         Self { metrics }
     }
 
-    pub fn feed<C: SynchronizableClock>(&self, clock: &C, estimate: TimeStamp) {
-        clock.step(estimate);
-        self.metrics
-            .record_offset_from_master(clock.now() - estimate);
+    pub fn feed<C: SynchronizableClock>(&self, clock: &C, sample: ServoSample) {
+        clock.step(sample.master_estimate());
+        sample.log(self.metrics);
     }
 }
 
@@ -51,11 +74,10 @@ impl PiServo {
         }
     }
 
-    pub fn feed<C: SynchronizableClock>(&self, clock: &C, estimate: TimeStamp) {
-        let offset = clock.now() - estimate;
-        self.metrics.record_offset_from_master(offset);
+    pub fn feed<C: SynchronizableClock>(&self, clock: &C, sample: ServoSample) {
+        sample.log(self.metrics);
 
-        let error = offset.as_f64_seconds();
+        let error = sample.offset();
         let integral = self.integral.get() + error;
         self.integral.set(integral);
 

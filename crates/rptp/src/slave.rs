@@ -9,7 +9,7 @@ use crate::message::{
 };
 use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity, SendResult, Timeout};
 use crate::portstate::{PortProfile, PortState, StateDecision};
-use crate::sync::MasterEstimate;
+use crate::sync::EndToEndDelayMechanism;
 use crate::time::{Instant, LogInterval, TimeStamp};
 
 pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
@@ -17,7 +17,7 @@ pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
     bmca: ParentTrackingBmca<B>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     delay_cycle: DelayCycle<P::Timeout>,
-    master_estimate: MasterEstimate,
+    delay_mechanism: EndToEndDelayMechanism,
     log: L,
     profile: PortProfile,
 }
@@ -38,7 +38,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             bmca,
             announce_receipt_timeout,
             delay_cycle,
-            master_estimate: MasterEstimate::new(),
+            delay_mechanism: EndToEndDelayMechanism::new(),
             log,
             profile,
         }
@@ -74,10 +74,10 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             return None;
         }
 
-        self.master_estimate
+        self.delay_mechanism
             .record_one_step_sync(sync, ingress_timestamp);
-        if let Some(estimate) = self.master_estimate.estimate() {
-            self.port.local_clock().discipline(estimate);
+        if let Some(sample) = self.delay_mechanism.sample() {
+            self.port.local_clock().discipline(sample);
         }
         None
     }
@@ -93,7 +93,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             return None;
         }
 
-        self.master_estimate
+        self.delay_mechanism
             .record_two_step_sync(sync, ingress_timestamp);
 
         None
@@ -109,9 +109,9 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             return None;
         }
 
-        self.master_estimate.record_follow_up(follow_up);
-        if let Some(estimate) = self.master_estimate.estimate() {
-            self.port.local_clock().discipline(estimate);
+        self.delay_mechanism.record_follow_up(follow_up);
+        if let Some(sample) = self.delay_mechanism.sample() {
+            self.port.local_clock().discipline(sample);
         }
 
         None
@@ -123,7 +123,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         egress_timestamp: TimeStamp,
     ) -> Option<StateDecision> {
         self.log.message_received("DelayReq");
-        self.master_estimate
+        self.delay_mechanism
             .record_delay_request(req, egress_timestamp);
 
         None
@@ -139,7 +139,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             return None;
         }
 
-        self.master_estimate.record_delay_response(resp);
+        self.delay_mechanism.record_delay_response(resp);
 
         None
     }
@@ -562,7 +562,7 @@ mod tests {
         );
         assert!(transition.is_none());
 
-        // Even if delay path completes, estimate should not trigger without accepted sync
+        // Even if delay path completes, delay mechanism should not trigger without accepted sync
         let transition =
             slave.process_delay_request(DelayRequestMessage::new(2.into()), TimeStamp::new(0, 0));
         assert!(transition.is_none());
@@ -633,7 +633,7 @@ mod tests {
         );
         assert!(transition.is_none());
 
-        // Matching conversation from the parent (numbers chosen to yield estimate 2s)
+        // Matching conversation from the parent (numbers chosen to yield to local time at 2s)
         let transition = slave.process_two_step_sync(
             TwoStepSyncMessage::new(42.into()),
             parent,
@@ -647,7 +647,7 @@ mod tests {
         );
         assert!(transition.is_none());
 
-        // Local clock disciplined to the estimate
+        // Local clock disciplined to 2s
         assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
     }
 
