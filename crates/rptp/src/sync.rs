@@ -2,7 +2,9 @@ use crate::message::{
     DelayRequestMessage, DelayResponseMessage, FollowUpMessage, MessageWindow, OneStepSyncMessage,
     TwoStepSyncMessage,
 };
+use crate::port::Timeout;
 use crate::servo::ServoSample;
+use crate::slave::DelayCycle;
 use crate::time::{TimeInterval, TimeStamp};
 
 struct SyncExchange {
@@ -74,19 +76,27 @@ impl DelayExchange {
     }
 }
 
-pub struct EndToEndDelayMechanism {
+pub struct EndToEndDelayMechanism<T: Timeout> {
+    delay_cycle: DelayCycle<T>,
     sync_exchange: SyncExchange,
     delay_exchange: DelayExchange,
     sync_ingress_timestamp: Option<TimeStamp>,
 }
 
-impl EndToEndDelayMechanism {
-    pub fn new() -> Self {
+impl<T: Timeout> EndToEndDelayMechanism<T> {
+    pub fn new(delay_cycle: DelayCycle<T>) -> Self {
         Self {
+            delay_cycle,
             sync_exchange: SyncExchange::new(),
             delay_exchange: DelayExchange::new(),
             sync_ingress_timestamp: None,
         }
+    }
+
+    pub fn delay_request(&mut self) -> DelayRequestMessage {
+        let delay_request = self.delay_cycle.delay_request();
+        self.delay_cycle.next();
+        delay_request
     }
 
     pub fn record_one_step_sync(&mut self, sync: OneStepSyncMessage, timestamp: TimeStamp) {
@@ -124,14 +134,10 @@ impl EndToEndDelayMechanism {
     }
 }
 
-impl Default for EndToEndDelayMechanism {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::{test_support::FakeTimeout, time::LogInterval};
+
     use super::*;
 
     #[test]
@@ -393,7 +399,11 @@ mod tests {
 
     #[test]
     fn e2e_delay_mechanism_yields_after_sync_and_delay_message_exchange() {
-        let mut e2e = EndToEndDelayMechanism::new();
+        let mut e2e = EndToEndDelayMechanism::new(DelayCycle::new(
+            0.into(),
+            FakeTimeout::new(crate::message::SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
+        ));
 
         e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(1, 0));
         e2e.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
@@ -411,7 +421,11 @@ mod tests {
 
     #[test]
     fn e2e_delay_mechanism_yields_after_reversed_sync_follow_up_and_delay_message_exchange() {
-        let mut e2e = EndToEndDelayMechanism::new();
+        let mut e2e = EndToEndDelayMechanism::new(DelayCycle::new(
+            0.into(),
+            FakeTimeout::new(crate::message::SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
+        ));
 
         e2e.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
         e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(1, 0));
@@ -429,7 +443,11 @@ mod tests {
 
     #[test]
     fn e2e_delay_mechanism_yields_with_one_step_sync() {
-        let mut e2e = EndToEndDelayMechanism::new();
+        let mut e2e = EndToEndDelayMechanism::new(DelayCycle::new(
+            0.into(),
+            FakeTimeout::new(crate::message::SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
+        ));
 
         e2e.record_one_step_sync(
             OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),
@@ -449,7 +467,11 @@ mod tests {
 
     #[test]
     fn e2e_delay_mechanism_yields_with_one_step_sync_after_two_step() {
-        let mut e2e = EndToEndDelayMechanism::new();
+        let mut e2e = EndToEndDelayMechanism::new(DelayCycle::new(
+            0.into(),
+            FakeTimeout::new(crate::message::SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
+        ));
 
         e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(0, 0));
         e2e.record_one_step_sync(
@@ -470,7 +492,11 @@ mod tests {
 
     #[test]
     fn e2e_delay_mechanism_two_step_sync_invalidates_prior_one_step_sync() {
-        let mut e2e = EndToEndDelayMechanism::new();
+        let mut e2e = EndToEndDelayMechanism::new(DelayCycle::new(
+            0.into(),
+            FakeTimeout::new(crate::message::SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
+        ));
 
         e2e.record_one_step_sync(
             OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),
@@ -485,7 +511,11 @@ mod tests {
 
     #[test]
     fn e2e_delay_mechanism_yields_with_two_step_and_follow_up_after_one_step() {
-        let mut e2e = EndToEndDelayMechanism::new();
+        let mut e2e = EndToEndDelayMechanism::new(DelayCycle::new(
+            0.into(),
+            FakeTimeout::new(crate::message::SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
+        ));
 
         e2e.record_one_step_sync(
             OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),

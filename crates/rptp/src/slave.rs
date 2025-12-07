@@ -16,8 +16,7 @@ pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: ParentTrackingBmca<B>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
-    delay_cycle: DelayCycle<P::Timeout>,
-    delay_mechanism: EndToEndDelayMechanism,
+    delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
     log: L,
     profile: PortProfile,
 }
@@ -37,8 +36,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             port,
             bmca,
             announce_receipt_timeout,
-            delay_cycle,
-            delay_mechanism: EndToEndDelayMechanism::new(),
+            delay_mechanism: EndToEndDelayMechanism::new(delay_cycle),
             log,
             profile,
         }
@@ -145,10 +143,9 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
     }
 
     pub fn send_delay_request(&mut self) -> SendResult {
-        let delay_request = self.delay_cycle.delay_request();
+        let delay_request = self.delay_mechanism.delay_request();
         self.port
             .send_event(EventMessage::DelayReq(delay_request))?;
-        self.delay_cycle.next();
         self.log.message_sent("DelayReq");
         Ok(())
     }
