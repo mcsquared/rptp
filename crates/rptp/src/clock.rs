@@ -5,7 +5,7 @@ use core::ops::Range;
 use crate::{
     bmca::{DefaultDS, ForeignClockDS},
     message::{AnnounceMessage, SequenceId},
-    servo::{Servo, ServoSample},
+    servo::{Servo, ServoSample, ServoState},
     time::{LogMessageInterval, TimeStamp},
 };
 
@@ -170,6 +170,10 @@ impl<C: SynchronizableClock> LocalClock<C> {
 
     pub fn discipline(&self, sample: ServoSample) {
         self.servo.feed(&self.clock, sample);
+    }
+
+    pub fn servo_state(&self) -> ServoState {
+        self.servo.state()
     }
 }
 

@@ -49,6 +49,9 @@ impl PortLog for TracingPortLog {
             PortEvent::QualifiedMaster => {
                 tracing::info!("{}: Qualified Master", self.port_identity);
             }
+            PortEvent::SynchronizationFault => {
+                tracing::warn!("{}: Synchronization Fault", self.port_identity);
+            }
             PortEvent::Static(desc) => {
                 tracing::info!("{}: {}", self.port_identity, desc);
             }

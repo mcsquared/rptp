@@ -11,6 +11,7 @@ use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity, SendResult, Timeou
 use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::sync::EndToEndDelayMechanism;
 use crate::time::{Instant, LogInterval, TimeStamp};
+use crate::uncalibrated::UncalibratedPort;
 
 pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
     port: P,
@@ -26,7 +27,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         port: P,
         bmca: ParentTrackingBmca<B>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
-        delay_cycle: DelayCycle<P::Timeout>,
+        delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
         log: L,
         profile: PortProfile,
     ) -> Self {
@@ -36,7 +37,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             port,
             bmca,
             announce_receipt_timeout,
-            delay_mechanism: EndToEndDelayMechanism::new(delay_cycle),
+            delay_mechanism,
             log,
             profile,
         }
@@ -168,6 +169,18 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         self.log.port_event(PortEvent::RecommendedMaster);
         decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
     }
+
+    pub fn synchronization_fault(self) -> PortState<P, B, L> {
+        self.log.port_event(PortEvent::SynchronizationFault);
+        PortState::Uncalibrated(UncalibratedPort::new(
+            self.port,
+            self.bmca,
+            self.announce_receipt_timeout,
+            self.delay_mechanism,
+            self.log,
+            self.profile,
+        ))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -227,6 +240,9 @@ mod tests {
             PortNumber::new(1),
         );
 
+        let delay_timeout =
+            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+
         let mut slave = SlavePort::new(
             domain_port,
             ParentTrackingBmca::new(
@@ -237,11 +253,11 @@ mod tests {
                 FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
                 Duration::from_secs(5),
             ),
-            DelayCycle::new(
+            EndToEndDelayMechanism::new(DelayCycle::new(
                 0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                delay_timeout,
                 LogInterval::new(0),
-            ),
+            )),
             NoopPortLog,
             PortProfile::default(),
         );
@@ -281,6 +297,9 @@ mod tests {
             PortNumber::new(1),
         );
 
+        let delay_timeout =
+            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+
         let mut slave = SlavePort::new(
             domain_port,
             ParentTrackingBmca::new(
@@ -291,11 +310,11 @@ mod tests {
                 FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
                 Duration::from_secs(5),
             ),
-            DelayCycle::new(
+            EndToEndDelayMechanism::new(DelayCycle::new(
                 0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                delay_timeout,
                 LogInterval::new(0),
-            ),
+            )),
             NoopPortLog,
             PortProfile::default(),
         );
@@ -332,12 +351,20 @@ mod tests {
             PortNumber::new(1),
         );
 
+        let delay_timeout =
+            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+
         let mut slave = PortProfile::default().slave(
             domain_port,
             ParentTrackingBmca::new(
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
+            EndToEndDelayMechanism::new(DelayCycle::new(
+                0.into(),
+                delay_timeout,
+                LogInterval::new(0),
+            )),
             NoopPortLog,
         );
 
@@ -373,6 +400,11 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
+            EndToEndDelayMechanism::new(DelayCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
+            )),
             NoopPortLog,
         );
 
@@ -405,6 +437,11 @@ mod tests {
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
+            EndToEndDelayMechanism::new(DelayCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
+            )),
             NoopPortLog,
         );
 
@@ -461,7 +498,7 @@ mod tests {
                 ParentPortIdentity::new(parent),
             ),
             announce_receipt_timeout,
-            delay_cycle,
+            EndToEndDelayMechanism::new(delay_cycle),
             NoopPortLog,
             PortProfile::default(),
         );
@@ -541,7 +578,7 @@ mod tests {
                 ParentPortIdentity::new(parent),
             ),
             announce_receipt_timeout,
-            delay_cycle,
+            EndToEndDelayMechanism::new(delay_cycle),
             NoopPortLog,
             PortProfile::default(),
         );
@@ -615,7 +652,7 @@ mod tests {
                 ParentPortIdentity::new(parent),
             ),
             announce_receipt_timeout,
-            delay_cycle,
+            EndToEndDelayMechanism::new(delay_cycle),
             NoopPortLog,
             PortProfile::default(),
         );
@@ -693,7 +730,7 @@ mod tests {
                 ParentPortIdentity::new(parent_port),
             ),
             announce_receipt_timeout,
-            delay_cycle,
+            EndToEndDelayMechanism::new(delay_cycle),
             NoopPortLog,
             PortProfile::default(),
         );
@@ -760,7 +797,7 @@ mod tests {
                 ParentPortIdentity::new(parent_port),
             ),
             announce_receipt_timeout,
-            delay_cycle,
+            EndToEndDelayMechanism::new(delay_cycle),
             NoopPortLog,
             PortProfile::default(),
         );
@@ -846,7 +883,7 @@ mod tests {
                 ParentPortIdentity::new(parent_port),
             ),
             announce_receipt_timeout,
-            delay_cycle,
+            EndToEndDelayMechanism::new(delay_cycle),
             NoopPortLog,
             PortProfile::default(),
         );

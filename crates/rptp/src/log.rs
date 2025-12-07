@@ -22,6 +22,7 @@ pub enum PortEvent {
     MasterClockSelected { parent: ParentPortIdentity },
     AnnounceReceiptTimeout,
     QualifiedMaster,
+    SynchronizationFault,
     Static(&'static str), // optional catch-all
 }
 

@@ -4,6 +4,11 @@ use crate::clock::SynchronizableClock;
 use crate::log::ClockMetrics;
 use crate::time::{TimeInterval, TimeStamp};
 
+pub enum ServoState {
+    Calibrating,
+    Locked,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ServoSample {
     ingress: TimeStamp,
@@ -40,6 +45,13 @@ impl Servo {
             Servo::PI(servo) => servo.feed(clock, sample),
         }
     }
+
+    pub fn state(&self) -> ServoState {
+        match self {
+            Servo::Stepping(servo) => servo.state(),
+            Servo::PI(servo) => servo.state(),
+        }
+    }
 }
 
 pub struct SteppingServo {
@@ -54,6 +66,10 @@ impl SteppingServo {
     pub fn feed<C: SynchronizableClock>(&self, clock: &C, sample: ServoSample) {
         clock.step(sample.master_estimate());
         sample.log(self.metrics);
+    }
+
+    pub fn state(&self) -> ServoState {
+        ServoState::Locked
     }
 }
 
@@ -83,5 +99,9 @@ impl PiServo {
 
         let rate = 1.0 - self.kp * error - self.ki * integral;
         clock.adjust(rate);
+    }
+
+    pub fn state(&self) -> ServoState {
+        ServoState::Locked
     }
 }

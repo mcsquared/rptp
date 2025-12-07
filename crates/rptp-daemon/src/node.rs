@@ -342,6 +342,7 @@ mod tests {
     use rptp::portstate::{PortProfile, PortState};
     use rptp::servo::{Servo, SteppingServo};
     use rptp::slave::{DelayCycle, SlavePort};
+    use rptp::sync::EndToEndDelayMechanism;
     use rptp::test_support::FakeClock;
     use rptp::test_support::FakeTimestamping;
     use rptp::time::{LogInterval, TimeStamp};
@@ -638,7 +639,7 @@ mod tests {
             domain_port,
             bmca,
             announce_receipt_timeout,
-            delay_cycle,
+            EndToEndDelayMechanism::new(delay_cycle),
             log,
             PortProfile::default(),
         ));

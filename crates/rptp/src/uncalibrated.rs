@@ -3,15 +3,21 @@ use crate::bmca::{
     ParentTrackingBmca,
 };
 use crate::log::{PortEvent, PortLog};
-use crate::message::AnnounceMessage;
-use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity};
+use crate::message::{
+    AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
+    OneStepSyncMessage, TwoStepSyncMessage,
+};
+use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity, SendResult};
 use crate::portstate::{PortProfile, PortState, StateDecision};
-use crate::time::Instant;
+use crate::servo::ServoState;
+use crate::sync::EndToEndDelayMechanism;
+use crate::time::{Instant, TimeStamp};
 
 pub struct UncalibratedPort<P: Port, B: Bmca, L: PortLog> {
     port: P,
     bmca: ParentTrackingBmca<B>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
+    delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
     log: L,
     profile: PortProfile,
 }
@@ -21,6 +27,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         port: P,
         bmca: ParentTrackingBmca<B>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
+        delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
         log: L,
         profile: PortProfile,
     ) -> Self {
@@ -30,6 +37,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
             port,
             bmca,
             announce_receipt_timeout,
+            delay_mechanism,
             log,
             profile,
         }
@@ -46,28 +54,116 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
-        // TODO: real calibration behaviour is yet to be implemented. For now, we just return
-        // MasterClockSelected on the first announce from the current parent, as long as the
-        // BMCA does not decide otherwise.
         match self.bmca.decision(self.port.local_clock()) {
             BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
             BmcaDecision::Slave(decision) => Some(StateDecision::RecommendedSlave(decision)),
             BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
-            BmcaDecision::Undecided => {
-                if self.bmca.matches_parent(&source_port_identity) {
-                    Some(StateDecision::MasterClockSelected)
-                } else {
-                    None
-                }
-            }
+            BmcaDecision::Undecided => None,
         }
+    }
+
+    pub fn process_one_step_sync(
+        &mut self,
+        sync: OneStepSyncMessage,
+        source_port_identity: PortIdentity,
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateDecision> {
+        self.log.message_received("One-Step Sync");
+        if !self.bmca.matches_parent(&source_port_identity) {
+            return None;
+        }
+
+        self.delay_mechanism
+            .record_one_step_sync(sync, ingress_timestamp);
+        if let Some(sample) = self.delay_mechanism.sample() {
+            self.port.local_clock().discipline(sample);
+        }
+
+        match self.port.local_clock().servo_state() {
+            ServoState::Locked => Some(StateDecision::MasterClockSelected),
+            _ => None,
+        }
+    }
+
+    pub fn process_two_step_sync(
+        &mut self,
+        sync: TwoStepSyncMessage,
+        source_port_identity: PortIdentity,
+        ingress_timestamp: TimeStamp,
+    ) -> Option<StateDecision> {
+        self.log.message_received("Two-Step Sync");
+        if !self.bmca.matches_parent(&source_port_identity) {
+            return None;
+        }
+
+        self.delay_mechanism
+            .record_two_step_sync(sync, ingress_timestamp);
+
+        None
+    }
+
+    pub fn process_follow_up(
+        &mut self,
+        follow_up: FollowUpMessage,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateDecision> {
+        self.log.message_received("FollowUp");
+        if !self.bmca.matches_parent(&source_port_identity) {
+            return None;
+        }
+
+        self.delay_mechanism.record_follow_up(follow_up);
+        if let Some(sample) = self.delay_mechanism.sample() {
+            self.port.local_clock().discipline(sample);
+        }
+
+        match self.port.local_clock().servo_state() {
+            ServoState::Locked => Some(StateDecision::MasterClockSelected),
+            _ => None,
+        }
+    }
+
+    pub fn process_delay_request(
+        &mut self,
+        req: DelayRequestMessage,
+        egress_timestamp: TimeStamp,
+    ) -> Option<StateDecision> {
+        self.log.message_received("DelayReq");
+        self.delay_mechanism
+            .record_delay_request(req, egress_timestamp);
+
+        None
+    }
+
+    pub fn process_delay_response(
+        &mut self,
+        resp: DelayResponseMessage,
+        source_port_identity: PortIdentity,
+    ) -> Option<StateDecision> {
+        self.log.message_received("DelayResp");
+        if !self.bmca.matches_parent(&source_port_identity) {
+            return None;
+        }
+
+        self.delay_mechanism.record_delay_response(resp);
+
+        None
+    }
+
+    pub fn send_delay_request(&mut self) -> SendResult {
+        let delay_request = self.delay_mechanism.delay_request();
+        self.port
+            .send_event(EventMessage::DelayReq(delay_request))?;
+        self.log.message_sent("DelayReq");
+        Ok(())
     }
 
     pub fn master_clock_selected(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::MasterClockSelected {
             parent: self.bmca.parent(),
         });
-        self.profile.slave(self.port, self.bmca, self.log)
+        self.profile
+            .slave(self.port, self.bmca, self.delay_mechanism, self.log)
     }
 
     pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
@@ -105,7 +201,8 @@ mod tests {
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::portstate::PortState;
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
+    use crate::slave::DelayCycle;
+    use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]
@@ -150,6 +247,11 @@ mod tests {
                 ParentPortIdentity::new(parent_port),
             ),
             announce_receipt_timeout,
+            EndToEndDelayMechanism::new(DelayCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
+            )),
             NoopPortLog,
             PortProfile::default(),
         );
@@ -191,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn uncalibrated_port_becomes_slave_on_next_announce_from_parent() {
+    fn uncalibrated_port_becomes_slave_on_next_sync_from_parent() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
@@ -229,14 +331,19 @@ mod tests {
                 ParentPortIdentity::new(parent_port),
             ),
             announce_receipt_timeout,
+            EndToEndDelayMechanism::new(DelayCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
+            )),
             NoopPortLog,
             PortProfile::default(),
         );
 
-        let decision = uncalibrated.process_announce(
-            AnnounceMessage::new(42.into(), LogMessageInterval::new(0), foreign_clock_ds),
-            parent_port,
-            Instant::from_secs(0),
+        let decision = uncalibrated.process_one_step_sync(
+            OneStepSyncMessage::new(0.into(), TimeStamp::new(1, 0)),
+            PortIdentity::fake(),
+            TimeStamp::new(1, 0),
         );
 
         assert!(matches!(decision, Some(StateDecision::MasterClockSelected)));
@@ -273,6 +380,11 @@ mod tests {
                 ParentPortIdentity::new(PortIdentity::fake()),
             ),
             announce_receipt_timeout,
+            EndToEndDelayMechanism::new(DelayCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
+            )),
             NoopPortLog,
             PortProfile::default(),
         ));
@@ -317,6 +429,11 @@ mod tests {
                 ParentPortIdentity::new(parent_port),
             ),
             announce_receipt_timeout,
+            EndToEndDelayMechanism::new(DelayCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
+            )),
             NoopPortLog,
             PortProfile::default(),
         );
@@ -382,6 +499,11 @@ mod tests {
                 ParentPortIdentity::new(parent_port),
             ),
             announce_receipt_timeout,
+            EndToEndDelayMechanism::new(DelayCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
+            )),
             NoopPortLog,
             PortProfile::default(),
         );
