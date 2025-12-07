@@ -69,7 +69,7 @@ impl core::ops::Sub for TimeStamp {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TimeInterval {
     seconds: i64,
     nanos: u32,
@@ -77,6 +77,9 @@ pub struct TimeInterval {
 
 impl TimeInterval {
     pub fn new(seconds: i64, nanos: u32) -> Self {
+        // Allow i64::MIN only with non-zero nanoseconds
+        assert!(seconds != i64::MIN || nanos > 0);
+        assert!(nanos < 1_000_000_000);
         Self { seconds, nanos }
     }
 
@@ -93,6 +96,19 @@ impl TimeInterval {
 
     pub fn half(self) -> Self {
         Self::from_total_nanos(self.total_nanos() / 2)
+    }
+
+    pub fn abs(&self) -> Self {
+        if self.seconds < 0 {
+            if self.nanos == 0 {
+                Self::new(-self.seconds, 0)
+            } else {
+                let secs = self.seconds + 1;
+                Self::new(-secs, 1_000_000_000 - self.nanos)
+            }
+        } else {
+            *self
+        }
     }
 
     /// Return this interval as fractional seconds in `f64` precision.
@@ -353,12 +369,9 @@ mod tests {
     }
 
     #[test]
-    fn timestamp_checked_add_large_negative_interval_returns_none() {
-        let ts = TimeStamp::new(0, 0);
-        let interval = TimeInterval::new(i64::MIN, 0);
-
-        let result = ts.checked_add(interval);
-        assert!(result.is_none());
+    #[should_panic]
+    fn duration_new_with_i64_min_and_zero_nanos_should_panic() {
+        let _ = TimeInterval::new(i64::MIN, 0);
     }
 
     #[test]
@@ -383,6 +396,51 @@ mod tests {
     fn duration_half_negative_odd_rounds_towards_zero() {
         let duration = TimeInterval::new(-1, 999_999_999);
         assert_eq!(duration.half(), TimeInterval::new(0, 0));
+    }
+
+    #[test]
+    fn duration_abs_positive() {
+        let duration = TimeInterval::new(1, 500_000_000);
+        assert_eq!(duration.abs(), TimeInterval::new(1, 500_000_000));
+    }
+
+    #[test]
+    fn duration_abs_negative() {
+        let duration = TimeInterval::new(-1, 500_000_000);
+        assert_eq!(duration.abs(), TimeInterval::new(0, 500_000_000));
+    }
+
+    #[test]
+    fn duration_abs_zero() {
+        let duration = TimeInterval::new(0, 0);
+        assert_eq!(duration.abs(), TimeInterval::new(0, 0));
+    }
+
+    #[test]
+    fn duration_abs_zero_nanos() {
+        let duration = TimeInterval::new(-1, 0);
+        assert_eq!(duration.abs(), TimeInterval::new(1, 0));
+    }
+
+    #[test]
+    fn duration_abs_max_nanos() {
+        let duration = TimeInterval::new(-1, 999_999_999);
+        assert_eq!(duration.abs(), TimeInterval::new(0, 1));
+    }
+
+    #[test]
+    fn duration_abs_i64_min() {
+        let duration = TimeInterval::new(i64::MIN, 1);
+        let abs_duration = duration.abs();
+        assert_eq!(abs_duration, TimeInterval::new(i64::MAX, 999_999_999));
+    }
+
+    #[test]
+    fn duration_ord() {
+        assert!(TimeInterval::new(-2, 0) < TimeInterval::new(-1, 999_999_999));
+
+        // -0.999999999 < -0.1
+        assert!(TimeInterval::new(-1, 1) < TimeInterval::new(-1, 999_999_999));
     }
 
     #[test]
