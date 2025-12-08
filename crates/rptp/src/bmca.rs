@@ -1415,7 +1415,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
+    fn bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
         let stale_records = vec![
             ForeignClockRecord::qualified(
                 PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
@@ -1465,27 +1465,27 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
+    fn bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::gm_grade_test_clock(),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
 
     #[test]
-    fn full_bmca_gm_capable_local_loses_tuple_returns_passive() {
+    fn bmca_gm_capable_local_loses_tuple_returns_passive() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::gm_grade_test_clock(),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         // Foreign uses lower priority1 so it is better, even though clock class is worse.
         let foreign_strong = ForeignClockDS::new(
@@ -1514,14 +1514,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_gm_capable_local_better_than_foreign_returns_master_m1() {
+    fn bmca_gm_capable_local_better_than_foreign_returns_master_m1() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::gm_grade_test_clock(),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         // Foreign is worse (higher priority1), so local GM-capable should become Master(M1).
         let foreign = ForeignClockDS::mid_grade_test_clock();
@@ -1540,14 +1540,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_non_gm_local_better_than_foreign_returns_master_m2() {
+    fn bmca_non_gm_local_better_than_foreign_returns_master_m2() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         // Foreign is slightly worse quality; local should be better and take M2.
         let foreign = ForeignClockDS::low_grade_test_clock();
@@ -1566,14 +1566,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_non_gm_local_loses_tuple_returns_slave() {
+    fn bmca_non_gm_local_loses_tuple_returns_slave() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         let foreign = ForeignClockDS::high_grade_test_clock();
         let port_id = PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1));
@@ -1591,14 +1591,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_recommends_slave_from_interleaved_announce_sequence() {
+    fn bmca_recommends_slave_from_interleaved_announce_sequence() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::low_grade_test_clock(),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -1649,14 +1649,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_recommends_slave_from_non_interleaved_announce_sequence() {
+    fn bmca_recommends_slave_from_non_interleaved_announce_sequence() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::low_grade_test_clock(),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
@@ -1707,27 +1707,27 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_undecided_when_no_announces_yet() {
+    fn bmca_undecided_when_no_announces_yet() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
 
     #[test]
-    fn full_bmca_undecided_when_no_qualified_clock_records_yet() {
+    fn bmca_undecided_when_no_qualified_clock_records_yet() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
 
@@ -1742,14 +1742,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn full_bmca_undecided_when_only_single_announces_each() {
+    fn bmca_undecided_when_only_single_announces_each() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             DefaultDS::mid_grade_test_clock(),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = ForeignClockDS::high_grade_test_clock();
         let foreign_mid = ForeignClockDS::mid_grade_test_clock();
