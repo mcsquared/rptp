@@ -42,7 +42,7 @@ impl SteppingServo {
 }
 
 pub struct PiServo {
-    step: ServoStep,
+    step_policy: StepPolicy,
     drift_estimate: ServoDriftEstimate,
     pi_loop: PiLoop,
     state: Cell<ServoState>,
@@ -51,14 +51,14 @@ pub struct PiServo {
 
 impl PiServo {
     pub fn new(
-        step: ServoStep,
+        step_policy: StepPolicy,
         drift_estimate: ServoDriftEstimate,
         pi_loop: PiLoop,
         initial_state: ServoState,
         metrics: &'static dyn ClockMetrics,
     ) -> Self {
         Self {
-            step,
+            step_policy,
             drift_estimate,
             pi_loop,
             state: Cell::new(initial_state),
@@ -87,7 +87,7 @@ impl PiServo {
     }
 
     fn step<C: SynchronizableClock>(&self, clock: &C, sample: ServoSample) -> Option<ServoState> {
-        match self.step.decide(&sample) {
+        match self.step_policy.should_step(&sample) {
             ServoStepDecision::StepTo(ts) => {
                 clock.step(ts);
                 self.pi_loop.reset();
@@ -213,36 +213,55 @@ pub enum ServoStepDecision {
     NoStep,
 }
 
-pub struct ServoStep {
-    first_step_threshold: TimeInterval,
-    step_threshold: Option<TimeInterval>,
-    first_update: Cell<bool>,
+pub enum ServoThreshold {
+    Disabled,
+    Enabled(TimeInterval),
 }
 
-impl ServoStep {
-    pub fn new(first_step_threshold: TimeInterval, step_threshold: Option<TimeInterval>) -> Self {
-        debug_assert!(first_step_threshold >= TimeInterval::new(0, 0));
-        debug_assert!(step_threshold.unwrap_or(TimeInterval::new(0, 0)) >= TimeInterval::new(0, 0));
+impl ServoThreshold {
+    pub fn new(threshold: TimeInterval) -> Self {
+        ServoThreshold::Enabled(threshold)
+    }
 
+    pub fn disabled() -> Self {
+        ServoThreshold::Disabled
+    }
+
+    fn exceeded_by(&self, sample: &ServoSample) -> bool {
+        match self {
+            ServoThreshold::Disabled => false,
+            ServoThreshold::Enabled(t) => t > &TimeInterval::ZERO && sample.beyond_threshold(*t),
+        }
+    }
+}
+
+pub struct StepPolicy {
+    initial_threshold: Cell<Option<ServoThreshold>>,
+    threshold: ServoThreshold,
+}
+
+impl StepPolicy {
+    pub fn new(initial: ServoThreshold, threshold: ServoThreshold) -> Self {
         Self {
-            first_step_threshold,
-            step_threshold,
-            first_update: Cell::new(true),
+            initial_threshold: Cell::new(Some(initial)),
+            threshold,
         }
     }
 
-    fn decide(&self, sample: &ServoSample) -> ServoStepDecision {
-        let exceeds_first = sample.beyond_threshold(Some(self.first_step_threshold));
-        let exceeds_step = sample.beyond_threshold(self.step_threshold);
+    fn should_step(&self, sample: &ServoSample) -> ServoStepDecision {
+        if self
+            .initial_threshold
+            .take()
+            .is_some_and(|t| t.exceeded_by(sample))
+        {
+            return ServoStepDecision::StepTo(sample.master_estimate());
+        }
 
-        let decision = if (self.first_update.get() && exceeds_first) || exceeds_step {
+        if self.threshold.exceeded_by(sample) {
             ServoStepDecision::StepTo(sample.master_estimate())
         } else {
             ServoStepDecision::NoStep
-        };
-
-        self.first_update.set(false);
-        decision
+        }
     }
 }
 
@@ -276,8 +295,8 @@ impl ServoSample {
         self.offset.as_f64_seconds()
     }
 
-    fn beyond_threshold(&self, threshold: Option<TimeInterval>) -> bool {
-        threshold.map(|t| self.offset.abs() > t).unwrap_or(false)
+    fn beyond_threshold(&self, threshold: TimeInterval) -> bool {
+        self.offset.abs() > threshold
     }
 
     fn drift(&self, other: &ServoSample, min_delta: TimeInterval) -> ServoSampleOrdering {
@@ -303,20 +322,26 @@ mod tests {
 
     #[test]
     fn first_sample_below_both_thresholds_does_not_step() {
-        let step = ServoStep::new(TimeInterval::new(2, 0), Some(TimeInterval::new(1, 0)));
+        let step_policy = StepPolicy::new(
+            ServoThreshold::new(TimeInterval::new(2, 0)),
+            ServoThreshold::new(TimeInterval::new(1, 0)),
+        );
         let sample = ServoSample::new(TimeStamp::new(10, 0), TimeInterval::new(0, 500_000_000));
 
-        let decision = step.decide(&sample);
+        let decision = step_policy.should_step(&sample);
 
         assert_eq!(decision, ServoStepDecision::NoStep);
     }
 
     #[test]
     fn first_sample_exceeding_first_step_threshold_steps() {
-        let step = ServoStep::new(TimeInterval::new(1, 0), Some(TimeInterval::new(2, 0)));
+        let step_policy = StepPolicy::new(
+            ServoThreshold::new(TimeInterval::new(1, 0)),
+            ServoThreshold::new(TimeInterval::new(2, 0)),
+        );
         let sample = ServoSample::new(TimeStamp::new(10, 0), TimeInterval::new(1, 500_000_000));
 
-        let decision = step.decide(&sample);
+        let decision = step_policy.should_step(&sample);
 
         assert_eq!(
             decision,
@@ -326,10 +351,13 @@ mod tests {
 
     #[test]
     fn first_sample_exceeding_step_threshold_steps_even_if_first_step_not_exceeded() {
-        let step = ServoStep::new(TimeInterval::new(2, 0), Some(TimeInterval::new(1, 0)));
+        let step_policy = StepPolicy::new(
+            ServoThreshold::new(TimeInterval::new(2, 0)),
+            ServoThreshold::new(TimeInterval::new(1, 0)),
+        );
         let sample = ServoSample::new(TimeStamp::new(10, 0), TimeInterval::new(1, 500_000_000));
 
-        let decision = step.decide(&sample);
+        let decision = step_policy.should_step(&sample);
 
         assert_eq!(
             decision,
@@ -339,16 +367,19 @@ mod tests {
 
     #[test]
     fn subsequent_samples_use_only_step_threshold() {
-        let step = ServoStep::new(TimeInterval::new(2, 0), Some(TimeInterval::new(1, 0)));
+        let step_policy = StepPolicy::new(
+            ServoThreshold::new(TimeInterval::new(2, 0)),
+            ServoThreshold::new(TimeInterval::new(1, 0)),
+        );
 
-        // First sample below both thresholds: no step, first_update becomes false.
+        // First sample below both thresholds: no step
         let first = ServoSample::new(TimeStamp::new(10, 0), TimeInterval::new(0, 500_000_000));
-        let decision = step.decide(&first);
+        let decision = step_policy.should_step(&first);
         assert_eq!(decision, ServoStepDecision::NoStep);
 
-        // Second sample exceeding step threshold should step, regardless of first_step_threshold.
+        // Second sample exceeding steady threshold should step, regardless of first step threshold.
         let second = ServoSample::new(TimeStamp::new(10, 0), TimeInterval::new(1, 500_000_000));
-        let decision = step.decide(&second);
+        let decision = step_policy.should_step(&second);
         assert_eq!(
             decision,
             ServoStepDecision::StepTo(second.master_estimate())
@@ -356,23 +387,29 @@ mod tests {
     }
 
     #[test]
-    fn zero_step_threshold_disables_subsequent_steps() {
-        let step = ServoStep::new(TimeInterval::new(2, 0), None);
+    fn zero_steady_threshold_disables_subsequent_steps() {
+        let step_policy = StepPolicy::new(
+            ServoThreshold::new(TimeInterval::new(2, 0)),
+            ServoThreshold::disabled(),
+        );
 
         // First sample below first threshold: no step, first_update becomes false.
         let first = ServoSample::new(TimeStamp::new(10, 0), TimeInterval::new(0, 500_000_000));
-        assert_eq!(step.decide(&first), ServoStepDecision::NoStep);
+        assert_eq!(step_policy.should_step(&first), ServoStepDecision::NoStep);
 
-        // Second sample would have exceeded step threshold if it were enabled; zero disables it.
+        // Second sample would have exceeded steady threshold if it were enabled; zero disables it.
         let second = ServoSample::new(TimeStamp::new(10, 0), TimeInterval::new(3, 0));
-        assert_eq!(step.decide(&second), ServoStepDecision::NoStep);
+        assert_eq!(step_policy.should_step(&second), ServoStepDecision::NoStep);
     }
 
     #[test]
     fn calibration_locks_after_spaced_samples() {
         let clock = FakeClock::new(TimeStamp::new(0, 0));
         let servo = PiServo::new(
-            ServoStep::new(TimeInterval::new(10, 0), Some(TimeInterval::new(10, 0))),
+            StepPolicy::new(
+                ServoThreshold::new(TimeInterval::new(10, 0)),
+                ServoThreshold::new(TimeInterval::new(10, 0)),
+            ),
             ServoDriftEstimate::new(
                 Drift::from_ppb(-500_000_000),
                 Drift::from_ppb(500_000_000),
@@ -400,7 +437,10 @@ mod tests {
     fn step_resets_drift_estimate() {
         let clock = FakeClock::new(TimeStamp::new(0, 0));
         let servo = PiServo::new(
-            ServoStep::new(TimeInterval::new(1, 0), Some(TimeInterval::new(10, 0))),
+            StepPolicy::new(
+                ServoThreshold::new(TimeInterval::new(1, 0)),
+                ServoThreshold::new(TimeInterval::new(10, 0)),
+            ),
             ServoDriftEstimate::new(
                 Drift::from_ppb(-1_000_000),
                 Drift::from_ppb(1_000_000),
@@ -426,7 +466,10 @@ mod tests {
     fn pi_servo_reaches_locked_and_runs_pi_loop() {
         let clock = FakeClock::new(TimeStamp::new(0, 0));
         let servo = PiServo::new(
-            ServoStep::new(TimeInterval::new(10, 0), Some(TimeInterval::new(10, 0))),
+            StepPolicy::new(
+                ServoThreshold::new(TimeInterval::new(10, 0)),
+                ServoThreshold::new(TimeInterval::new(10, 0)),
+            ),
             ServoDriftEstimate::new(
                 Drift::from_ppb(-1_000_000_000),
                 Drift::from_ppb(1_000_000_000),
@@ -458,7 +501,10 @@ mod tests {
     fn calibration_ignores_samples_without_minimum_delta() {
         let clock = FakeClock::new(TimeStamp::new(0, 0));
         let servo = PiServo::new(
-            ServoStep::new(TimeInterval::new(10, 0), Some(TimeInterval::new(10, 0))),
+            StepPolicy::new(
+                ServoThreshold::new(TimeInterval::new(10, 0)),
+                ServoThreshold::new(TimeInterval::new(10, 0)),
+            ),
             ServoDriftEstimate::new(
                 Drift::from_ppb(-1_000_000),
                 Drift::from_ppb(1_000_000),
@@ -485,7 +531,10 @@ mod tests {
     fn drift_estimate_is_clamped_to_bounds() {
         let clock = FakeClock::new(TimeStamp::new(0, 0));
         let servo = PiServo::new(
-            ServoStep::new(TimeInterval::new(100, 0), Some(TimeInterval::new(100, 0))),
+            StepPolicy::new(
+                ServoThreshold::new(TimeInterval::new(100, 0)),
+                ServoThreshold::new(TimeInterval::new(100, 0)),
+            ),
             ServoDriftEstimate::new(
                 Drift::from_ppb(-1_000),
                 Drift::from_ppb(1_000),
@@ -511,7 +560,10 @@ mod tests {
     fn pi_loop_integral_resets_after_step() {
         let clock = FakeClock::new(TimeStamp::new(0, 0));
         let servo = PiServo::new(
-            ServoStep::new(TimeInterval::new(1, 0), Some(TimeInterval::new(1, 0))),
+            StepPolicy::new(
+                ServoThreshold::new(TimeInterval::new(1, 0)),
+                ServoThreshold::new(TimeInterval::new(1, 0)),
+            ),
             ServoDriftEstimate::new(
                 Drift::from_ppb(-1_000_000_000),
                 Drift::from_ppb(1_000_000_000),
@@ -575,7 +627,10 @@ mod tests {
     fn calibration_rejects_non_increasing_ingress() {
         let clock = FakeClock::new(TimeStamp::new(0, 0));
         let servo = PiServo::new(
-            ServoStep::new(TimeInterval::new(100, 0), Some(TimeInterval::new(100, 0))),
+            StepPolicy::new(
+                ServoThreshold::new(TimeInterval::new(100, 0)),
+                ServoThreshold::new(TimeInterval::new(100, 0)),
+            ),
             ServoDriftEstimate::new(
                 Drift::from_ppb(-1_000_000),
                 Drift::from_ppb(1_000_000),
@@ -600,7 +655,10 @@ mod tests {
     fn pi_loop_accumulates_over_multiple_locked_samples() {
         let clock = FakeClock::new(TimeStamp::new(0, 0));
         let servo = PiServo::new(
-            ServoStep::new(TimeInterval::new(100, 0), Some(TimeInterval::new(100, 0))),
+            StepPolicy::new(
+                ServoThreshold::new(TimeInterval::new(100, 0)),
+                ServoThreshold::new(TimeInterval::new(100, 0)),
+            ),
             ServoDriftEstimate::new(
                 Drift::from_ppb(-1_000_000),
                 Drift::from_ppb(1_000_000),
@@ -646,7 +704,10 @@ mod tests {
     fn calibration_waits_until_min_interval_before_locking() {
         let clock = FakeClock::new(TimeStamp::new(0, 0));
         let servo = PiServo::new(
-            ServoStep::new(TimeInterval::new(100, 0), Some(TimeInterval::new(100, 0))),
+            StepPolicy::new(
+                ServoThreshold::new(TimeInterval::new(100, 0)),
+                ServoThreshold::new(TimeInterval::new(100, 0)),
+            ),
             ServoDriftEstimate::new(
                 Drift::from_ppb(-1_000_000_000),
                 Drift::from_ppb(1_000_000_000),
@@ -662,6 +723,7 @@ mod tests {
         let third = ServoSample::new(TimeStamp::new(5, 0), TimeInterval::new(1, 0));
 
         assert_eq!(servo.feed(&clock, first), ServoState::Calibrating);
+        assert_eq!(clock.last_adjust(), None);
         assert_eq!(servo.feed(&clock, too_close), ServoState::Calibrating);
         assert_eq!(clock.last_adjust(), None);
 

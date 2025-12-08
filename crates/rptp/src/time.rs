@@ -76,6 +76,11 @@ pub struct TimeInterval {
 }
 
 impl TimeInterval {
+    pub const ZERO: Self = Self {
+        seconds: 0,
+        nanos: 0,
+    };
+
     pub fn new(seconds: i64, nanos: u32) -> Self {
         // Allow i64::MIN only with non-zero nanoseconds
         assert!(seconds != i64::MIN || nanos > 0);
