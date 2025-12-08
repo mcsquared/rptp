@@ -9,6 +9,7 @@ use crate::message::{
 };
 use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity, SendResult, Timeout};
 use crate::portstate::{PortProfile, PortState, StateDecision};
+use crate::servo::ServoState;
 use crate::sync::EndToEndDelayMechanism;
 use crate::time::{Instant, LogInterval, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
@@ -76,9 +77,14 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         self.delay_mechanism
             .record_one_step_sync(sync, ingress_timestamp);
         if let Some(sample) = self.delay_mechanism.sample() {
-            self.port.local_clock().discipline(sample);
+            let servo_state = self.port.local_clock().discipline(sample);
+            match servo_state {
+                ServoState::Locked => None,
+                _ => Some(StateDecision::SynchronizationFault),
+            }
+        } else {
+            None
         }
-        None
     }
 
     pub fn process_two_step_sync(
@@ -110,10 +116,14 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
 
         self.delay_mechanism.record_follow_up(follow_up);
         if let Some(sample) = self.delay_mechanism.sample() {
-            self.port.local_clock().discipline(sample);
+            let servo_state = self.port.local_clock().discipline(sample);
+            match servo_state {
+                ServoState::Locked => None,
+                _ => Some(StateDecision::SynchronizationFault),
+            }
+        } else {
+            None
         }
-
-        None
     }
 
     pub fn process_delay_request(

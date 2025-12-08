@@ -17,13 +17,19 @@ use crate::time::Duration;
 
 pub struct FakeClock {
     now: Cell<TimeStamp>,
+    last_adjust: Cell<Option<f64>>,
 }
 
 impl FakeClock {
     pub fn new(now: TimeStamp) -> Self {
         Self {
             now: Cell::new(now),
+            last_adjust: Cell::new(None),
         }
+    }
+
+    pub fn last_adjust(&self) -> Option<f64> {
+        self.last_adjust.get()
     }
 }
 
@@ -50,8 +56,8 @@ impl SynchronizableClock for FakeClock {
         self.now.set(to);
     }
 
-    fn adjust(&self, _rate: f64) {
-        // no-op
+    fn adjust(&self, rate: f64) {
+        self.last_adjust.set(Some(rate));
     }
 }
 

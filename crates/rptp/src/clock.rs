@@ -168,12 +168,8 @@ impl<C: SynchronizableClock> LocalClock<C> {
             .better_than(other, &self.steps_removed.get())
     }
 
-    pub fn discipline(&self, sample: ServoSample) {
-        self.servo.feed(&self.clock, sample);
-    }
-
-    pub fn servo_state(&self) -> ServoState {
-        self.servo.state()
+    pub fn discipline(&self, sample: ServoSample) -> ServoState {
+        self.servo.feed(&self.clock, sample)
     }
 }
 

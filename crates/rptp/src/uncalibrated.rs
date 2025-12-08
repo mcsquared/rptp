@@ -76,12 +76,14 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         self.delay_mechanism
             .record_one_step_sync(sync, ingress_timestamp);
         if let Some(sample) = self.delay_mechanism.sample() {
-            self.port.local_clock().discipline(sample);
-        }
+            let state = self.port.local_clock().discipline(sample);
 
-        match self.port.local_clock().servo_state() {
-            ServoState::Locked => Some(StateDecision::MasterClockSelected),
-            _ => None,
+            match state {
+                ServoState::Locked => Some(StateDecision::MasterClockSelected),
+                _ => None,
+            }
+        } else {
+            None
         }
     }
 
@@ -114,12 +116,13 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
 
         self.delay_mechanism.record_follow_up(follow_up);
         if let Some(sample) = self.delay_mechanism.sample() {
-            self.port.local_clock().discipline(sample);
-        }
-
-        match self.port.local_clock().servo_state() {
-            ServoState::Locked => Some(StateDecision::MasterClockSelected),
-            _ => None,
+            let servo_state = self.port.local_clock().discipline(sample);
+            match servo_state {
+                ServoState::Locked => Some(StateDecision::MasterClockSelected),
+                _ => None,
+            }
+        } else {
+            None
         }
     }
 
@@ -197,7 +200,7 @@ mod tests {
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
-    use crate::message::SystemMessage;
+    use crate::message::{DelayRequestMessage, DelayResponseMessage, SystemMessage};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::portstate::PortState;
     use crate::servo::{Servo, SteppingServo};
@@ -339,6 +342,16 @@ mod tests {
             NoopPortLog,
             PortProfile::default(),
         );
+
+        // pre-feed the delay mechanism with delay req/resp messages so it can calibrate
+        let decision = uncalibrated
+            .process_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
+        assert!(decision.is_none());
+        let decision = uncalibrated.process_delay_response(
+            DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0)),
+            parent_port,
+        );
+        assert!(decision.is_none());
 
         let decision = uncalibrated.process_one_step_sync(
             OneStepSyncMessage::new(0.into(), TimeStamp::new(1, 0)),
