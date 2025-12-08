@@ -29,7 +29,7 @@ async fn main() -> std::io::Result<()> {
             ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
             Priority1::new(250),
             Priority2::new(255),
-            ClockQuality::new(250, 0xFE, 0xFFFF),
+            ClockQuality::new(248, 0xFE, 0xFFFF),
         ),
         StepsRemoved::new(0),
         Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
