@@ -13,10 +13,8 @@
 This repository contains:
 
 - `crates/rptp` – the core PTP domain model (no async/runtime dependencies). 
-- `crates/rptp-daemon` – a thin Tokio-based daemon that wires the core to UDP multicast sockets and a virtual clock.
+- `crates/rptp-daemon` – a thin Tokio-based infrastructure layer that wires the core to UDP multicast sockets, system timers and virtual clocks.
 - `tests/e2e` – end-to-end acceptance test scenarios 
-
-It is not a drop-in replacement for existing daemons yet, but a foundation to grow one.
 
 ### How it started
 
@@ -28,15 +26,17 @@ This project began as:
 
 ### How it’s going
 
-- A growing **domain-driven model** of PTP: behavior-rich objects that talk in the language of the IEEE 1588 standard.  
-- A **test-friendly core**: clocks, ports, and state machines that can be exercised without real hardware or OS clocks.  
-- A **portable foundation**: the core is designed to sit behind different runtimes and timestamping backends (Tokio today, embedded/PHC tomorrow).  
+- A growing **domain-driven model** of PTP: behavior-rich objects (clocks, ports, BMCA roles, servos, delay mechanisms) that talk in the language of the IEEE 1588 standard.  
+- A **test-heavy core**: the vast majority of tests live in the `rptp` crate (clocks, BMCA, port state machine, sync/delay, servo). The Tokio layer has only the minimal tests needed to drive and probe the core.  
+- A **portable foundation**: the core runs without async/runtime dependencies and is designed to sit behind different runtimes and timestamping backends (Tokio today, embedded/PHC or bare metal tomorrow).  
+- An intentionally **thin Tokio adapter**: `crates/rptp-daemon` exists to exercise the model end-to-end, not as the primary product yet. It will grow as the domain model and the Rust/Tokio integration mature.  
 
 ### What this project is not (yet)
 
 - A complete implementation of all PTPv2 features and profiles.  
-- A hardened, production-grade daemon with full hardware timestamping support.  
-- A performance-tuned stack with stable public APIs.  
+- A hardened, production-grade daemon with hardware timestamping or PHC integration.  
+- A performance-tuned stack with stable public APIs, configuration formats, and operational tooling.  
+- A drop-in replacement for existing PTP daemons.  
 
 Expect **0.x** semantics: the design and APIs will evolve as the model matures.
 
@@ -44,10 +44,11 @@ Expect **0.x** semantics: the design and APIs will evolve as the model matures.
 
 ## Status & Agenda
 
-This is an **early-stage, experimental project**:
+This is an **early-stage, experimental project**, with a deliberate focus on the **domain core first**:
 
 - APIs are **unstable** and may change in 0.x releases.
 - The design is actively evolving as domain understanding deepens.
+- The core model is ahead of the runtime: `rptp` evolves first, `rptp-daemon` follows.
 - It has **not been audited for security** and currently implements **no IEEE 1588/PTP security mechanisms** (authentication, certificates, encryption, secure profiles, …).
 
 You **must not** treat `rptp` or `rptp-daemon` as a hardened, production-ready PTP stack.
@@ -57,11 +58,11 @@ You **must not** treat `rptp` or `rptp-daemon` as a hardened, production-ready P
 
 ### Current Status
 
-- Core PTPv2 message flows  
-- Virtual clocks for simulation & tests  
-- Thin, Tokio-driven integration  
-- Many tests across unit, integration, and early e2e  
-- Promising early locality/performance behavior  
+- Core PTPv2 message flows: BMCA, port state machine, and end-to-end delay mechanism for a single-port, single-domain topology.  
+- A rich, **core-centered test suite**: 200+ unit and integration tests around the domain logic; a small Tokio/e2e layer that is just large enough to drive the core.  
+- Virtual clocks and software timestamping for simulation & tests.  
+- Thin, Tokio-driven integration that wires the core to UDP multicast sockets and system timers for experiments.  
+- Promising early locality/performance behavior in the core, with the hot paths kept free from unnecessary allocation, infrastructure or framework concerns.  
 
 ### On the Agenda
 
@@ -72,7 +73,7 @@ These are planned directions and areas of interest, not yet hard commitments; pr
 - Expanded protocol coverage and profile support  
 - Broader testing for edge cases, failure modes, and error conditions  
 - Stronger runtime and infrastructure abstractions  
-- Hardened Tokio integration  
+- Evolving `rptp-daemon` from a thin test harness into a production-grade daemon as the model and understanding solidify  
 - Embedded and system/PHC clock backends  
 - Systematic benchmarking & profiling  
 
@@ -86,6 +87,7 @@ For details on how to report potential vulnerabilities or security-sensitive iss
 
 - A recent Rust 2024 edition toolchain (stable).  
 - A Unix-like environment for running the daemon examples and tests.
+- A docker environment for end-to-end acceptance testing
 
 ### Build and test the core
 
