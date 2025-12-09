@@ -74,8 +74,13 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         ingress_timestamp: TimeStamp,
     ) -> SendResult {
         self.log.message_received("DelayReq");
-        self.port
-            .send_general(GeneralMessage::DelayResp(req.response(ingress_timestamp)))
+        let result = self
+            .port
+            .send_general(GeneralMessage::DelayResp(req.response(ingress_timestamp)));
+        if result.is_ok() {
+            self.log.message_sent("DelayResp");
+        }
+        result
     }
 
     pub fn send_sync(&mut self) -> SendResult {
