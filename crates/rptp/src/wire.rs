@@ -481,7 +481,7 @@ pub enum ControlField {
 bitflags! {
     #[derive(Default)]
     pub struct MessageFlags: u16 {
-        const TWO_STEP = 0x0002;
+        const TWO_STEP = 0x0200;
     }
 }
 
