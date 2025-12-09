@@ -227,7 +227,7 @@ mod tests {
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
-    use crate::message::SystemMessage;
+    use crate::message::{SystemMessage, TimeScale};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
@@ -778,6 +778,7 @@ mod tests {
                 42.into(),
                 LogMessageInterval::new(0),
                 ForeignClockDS::high_grade_test_clock(),
+                TimeScale::Ptp,
             ),
             parent_port,
             Instant::from_secs(0),
@@ -849,6 +850,7 @@ mod tests {
                 42.into(),
                 LogMessageInterval::new(0),
                 ForeignClockDS::high_grade_test_clock(),
+                TimeScale::Ptp,
             ),
             new_parent,
             Instant::from_secs(0),
@@ -860,6 +862,7 @@ mod tests {
                 43.into(),
                 LogMessageInterval::new(0),
                 ForeignClockDS::high_grade_test_clock(),
+                TimeScale::Ptp,
             ),
             new_parent,
             Instant::from_secs(0),
@@ -931,6 +934,7 @@ mod tests {
                 42.into(),
                 LogMessageInterval::new(0),
                 ForeignClockDS::low_grade_test_clock(),
+                TimeScale::Ptp,
             ),
             parent_port,
             Instant::from_secs(0),

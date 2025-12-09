@@ -187,7 +187,7 @@ mod tests {
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{
         DelayResponseMessage, EventMessage, FollowUpMessage, GeneralMessage, SystemMessage,
-        TwoStepSyncMessage,
+        TimeScale, TwoStepSyncMessage,
     };
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::servo::{Servo, SteppingServo};
@@ -453,7 +453,8 @@ mod tests {
             messages.contains(&GeneralMessage::Announce(AnnounceMessage::new(
                 0.into(),
                 LogMessageInterval::new(0),
-                ForeignClockDS::high_grade_test_clock()
+                ForeignClockDS::high_grade_test_clock(),
+                TimeScale::Ptp,
             )))
         );
     }
@@ -496,14 +497,24 @@ mod tests {
         );
 
         let decision = master.process_announce(
-            AnnounceMessage::new(42.into(), LogMessageInterval::new(0), foreign_clock_ds),
+            AnnounceMessage::new(
+                42.into(),
+                LogMessageInterval::new(0),
+                foreign_clock_ds,
+                TimeScale::Ptp,
+            ),
             PortIdentity::fake(),
             Instant::from_secs(0),
         );
         assert!(decision.is_none());
 
         let decision = master.process_announce(
-            AnnounceMessage::new(43.into(), LogMessageInterval::new(0), foreign_clock_ds),
+            AnnounceMessage::new(
+                43.into(),
+                LogMessageInterval::new(0),
+                foreign_clock_ds,
+                TimeScale::Ptp,
+            ),
             PortIdentity::fake(),
             Instant::from_secs(0),
         );
@@ -562,7 +573,12 @@ mod tests {
         timer_host.take_system_messages();
 
         let decision = master.process_announce(
-            AnnounceMessage::new(42.into(), LogMessageInterval::new(0), foreign_clock_ds),
+            AnnounceMessage::new(
+                42.into(),
+                LogMessageInterval::new(0),
+                foreign_clock_ds,
+                TimeScale::Ptp,
+            ),
             PortIdentity::fake(),
             Instant::from_secs(0),
         );
@@ -614,7 +630,12 @@ mod tests {
         timer_host.take_system_messages();
 
         let transition = master.process_announce(
-            AnnounceMessage::new(42.into(), LogMessageInterval::new(0), foreign_clock_ds),
+            AnnounceMessage::new(
+                42.into(),
+                LogMessageInterval::new(0),
+                foreign_clock_ds,
+                TimeScale::Ptp,
+            ),
             PortIdentity::fake(),
             Instant::from_secs(0),
         );
@@ -675,6 +696,7 @@ mod tests {
                 42.into(),
                 LogMessageInterval::new(0),
                 ForeignClockDS::mid_grade_test_clock(),
+                TimeScale::Ptp,
             ),
             parent_port,
             Instant::from_secs(0),
@@ -707,7 +729,8 @@ mod tests {
             AnnounceMessage::new(
                 0.into(),
                 LogInterval::new(0).log_message_interval(),
-                ForeignClockDS::high_grade_test_clock()
+                ForeignClockDS::high_grade_test_clock(),
+                TimeScale::Ptp,
             )
         );
         assert_eq!(
@@ -715,7 +738,8 @@ mod tests {
             AnnounceMessage::new(
                 1.into(),
                 LogInterval::new(0).log_message_interval(),
-                ForeignClockDS::high_grade_test_clock()
+                ForeignClockDS::high_grade_test_clock(),
+                TimeScale::Ptp,
             )
         );
     }

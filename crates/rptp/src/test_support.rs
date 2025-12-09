@@ -290,9 +290,10 @@ impl TryFrom<&[u8]> for GeneralMessage {
         let header = MessageHeader::new(length_checked);
         let msg_type = header.message_type()?;
         let sequence_id = header.sequence_id();
+        let flags = header.flags();
         let log_message_interval = header.log_message_interval();
         let payload = header.payload();
 
-        GeneralMessage::new(msg_type, sequence_id, log_message_interval, payload)
+        GeneralMessage::new(msg_type, sequence_id, flags, log_message_interval, payload)
     }
 }

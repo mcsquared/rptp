@@ -482,6 +482,7 @@ bitflags! {
     #[derive(Default)]
     pub struct MessageFlags: u16 {
         const TWO_STEP = 0x0200;
+        const PTP_TIMESCALE = 0x0008;
     }
 }
 
@@ -492,7 +493,7 @@ mod tests {
     use crate::bmca::{ForeignClockDS, Priority1, Priority2};
     use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved};
     use crate::message::{
-        AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
+        AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage, TimeScale,
         TwoStepSyncMessage,
     };
     use crate::port::{PortIdentity, PortNumber};
@@ -590,6 +591,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
                 StepsRemoved::new(0),
             ),
+            TimeScale::Ptp,
         );
         let mut buf = MessageBuffer::new(
             TransportSpecific,

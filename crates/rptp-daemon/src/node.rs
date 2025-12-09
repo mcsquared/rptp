@@ -335,7 +335,9 @@ mod tests {
     use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
     use rptp::infra::infra_support::SortedForeignClockRecordsVec;
     use rptp::log::NOOP_CLOCK_METRICS;
-    use rptp::message::{EventMessage, GeneralMessage, OneStepSyncMessage, TwoStepSyncMessage};
+    use rptp::message::{
+        EventMessage, GeneralMessage, OneStepSyncMessage, TimeScale, TwoStepSyncMessage,
+    };
     use rptp::port::{
         AnnounceReceiptTimeout, DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber,
     };
@@ -509,6 +511,7 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -598,6 +601,7 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -692,6 +696,7 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -736,6 +741,7 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -780,6 +786,7 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -813,6 +820,7 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -859,6 +867,7 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),

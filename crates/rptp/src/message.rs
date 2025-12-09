@@ -43,6 +43,7 @@ impl<'a> DomainMessage<'a> {
         let msg = GeneralMessage::new(
             self.header.message_type()?,
             self.header.sequence_id(),
+            self.header.flags(),
             self.header.log_message_interval(),
             self.header.payload(),
         )?;
@@ -122,6 +123,7 @@ impl GeneralMessage {
     pub fn new(
         msg_type: MessageType,
         sequence_id: SequenceId,
+        flags: MessageFlags,
         log_message_interval: LogMessageInterval,
         payload: &[u8],
     ) -> Result<Self> {
@@ -132,6 +134,11 @@ impl GeneralMessage {
                     sequence_id,
                     log_message_interval,
                     announce_payload.foreign_clock_ds()?,
+                    if flags.contains(MessageFlags::PTP_TIMESCALE) {
+                        TimeScale::Ptp
+                    } else {
+                        TimeScale::Arb
+                    },
                 )))
             }
             MessageType::FollowUp => Ok(Self::FollowUp(FollowUpMessage::new(
@@ -215,10 +222,17 @@ impl TryFrom<&[u8]> for SequenceId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeScale {
+    Ptp,
+    Arb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnnounceMessage {
     sequence_id: SequenceId,
     log_message_interval: LogMessageInterval,
     foreign_clock_ds: ForeignClockDS,
+    ptp_timescale: TimeScale,
 }
 
 impl AnnounceMessage {
@@ -226,11 +240,13 @@ impl AnnounceMessage {
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
         foreign_clock_ds: ForeignClockDS,
+        ptp_timescale: TimeScale,
     ) -> Self {
         Self {
             sequence_id,
             log_message_interval,
             foreign_clock_ds,
+            ptp_timescale,
         }
     }
 
@@ -246,9 +262,14 @@ impl AnnounceMessage {
     }
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+        let ptp_timescale_flag = match self.ptp_timescale {
+            TimeScale::Ptp => MessageFlags::PTP_TIMESCALE,
+            TimeScale::Arb => MessageFlags::empty(),
+        };
+
         let mut payload = buf
             .typed(MessageType::Announce, ControlField::Other)
-            .flagged(MessageFlags::empty())
+            .flagged(ptp_timescale_flag)
             .sequenced(self.sequence_id)
             .with_log_message_interval(self.log_message_interval)
             .payload();
@@ -538,6 +559,7 @@ mod tests {
                 ClockQuality::new(248, 0xFE, 0xFFFF),
                 StepsRemoved::new(42),
             ),
+            TimeScale::Ptp,
         );
 
         let mut buf = MessageBuffer::new(
@@ -668,6 +690,7 @@ mod tests {
         let res = GeneralMessage::new(
             MessageType::Announce,
             1.into(),
+            MessageFlags::empty(),
             LogMessageInterval::new(0),
             &payload,
         );
@@ -690,6 +713,7 @@ mod tests {
         let res = GeneralMessage::new(
             MessageType::DelayResponse,
             1.into(),
+            MessageFlags::empty(),
             LogMessageInterval::new(0),
             &payload,
         );
@@ -712,6 +736,7 @@ mod tests {
         let res = GeneralMessage::new(
             MessageType::DelayResponse,
             1.into(),
+            MessageFlags::empty(),
             LogMessageInterval::new(0),
             &payload,
         );

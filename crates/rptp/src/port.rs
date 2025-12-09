@@ -352,7 +352,7 @@ mod tests {
     use crate::bmca::DefaultDS;
     use crate::clock::{ClockQuality, StepsRemoved};
     use crate::log::NOOP_CLOCK_METRICS;
-    use crate::message::{DelayRequestMessage, FollowUpMessage};
+    use crate::message::{DelayRequestMessage, FollowUpMessage, TimeScale};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakeTimerHost, FakeTimestamping};
     use crate::time::LogMessageInterval;
@@ -389,6 +389,7 @@ mod tests {
                 crate::bmca::Priority1::new(127),
                 crate::bmca::Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -431,6 +432,7 @@ mod tests {
                 crate::bmca::Priority1::new(127),
                 crate::bmca::Priority2::new(127),
                 ClockQuality::new(248, 0xFE, 0xFFFF),
+                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),

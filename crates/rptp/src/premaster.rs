@@ -71,7 +71,7 @@ mod tests {
     use crate::clock::{LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
-    use crate::message::SystemMessage;
+    use crate::message::{SystemMessage, TimeScale};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
     use crate::portstate::StateDecision;
@@ -188,6 +188,7 @@ mod tests {
                 42.into(),
                 LogMessageInterval::new(0),
                 ForeignClockDS::high_grade_test_clock(),
+                TimeScale::Ptp,
             ),
             better_port,
             Instant::from_secs(0),
@@ -200,6 +201,7 @@ mod tests {
                 43.into(),
                 LogMessageInterval::new(0),
                 ForeignClockDS::high_grade_test_clock(),
+                TimeScale::Ptp,
             ),
             better_port,
             Instant::from_secs(0),
