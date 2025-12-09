@@ -239,18 +239,6 @@ impl Default for PortProfile {
 }
 
 impl PortProfile {
-    pub fn announce_receipt_timeout_interval(&self) -> Duration {
-        self.announce_receipt_timeout_interval
-    }
-
-    pub fn log_announce_interval(&self) -> LogInterval {
-        self.log_announce_interval
-    }
-
-    pub fn log_sync_interval(&self) -> LogInterval {
-        self.log_sync_interval
-    }
-
     pub fn log_min_delay_request_interval(&self) -> LogInterval {
         self.log_min_delay_request_interval
     }

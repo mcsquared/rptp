@@ -274,7 +274,12 @@ mod tests {
 
         slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
         slave.process_delay_response(
-            DelayResponseMessage::new(0.into(), TimeStamp::new(2, 0), PortIdentity::fake()),
+            DelayResponseMessage::new(
+                0.into(),
+                LogMessageInterval::new(2),
+                TimeStamp::new(2, 0),
+                PortIdentity::fake(),
+            ),
             PortIdentity::fake(),
         );
         slave.process_two_step_sync(
@@ -331,7 +336,12 @@ mod tests {
 
         slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
         slave.process_delay_response(
-            DelayResponseMessage::new(0.into(), TimeStamp::new(2, 0), PortIdentity::fake()),
+            DelayResponseMessage::new(
+                0.into(),
+                LogMessageInterval::new(2),
+                TimeStamp::new(2, 0),
+                PortIdentity::fake(),
+            ),
             PortIdentity::fake(),
         );
         slave.process_one_step_sync(
@@ -534,7 +544,12 @@ mod tests {
         assert!(transition.is_none());
 
         let transition = slave.process_delay_response(
-            DelayResponseMessage::new(2.into(), TimeStamp::new(2, 0), PortIdentity::fake()),
+            DelayResponseMessage::new(
+                2.into(),
+                LogMessageInterval::new(2),
+                TimeStamp::new(2, 0),
+                PortIdentity::fake(),
+            ),
             non_parent,
         );
         assert!(transition.is_none());
@@ -614,7 +629,12 @@ mod tests {
         assert!(transition.is_none());
 
         let transition = slave.process_delay_response(
-            DelayResponseMessage::new(2.into(), TimeStamp::new(2, 0), PortIdentity::fake()),
+            DelayResponseMessage::new(
+                2.into(),
+                LogMessageInterval::new(2),
+                TimeStamp::new(2, 0),
+                PortIdentity::fake(),
+            ),
             parent,
         );
         assert!(transition.is_none());
@@ -674,7 +694,12 @@ mod tests {
         assert!(transition.is_none());
 
         let transition = slave.process_delay_response(
-            DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0), PortIdentity::fake()),
+            DelayResponseMessage::new(
+                43.into(),
+                LogMessageInterval::new(2),
+                TimeStamp::new(2, 0),
+                PortIdentity::fake(),
+            ),
             parent,
         );
         assert!(transition.is_none());

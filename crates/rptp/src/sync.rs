@@ -376,6 +376,7 @@ mod tests {
         let mut delay_exchange = DelayExchange::new();
         delay_exchange.record_delay_response(DelayResponseMessage::new(
             42.into(),
+            LogMessageInterval::new(1),
             TimeStamp::new(1, 0),
             PortIdentity::fake(),
         ));
@@ -390,6 +391,7 @@ mod tests {
             .record_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
         delay_exchange.record_delay_response(DelayResponseMessage::new(
             42.into(),
+            LogMessageInterval::new(1),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -405,6 +407,7 @@ mod tests {
         let mut delay_exchange = DelayExchange::new();
         delay_exchange.record_delay_response(DelayResponseMessage::new(
             42.into(),
+            LogMessageInterval::new(1),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -424,6 +427,7 @@ mod tests {
             .record_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
         delay_exchange.record_delay_response(DelayResponseMessage::new(
             43.into(),
+            LogMessageInterval::new(1),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -436,6 +440,7 @@ mod tests {
         let mut delay_exchange = DelayExchange::new();
         delay_exchange.record_delay_response(DelayResponseMessage::new(
             42.into(),
+            LogMessageInterval::new(1),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -450,6 +455,7 @@ mod tests {
         let mut delay_exchange = DelayExchange::new();
         delay_exchange.record_delay_response(DelayResponseMessage::new(
             42.into(),
+            LogMessageInterval::new(1),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -457,6 +463,7 @@ mod tests {
             .record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(1, 0));
         delay_exchange.record_delay_response(DelayResponseMessage::new(
             43.into(),
+            LogMessageInterval::new(1),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -474,6 +481,7 @@ mod tests {
             .record_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
         delay_exchange.record_delay_response(DelayResponseMessage::new(
             43.into(),
+            LogMessageInterval::new(1),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -506,6 +514,7 @@ mod tests {
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
         e2e.record_delay_response(DelayResponseMessage::new(
             43.into(),
+            LogMessageInterval::new(2),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -539,6 +548,7 @@ mod tests {
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
         e2e.record_delay_response(DelayResponseMessage::new(
             43.into(),
+            LogMessageInterval::new(2),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -567,6 +577,7 @@ mod tests {
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
         e2e.record_delay_response(DelayResponseMessage::new(
             43.into(),
+            LogMessageInterval::new(2),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -599,6 +610,7 @@ mod tests {
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
         e2e.record_delay_response(DelayResponseMessage::new(
             43.into(),
+            LogMessageInterval::new(2),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -631,6 +643,7 @@ mod tests {
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
         e2e.record_delay_response(DelayResponseMessage::new(
             43.into(),
+            LogMessageInterval::new(2),
             TimeStamp::new(2, 0),
             PortIdentity::fake(),
         ));
@@ -662,6 +675,7 @@ mod tests {
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
         e2e.record_delay_response(DelayResponseMessage::new(
             43.into(),
+            LogMessageInterval::new(2),
             TimeStamp::new(3, 0),
             PortIdentity::fake(),
         ));

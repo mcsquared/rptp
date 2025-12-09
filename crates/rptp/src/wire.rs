@@ -540,6 +540,7 @@ mod tests {
     fn buffer_integrity_delay_resp() {
         let msg = DelayResponseMessage::new(
             11.into(),
+            LogMessageInterval::new(2),
             TimeStamp::new(1, 2),
             PortIdentity::new(
                 ClockIdentity::new(&[9, 9, 8, 8, 7, 7, 6, 6]),

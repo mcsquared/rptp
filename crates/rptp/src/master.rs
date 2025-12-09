@@ -75,9 +75,16 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         requesting_port_identity: PortIdentity,
     ) -> SendResult {
         self.log.message_received("DelayReq");
-        let result = self.port.send_general(GeneralMessage::DelayResp(
-            req.response(ingress_timestamp, requesting_port_identity),
-        ));
+
+        let response = req.response(
+            self.profile
+                .log_min_delay_request_interval()
+                .log_message_interval(),
+            ingress_timestamp,
+            requesting_port_identity,
+        );
+
+        let result = self.port.send_general(GeneralMessage::DelayResp(response));
         if result.is_ok() {
             self.log.message_sent("DelayResp");
         }
@@ -241,6 +248,7 @@ mod tests {
         assert!(
             messages.contains(&GeneralMessage::DelayResp(DelayResponseMessage::new(
                 0.into(),
+                LogMessageInterval::new(0),
                 TimeStamp::new(0, 0),
                 PortIdentity::fake()
             )))

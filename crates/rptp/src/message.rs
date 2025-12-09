@@ -143,6 +143,7 @@ impl GeneralMessage {
                 let payload = DelayResponsePayload::new(payload);
                 Ok(Self::DelayResp(DelayResponseMessage::new(
                     sequence_id,
+                    log_message_interval,
                     payload.receive_timestamp()?,
                     payload.requesting_port_identity()?,
                 )))
@@ -391,11 +392,13 @@ impl DelayRequestMessage {
 
     pub fn response(
         self,
+        log_message_interval: LogMessageInterval,
         receive_timestamp: TimeStamp,
         requesting_port_identity: PortIdentity,
     ) -> DelayResponseMessage {
         DelayResponseMessage::new(
             self.sequence_id,
+            log_message_interval,
             receive_timestamp,
             requesting_port_identity,
         )
@@ -416,6 +419,7 @@ impl DelayRequestMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayResponseMessage {
     sequence_id: SequenceId,
+    log_message_interval: LogMessageInterval,
     receive_timestamp: TimeStamp,
     requesting_port_identity: PortIdentity,
 }
@@ -423,11 +427,13 @@ pub struct DelayResponseMessage {
 impl DelayResponseMessage {
     pub fn new(
         sequence_id: SequenceId,
+        log_message_interval: LogMessageInterval,
         receive_timestamp: TimeStamp,
         requesting_port_identity: PortIdentity,
     ) -> Self {
         Self {
             sequence_id,
+            log_message_interval,
             receive_timestamp,
             requesting_port_identity,
         }
@@ -450,7 +456,7 @@ impl DelayResponseMessage {
             .typed(MessageType::DelayResponse, ControlField::DelayResponse)
             .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
-            .with_log_message_interval(LogMessageInterval::unspecified())
+            .with_log_message_interval(self.log_message_interval)
             .payload();
 
         let payload_buf = payload.buf();
@@ -614,8 +620,12 @@ mod tests {
             ClockIdentity::new(&[1, 2, 3, 4, 5, 6, 7, 8]),
             PortNumber::new(9),
         );
-        let delay_resp =
-            DelayResponseMessage::new(42.into(), TimeStamp::new(1, 2), requesting_port_identity);
+        let delay_resp = DelayResponseMessage::new(
+            42.into(),
+            LogMessageInterval::new(-2),
+            TimeStamp::new(1, 2),
+            requesting_port_identity,
+        );
         let mut buf = MessageBuffer::new(
             TransportSpecific,
             PtpVersion::V2,
@@ -805,8 +815,12 @@ mod tests {
     #[test]
     fn delay_response_produces_slave_master_offset() {
         let delay_req = DelayRequestMessage::new(42.into());
-        let delay_resp =
-            DelayResponseMessage::new(42.into(), TimeStamp::new(5, 0), PortIdentity::fake());
+        let delay_resp = DelayResponseMessage::new(
+            42.into(),
+            LogMessageInterval::new(5),
+            TimeStamp::new(5, 0),
+            PortIdentity::fake(),
+        );
 
         let delay_req_egress_timestamp = TimeStamp::new(4, 0);
         let offset = delay_resp.slave_master_offset(delay_req, delay_req_egress_timestamp);
@@ -817,8 +831,12 @@ mod tests {
     #[test]
     fn delay_response_with_different_sequence_id_produces_no_slave_master_offset() {
         let delay_req = DelayRequestMessage::new(42.into());
-        let delay_resp =
-            DelayResponseMessage::new(43.into(), TimeStamp::new(5, 0), PortIdentity::fake());
+        let delay_resp = DelayResponseMessage::new(
+            43.into(),
+            LogMessageInterval::new(-1),
+            TimeStamp::new(5, 0),
+            PortIdentity::fake(),
+        );
 
         let delay_req_egress_timestamp = TimeStamp::new(4, 0);
         let offset = delay_resp.slave_master_offset(delay_req, delay_req_egress_timestamp);
@@ -829,11 +847,20 @@ mod tests {
     #[test]
     fn delay_request_message_produces_delay_response_message() {
         let delay_req = DelayRequestMessage::new(42.into());
-        let delay_resp = delay_req.response(TimeStamp::new(4, 0), PortIdentity::fake());
+        let delay_resp = delay_req.response(
+            LogMessageInterval::new(1),
+            TimeStamp::new(4, 0),
+            PortIdentity::fake(),
+        );
 
         assert_eq!(
             delay_resp,
-            DelayResponseMessage::new(42.into(), TimeStamp::new(4, 0), PortIdentity::fake())
+            DelayResponseMessage::new(
+                42.into(),
+                LogMessageInterval::new(1),
+                TimeStamp::new(4, 0),
+                PortIdentity::fake()
+            )
         );
     }
 
