@@ -1,0 +1,13 @@
+[package]
+name = "ptp4l-slave-syncs-to-master"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mcsquared/rptp"
+
+[dependencies]
+rptp = { path = "../../../../crates/rptp", features = ["test-support"] }
+rptp_daemon = { package = "rptp-daemon", path = "../../../../crates/rptp-daemon" }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"

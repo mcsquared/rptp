@@ -84,6 +84,9 @@ where
 pub struct TestImage {
     docker: Docker,
     tag: String,
+    dockerfile: String,
+    context_pairs: Vec<(PathBuf, PathBuf)>,
+    buildargs: HashMap<String, String>,
 }
 
 impl TestImage {
@@ -91,19 +94,43 @@ impl TestImage {
         Self {
             docker,
             tag: tag.into(),
+            dockerfile: "tests/e2e/docker/Dockerfile".into(),
+            context_pairs: vec![
+                (".dockerignore".into(), ".dockerignore".into()),
+                ("crates".into(), "crates".into()),
+                (
+                    "tests/e2e/docker/Dockerfile".into(),
+                    "tests/e2e/docker/Dockerfile".into(),
+                ),
+                ("tests/e2e/scenarios".into(), "tests/e2e/scenarios".into()),
+            ],
+            buildargs: HashMap::from([(
+                "MANIFEST_DIR".into(),
+                "tests/e2e/scenarios".into(),
+            )]),
+        }
+    }
+
+    pub fn ptp4l(docker: Docker) -> Self {
+        Self {
+            docker,
+            tag: "ptp4l".into(),
+            dockerfile: "tests/e2e/docker/ptp4l.Dockerfile".into(),
+            context_pairs: vec![
+                (".dockerignore".into(), ".dockerignore".into()),
+                (
+                    "tests/e2e/docker/ptp4l.Dockerfile".into(),
+                    "tests/e2e/docker/ptp4l.Dockerfile".into(),
+                ),
+            ],
+            buildargs: HashMap::new(),
         }
     }
 
     pub async fn build(&self) -> anyhow::Result<String> {
         let ctx = BuildContext::new(
             repo_root()?,
-            vec![
-                (".dockerignore", ".dockerignore"),
-                ("crates", "crates"),
-                ("tests/e2e/docker/Dockerfile", "tests/e2e/docker/Dockerfile"),
-                ("tests/e2e/scenarios", "tests/e2e/scenarios"),
-            ]
-            .into_iter(),
+            self.context_pairs.clone().into_iter(),
         );
 
         let ctx_tar = ctx.tar()?;
@@ -116,15 +143,12 @@ impl TestImage {
         let content_tag = format!("{}-{}", self.tag, short);
 
         let opts = BuildImageOptions {
-            dockerfile: "tests/e2e/docker/Dockerfile".into(),
+            dockerfile: self.dockerfile.clone(),
             t: Some(format!("{}:{}", "rptp-e2e-test", content_tag)),
             pull: Some("missing".into()),
             rm: true,
             forcerm: true,
-            buildargs: Some(HashMap::from([(
-                "MANIFEST_DIR".into(),
-                "tests/e2e/scenarios".into(),
-            )])),
+            buildargs: Some(self.buildargs.clone()),
             labels: Some(HashMap::from([("rptp.e2e".into(), "true".into())])),
             version: BuilderVersion::BuilderBuildKit,
             session: Some(Uuid::new_v4().to_string()),

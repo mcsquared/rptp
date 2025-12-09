@@ -14,13 +14,16 @@ mod tests {
     async fn slave_syncs_to_ptp4l_master() -> anyhow::Result<()> {
         let docker = Docker::connect_with_local_defaults()?;
 
-        let image = TestImage::new(docker.clone(), "e2e-scenarios");
-        let tag = image.build().await?;
+        let scenarios_image = TestImage::new(docker.clone(), "e2e-scenarios");
+        let scenarios_tag = scenarios_image.build().await?;
+
+        let ptp4l_image = TestImage::ptp4l(docker.clone());
+        let ptp4l_tag = ptp4l_image.build().await?;
 
         let net = TestNetwork::new(docker.clone(), "ptpnet").await?;
 
         let master = TestContainer::new(
-            GenericImage::new(image.name(), &tag)
+            GenericImage::new(ptp4l_image.name(), &ptp4l_tag)
                 .with_wait_for(WaitFor::message_on_stdout("assuming the grand master role"))
                 .with_log_consumer(PrintLog { prefix: "ptp4l" })
                 .with_cmd(["ptp4l", "-i", "eth0", "-S", "-m", "-l", "6", "-4"])
@@ -31,7 +34,7 @@ mod tests {
         );
 
         let slave = TestContainer::new(
-            GenericImage::new(image.name(), &tag)
+            GenericImage::new(scenarios_image.name(), &scenarios_tag)
                 .with_wait_for(WaitFor::message_on_stdout("Slave ready"))
                 .with_env_var("RUST_LOG", "debug")
                 .with_log_consumer(PrintLog { prefix: "slave" })

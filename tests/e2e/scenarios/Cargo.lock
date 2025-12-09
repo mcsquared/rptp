@@ -233,6 +233,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ptp4l-slave-syncs-to-master"
+version = "0.1.0"
+dependencies = [
+ "rptp",
+ "rptp-daemon",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
