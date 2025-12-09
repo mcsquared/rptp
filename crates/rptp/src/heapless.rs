@@ -89,8 +89,10 @@ impl<const N: usize> SortedForeignClockRecords for HeaplessSortedForeignClockRec
         self.records.first()
     }
 
-    fn prune_stale(&mut self, now: crate::time::Instant) {
+    fn prune_stale(&mut self, now: crate::time::Instant) -> bool {
+        let before = self.records.len();
         self.records.retain(|record| !record.is_stale(now));
+        self.records.len() != before
     }
 }
 
@@ -312,5 +314,52 @@ mod tests {
         assert!(has_high);
         assert!(has_mid);
         assert!(!has_low);
+    }
+
+    #[test]
+    fn heapless_prune_stale_returns_true_when_records_removed() {
+        let high_clock = ForeignClockDS::high_grade_test_clock();
+        let high_port_id = new_port_identity(1);
+
+        let mut records = HeaplessSortedForeignClockRecords::<4>::new();
+        records.insert(ForeignClockRecord::new(
+            high_port_id,
+            high_clock,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        ));
+
+        // With logInterval = 0, the foreign master time window is 4 seconds.
+        // Advancing well beyond that should mark the record as stale.
+        let pruned = records.prune_stale(Instant::from_secs(10));
+
+        assert!(pruned, "prune_stale should report removal of stale records");
+        assert!(
+            records.records.is_empty(),
+            "all stale records should have been removed"
+        );
+    }
+
+    #[test]
+    fn heapless_prune_stale_returns_false_when_no_records_are_stale() {
+        let high_clock = ForeignClockDS::high_grade_test_clock();
+        let high_port_id = new_port_identity(1);
+
+        let mut records = HeaplessSortedForeignClockRecords::<4>::new();
+        records.insert(ForeignClockRecord::new(
+            high_port_id,
+            high_clock,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        ));
+
+        // Within the 4-second window, the record is not yet stale.
+        let pruned = records.prune_stale(Instant::from_secs(2));
+
+        assert!(
+            !pruned,
+            "prune_stale should report no removals when nothing is stale"
+        );
+        assert_eq!(records.records.len(), 1);
     }
 }

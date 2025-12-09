@@ -73,7 +73,13 @@ pub trait SortedForeignClockRecords {
     fn first(&self) -> Option<&ForeignClockRecord>;
 
     /// Prune stale foreign clock records from the collection.
-    fn prune_stale(&mut self, now: Instant);
+    ///
+    /// Returns `true` when at least one record was removed.  This allows BMCA
+    /// wrappers such as [`IncrementalBmca`] to treat the removal of stale
+    /// records as an update that may change the overall decision even when the
+    /// most recent [`AnnounceMessage`] only refreshed an existing record or
+    /// created a still‑unqualified one.
+    fn prune_stale(&mut self, now: Instant) -> bool;
 }
 
 /// BMCA implementation that returns an actual decision only if the underlying
@@ -276,7 +282,7 @@ impl<S: SortedForeignClockRecords> BestMasterClockAlgorithm<S> {
         log_announce_interval: LogInterval,
         now: Instant,
     ) -> ForeignClockStatus {
-        self.sorted_clock_records.prune_stale(now);
+        let pruned = self.sorted_clock_records.prune_stale(now);
 
         let result = self
             .sorted_clock_records
@@ -284,7 +290,7 @@ impl<S: SortedForeignClockRecords> BestMasterClockAlgorithm<S> {
                 record.consider(foreign_clock_ds, log_announce_interval, now)
             });
 
-        match result {
+        let status = match result {
             ForeignClockResult::NotFound => {
                 self.sorted_clock_records.insert(ForeignClockRecord::new(
                     source_port_identity,
@@ -295,6 +301,12 @@ impl<S: SortedForeignClockRecords> BestMasterClockAlgorithm<S> {
                 ForeignClockStatus::Unchanged
             }
             ForeignClockResult::Status(status) => status,
+        };
+
+        if pruned {
+            ForeignClockStatus::Updated
+        } else {
+            status
         }
     }
 
@@ -1449,12 +1461,13 @@ pub(crate) mod tests {
         let mut bmca = BestMasterClockAlgorithm::new(&mut sorted_records);
 
         // Consider a new announce from a different foreign clock.
-        bmca.consider(
+        let status = bmca.consider(
             PortIdentity::new(CLK_ID_GM, PortNumber::new(1)),
             ForeignClockDS::gm_grade_test_clock(),
             LogInterval::new(0),
             Instant::from_secs(10),
         );
+        assert_eq!(status, ForeignClockStatus::Updated);
 
         assert_eq!(
             sorted_records.len(),

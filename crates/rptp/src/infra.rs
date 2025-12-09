@@ -111,8 +111,10 @@ pub mod infra_support {
             self.records.first()
         }
 
-        fn prune_stale(&mut self, now: crate::time::Instant) {
+        fn prune_stale(&mut self, now: crate::time::Instant) -> bool {
+            let before = self.records.len();
             self.records.retain(|record| !record.is_stale(now));
+            self.records.len() != before
         }
     }
 
@@ -136,8 +138,8 @@ pub mod infra_support {
             (**self).first()
         }
 
-        fn prune_stale(&mut self, now: crate::time::Instant) {
-            (*self).prune_stale(now);
+        fn prune_stale(&mut self, now: crate::time::Instant) -> bool {
+            (*self).prune_stale(now)
         }
     }
 
@@ -201,6 +203,54 @@ pub mod infra_support {
 
             let best_clock = records.first().and_then(|record| record.dataset());
             assert_eq!(best_clock, Some(&high_clock));
+        }
+
+        #[test]
+        fn sorted_foreign_vec_prune_stale_returns_true_when_records_removed() {
+            let high_clock = ForeignClockDS::high_grade_test_clock();
+            let high_port_id = PortIdentity::new(
+                ClockIdentity::new(&[0, 1, 2, 3, 4, 5, 6, 9]),
+                PortNumber::new(1),
+            );
+
+            let mut records = SortedForeignClockRecordsVec::new();
+            records.insert(ForeignClockRecord::new(
+                high_port_id,
+                high_clock,
+                LogInterval::new(0),
+                Instant::from_secs(0),
+            ));
+
+            // With logInterval = 0, the foreign master time window is 4 seconds.
+            let pruned = records.prune_stale(Instant::from_secs(10));
+
+            assert!(pruned, "prune_stale should report removal of stale records");
+            assert!(records.is_empty());
+        }
+
+        #[test]
+        fn sorted_foreign_vec_prune_stale_returns_false_when_no_records_are_stale() {
+            let high_clock = ForeignClockDS::high_grade_test_clock();
+            let high_port_id = PortIdentity::new(
+                ClockIdentity::new(&[0, 1, 2, 3, 4, 5, 6, 10]),
+                PortNumber::new(1),
+            );
+
+            let mut records = SortedForeignClockRecordsVec::new();
+            records.insert(ForeignClockRecord::new(
+                high_port_id,
+                high_clock,
+                LogInterval::new(0),
+                Instant::from_secs(0),
+            ));
+
+            let pruned = records.prune_stale(Instant::from_secs(2));
+
+            assert!(
+                !pruned,
+                "prune_stale should report no removals when nothing is stale"
+            );
+            assert_eq!(records.len(), 1);
         }
     }
 }
