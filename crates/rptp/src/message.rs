@@ -139,10 +139,14 @@ impl GeneralMessage {
                 log_message_interval,
                 FollowUpPayload::new(payload).precise_origin_timestamp()?,
             ))),
-            MessageType::DelayResponse => Ok(Self::DelayResp(DelayResponseMessage::new(
-                sequence_id,
-                DelayResponsePayload::new(payload).receive_timestamp()?,
-            ))),
+            MessageType::DelayResponse => {
+                let payload = DelayResponsePayload::new(payload);
+                Ok(Self::DelayResp(DelayResponseMessage::new(
+                    sequence_id,
+                    payload.receive_timestamp()?,
+                    payload.requesting_port_identity()?,
+                )))
+            }
             _ => Err(ProtocolError::UnknownMessageType(msg_type.to_nibble()).into()),
         }
     }
@@ -385,8 +389,16 @@ impl DelayRequestMessage {
         Self { sequence_id }
     }
 
-    pub fn response(self, receive_timestamp: TimeStamp) -> DelayResponseMessage {
-        DelayResponseMessage::new(self.sequence_id, receive_timestamp)
+    pub fn response(
+        self,
+        receive_timestamp: TimeStamp,
+        requesting_port_identity: PortIdentity,
+    ) -> DelayResponseMessage {
+        DelayResponseMessage::new(
+            self.sequence_id,
+            receive_timestamp,
+            requesting_port_identity,
+        )
     }
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
@@ -405,13 +417,19 @@ impl DelayRequestMessage {
 pub struct DelayResponseMessage {
     sequence_id: SequenceId,
     receive_timestamp: TimeStamp,
+    requesting_port_identity: PortIdentity,
 }
 
 impl DelayResponseMessage {
-    pub fn new(sequence_id: SequenceId, receive_timestamp: TimeStamp) -> Self {
+    pub fn new(
+        sequence_id: SequenceId,
+        receive_timestamp: TimeStamp,
+        requesting_port_identity: PortIdentity,
+    ) -> Self {
         Self {
             sequence_id,
             receive_timestamp,
+            requesting_port_identity,
         }
     }
 
@@ -437,6 +455,7 @@ impl DelayResponseMessage {
 
         let payload_buf = payload.buf();
         payload_buf[..10].copy_from_slice(&self.receive_timestamp.to_wire());
+        payload_buf[10..20].copy_from_slice(&self.requesting_port_identity.to_bytes());
 
         payload.finalize(20)
     }
@@ -591,12 +610,17 @@ mod tests {
 
     #[test]
     fn delay_response_message_wire_roundtrip() {
-        let delay_resp = DelayResponseMessage::new(42.into(), TimeStamp::new(1, 2));
+        let requesting_port_identity = PortIdentity::new(
+            ClockIdentity::new(&[1, 2, 3, 4, 5, 6, 7, 8]),
+            PortNumber::new(9),
+        );
+        let delay_resp =
+            DelayResponseMessage::new(42.into(), TimeStamp::new(1, 2), requesting_port_identity);
         let mut buf = MessageBuffer::new(
             TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
-            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
+            PortIdentity::fake(),
         );
         let wire = delay_resp.serialize(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
@@ -644,6 +668,50 @@ mod tests {
                 field: "Announce.foreign_clock_ds",
                 expected: 16,
                 found: payload.len().saturating_sub(13),
+            }
+            .into())
+        );
+    }
+
+    #[test]
+    fn general_message_new_reports_short_delay_response_timestamp() {
+        let payload = [0u8; 5]; // less than 10 bytes required for receive_timestamp
+
+        let res = GeneralMessage::new(
+            MessageType::DelayResponse,
+            1.into(),
+            LogMessageInterval::new(0),
+            &payload,
+        );
+
+        assert_eq!(
+            res,
+            Err(ParseError::PayloadTooShort {
+                field: "DelayResponse.receive_timestamp",
+                expected: 10,
+                found: 5,
+            }
+            .into())
+        );
+    }
+
+    #[test]
+    fn general_message_new_reports_short_delay_response_requesting_port_identity() {
+        let payload = [0u8; 15]; // 10 bytes for timestamp, 5 bytes for identity (short of 10)
+
+        let res = GeneralMessage::new(
+            MessageType::DelayResponse,
+            1.into(),
+            LogMessageInterval::new(0),
+            &payload,
+        );
+
+        assert_eq!(
+            res,
+            Err(ParseError::PayloadTooShort {
+                field: "DelayResponse.requesting_port_identity",
+                expected: 10,
+                found: 5,
             }
             .into())
         );
@@ -737,7 +805,8 @@ mod tests {
     #[test]
     fn delay_response_produces_slave_master_offset() {
         let delay_req = DelayRequestMessage::new(42.into());
-        let delay_resp = DelayResponseMessage::new(42.into(), TimeStamp::new(5, 0));
+        let delay_resp =
+            DelayResponseMessage::new(42.into(), TimeStamp::new(5, 0), PortIdentity::fake());
 
         let delay_req_egress_timestamp = TimeStamp::new(4, 0);
         let offset = delay_resp.slave_master_offset(delay_req, delay_req_egress_timestamp);
@@ -748,7 +817,8 @@ mod tests {
     #[test]
     fn delay_response_with_different_sequence_id_produces_no_slave_master_offset() {
         let delay_req = DelayRequestMessage::new(42.into());
-        let delay_resp = DelayResponseMessage::new(43.into(), TimeStamp::new(5, 0));
+        let delay_resp =
+            DelayResponseMessage::new(43.into(), TimeStamp::new(5, 0), PortIdentity::fake());
 
         let delay_req_egress_timestamp = TimeStamp::new(4, 0);
         let offset = delay_resp.slave_master_offset(delay_req, delay_req_egress_timestamp);
@@ -759,11 +829,11 @@ mod tests {
     #[test]
     fn delay_request_message_produces_delay_response_message() {
         let delay_req = DelayRequestMessage::new(42.into());
-        let delay_resp = delay_req.response(TimeStamp::new(4, 0));
+        let delay_resp = delay_req.response(TimeStamp::new(4, 0), PortIdentity::fake());
 
         assert_eq!(
             delay_resp,
-            DelayResponseMessage::new(42.into(), TimeStamp::new(4, 0))
+            DelayResponseMessage::new(42.into(), TimeStamp::new(4, 0), PortIdentity::fake())
         );
     }
 

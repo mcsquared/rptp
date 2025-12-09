@@ -245,6 +245,25 @@ impl<'a> DelayResponsePayload<'a> {
         )
         .timestamp()
     }
+
+    pub fn requesting_port_identity(&self) -> Result<PortIdentity> {
+        let pi_bytes = self
+            .payload
+            .get(10..20)
+            .ok_or(ParseError::PayloadTooShort {
+                field: "DelayResponse.requesting_port_identity",
+                expected: 10,
+                found: self.payload.len().saturating_sub(10),
+            })?;
+
+        Ok(PortIdentity::from_slice(pi_bytes.try_into().map_err(
+            |_| ParseError::PayloadTooShort {
+                field: "DelayResponse.requesting_port_identity",
+                expected: 10,
+                found: pi_bytes.len(),
+            },
+        )?))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,7 +495,7 @@ mod tests {
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
         TwoStepSyncMessage,
     };
-    use crate::port::PortNumber;
+    use crate::port::{PortIdentity, PortNumber};
     use crate::result::{Error, ParseError, ProtocolError};
     use crate::time::{LogMessageInterval, TimeStamp};
 
@@ -487,7 +506,10 @@ mod tests {
             TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
-            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
+            PortIdentity::new(
+                ClockIdentity::new(&[1, 2, 3, 4, 5, 6, 7, 8]),
+                PortNumber::new(2),
+            ),
         );
         let wire = msg.serialize(&mut buf);
         let bytes = wire.as_ref();
@@ -504,7 +526,7 @@ mod tests {
             TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
-            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
+            PortIdentity::fake(),
         );
         let wire = msg.serialize(&mut buf);
         let bytes = wire.as_ref();
@@ -516,12 +538,19 @@ mod tests {
 
     #[test]
     fn buffer_integrity_delay_resp() {
-        let msg = DelayResponseMessage::new(11.into(), TimeStamp::new(1, 2));
+        let msg = DelayResponseMessage::new(
+            11.into(),
+            TimeStamp::new(1, 2),
+            PortIdentity::new(
+                ClockIdentity::new(&[9, 9, 8, 8, 7, 7, 6, 6]),
+                PortNumber::new(4),
+            ),
+        );
         let mut buf = MessageBuffer::new(
             TransportSpecific,
             PtpVersion::V2,
             DomainNumber::new(0),
-            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
+            PortIdentity::fake(),
         );
         let wire = msg.serialize(&mut buf);
         let bytes = wire.as_ref();

@@ -118,7 +118,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
                 port.process_two_step_sync(msg, source_port_identity, ingress_timestamp)
             }
             (Master(port), DelayReq(msg)) => {
-                match port.process_delay_request(msg, ingress_timestamp) {
+                match port.process_delay_request(msg, ingress_timestamp, source_port_identity) {
                     Ok(()) => None,
                     Err(_) => Some(StateDecision::FaultDetected),
                 }

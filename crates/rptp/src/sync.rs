@@ -136,6 +136,7 @@ impl<T: Timeout> EndToEndDelayMechanism<T> {
 
 #[cfg(test)]
 mod tests {
+    use crate::port::PortIdentity;
     use crate::test_support::FakeTimeout;
     use crate::time::{LogInterval, LogMessageInterval};
 
@@ -373,8 +374,11 @@ mod tests {
     #[test]
     fn delay_exchange_produces_no_slave_master_offset_on_response_only() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange
-            .record_delay_response(DelayResponseMessage::new(42.into(), TimeStamp::new(1, 0)));
+        delay_exchange.record_delay_response(DelayResponseMessage::new(
+            42.into(),
+            TimeStamp::new(1, 0),
+            PortIdentity::fake(),
+        ));
 
         assert_eq!(delay_exchange.slave_master_offset(), None);
     }
@@ -384,8 +388,11 @@ mod tests {
         let mut delay_exchange = DelayExchange::new();
         delay_exchange
             .record_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
-        delay_exchange
-            .record_delay_response(DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0)));
+        delay_exchange.record_delay_response(DelayResponseMessage::new(
+            42.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
 
         assert_eq!(
             delay_exchange.slave_master_offset(),
@@ -396,8 +403,11 @@ mod tests {
     #[test]
     fn delay_exchange_produces_slave_master_offset_on_response_then_request_matching() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange
-            .record_delay_response(DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0)));
+        delay_exchange.record_delay_response(DelayResponseMessage::new(
+            42.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
         delay_exchange
             .record_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
 
@@ -412,8 +422,11 @@ mod tests {
         let mut delay_exchange = DelayExchange::new();
         delay_exchange
             .record_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
-        delay_exchange
-            .record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        delay_exchange.record_delay_response(DelayResponseMessage::new(
+            43.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
 
         assert_eq!(delay_exchange.slave_master_offset(), None);
     }
@@ -421,8 +434,11 @@ mod tests {
     #[test]
     fn delay_exchange_produces_no_slave_master_offset_on_non_matching_request() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange
-            .record_delay_response(DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0)));
+        delay_exchange.record_delay_response(DelayResponseMessage::new(
+            42.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
         delay_exchange
             .record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(1, 0));
 
@@ -432,12 +448,18 @@ mod tests {
     #[test]
     fn delay_exchange_recovers_when_matching_response_arrives_later() {
         let mut delay_exchange = DelayExchange::new();
-        delay_exchange
-            .record_delay_response(DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0)));
+        delay_exchange.record_delay_response(DelayResponseMessage::new(
+            42.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
         delay_exchange
             .record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(1, 0));
-        delay_exchange
-            .record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        delay_exchange.record_delay_response(DelayResponseMessage::new(
+            43.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
 
         assert_eq!(
             delay_exchange.slave_master_offset(),
@@ -450,8 +472,11 @@ mod tests {
         let mut delay_exchange = DelayExchange::new();
         delay_exchange
             .record_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
-        delay_exchange
-            .record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        delay_exchange.record_delay_response(DelayResponseMessage::new(
+            43.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
         delay_exchange
             .record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(1, 0));
 
@@ -479,7 +504,11 @@ mod tests {
             TimeStamp::new(1, 0),
         ));
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        e2e.record_delay_response(DelayResponseMessage::new(
+            43.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
 
         assert_eq!(
             e2e.sample(),
@@ -508,7 +537,11 @@ mod tests {
             TimeStamp::new(1, 0),
         );
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        e2e.record_delay_response(DelayResponseMessage::new(
+            43.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
 
         assert_eq!(
             e2e.sample(),
@@ -532,7 +565,11 @@ mod tests {
             TimeStamp::new(1, 0),
         );
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        e2e.record_delay_response(DelayResponseMessage::new(
+            43.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
 
         assert_eq!(
             e2e.sample(),
@@ -560,7 +597,11 @@ mod tests {
             TimeStamp::new(1, 0),
         );
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        e2e.record_delay_response(DelayResponseMessage::new(
+            43.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
 
         assert_eq!(
             e2e.sample(),
@@ -588,7 +629,11 @@ mod tests {
             TimeStamp::new(0, 0),
         );
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
+        e2e.record_delay_response(DelayResponseMessage::new(
+            43.into(),
+            TimeStamp::new(2, 0),
+            PortIdentity::fake(),
+        ));
 
         assert_eq!(e2e.sample(), None);
     }
@@ -615,7 +660,11 @@ mod tests {
             TimeStamp::new(1, 0),
         ));
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
-        e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(3, 0)));
+        e2e.record_delay_response(DelayResponseMessage::new(
+            43.into(),
+            TimeStamp::new(3, 0),
+            PortIdentity::fake(),
+        ));
 
         assert_eq!(
             e2e.sample(),

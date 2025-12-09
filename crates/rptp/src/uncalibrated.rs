@@ -348,7 +348,7 @@ mod tests {
             .process_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
         assert!(decision.is_none());
         let decision = uncalibrated.process_delay_response(
-            DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0)),
+            DelayResponseMessage::new(42.into(), TimeStamp::new(2, 0), PortIdentity::fake()),
             parent_port,
         );
         assert!(decision.is_none());
