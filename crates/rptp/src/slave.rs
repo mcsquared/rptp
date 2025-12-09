@@ -278,12 +278,12 @@ mod tests {
             PortIdentity::fake(),
         );
         slave.process_two_step_sync(
-            TwoStepSyncMessage::new(0.into()),
+            TwoStepSyncMessage::new(0.into(), LogMessageInterval::new(0)),
             PortIdentity::fake(),
             TimeStamp::new(1, 0),
         );
         slave.process_follow_up(
-            FollowUpMessage::new(0.into(), TimeStamp::new(1, 0)),
+            FollowUpMessage::new(0.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
             PortIdentity::fake(),
         );
 
@@ -335,7 +335,7 @@ mod tests {
             PortIdentity::fake(),
         );
         slave.process_one_step_sync(
-            OneStepSyncMessage::new(0.into(), TimeStamp::new(1, 0)),
+            OneStepSyncMessage::new(0.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
             PortIdentity::fake(),
             TimeStamp::new(1, 0),
         );
@@ -515,7 +515,7 @@ mod tests {
 
         // Record a TwoStepSync from the parent so a matching FollowUp could produce ms_offset
         let transition = slave.process_two_step_sync(
-            TwoStepSyncMessage::new(1.into()),
+            TwoStepSyncMessage::new(1.into(), LogMessageInterval::new(0)),
             parent,
             TimeStamp::new(2, 0),
         );
@@ -528,7 +528,7 @@ mod tests {
 
         // Send FollowUp and DelayResp from a non-parent; these should be ignored
         let transition = slave.process_follow_up(
-            FollowUpMessage::new(1.into(), TimeStamp::new(1, 0)),
+            FollowUpMessage::new(1.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
             non_parent,
         );
         assert!(transition.is_none());
@@ -594,13 +594,15 @@ mod tests {
         );
 
         // Send a FollowUp from the parent first (ms offset incomplete without sync)
-        let transition =
-            slave.process_follow_up(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0)), parent);
+        let transition = slave.process_follow_up(
+            FollowUpMessage::new(1.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
+            parent,
+        );
         assert!(transition.is_none());
 
         // Now send TwoStepSync from a non-parent; should be ignored
         let transition = slave.process_two_step_sync(
-            TwoStepSyncMessage::new(1.into()),
+            TwoStepSyncMessage::new(1.into(), LogMessageInterval::new(0)),
             non_parent,
             TimeStamp::new(2, 0),
         );
@@ -679,14 +681,14 @@ mod tests {
 
         // Matching conversation from the parent (numbers chosen to yield to local time at 2s)
         let transition = slave.process_two_step_sync(
-            TwoStepSyncMessage::new(42.into()),
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
             parent,
             TimeStamp::new(1, 0),
         );
         assert!(transition.is_none());
 
         let transition = slave.process_follow_up(
-            FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)),
+            FollowUpMessage::new(42.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
             parent,
         );
         assert!(transition.is_none());

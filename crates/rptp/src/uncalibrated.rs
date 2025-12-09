@@ -354,7 +354,7 @@ mod tests {
         assert!(decision.is_none());
 
         let decision = uncalibrated.process_one_step_sync(
-            OneStepSyncMessage::new(0.into(), TimeStamp::new(1, 0)),
+            OneStepSyncMessage::new(0.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
             PortIdentity::fake(),
             TimeStamp::new(1, 0),
         );

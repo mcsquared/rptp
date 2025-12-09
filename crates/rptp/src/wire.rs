@@ -478,11 +478,11 @@ mod tests {
     };
     use crate::port::PortNumber;
     use crate::result::{Error, ParseError, ProtocolError};
-    use crate::time::TimeStamp;
+    use crate::time::{LogMessageInterval, TimeStamp};
 
     #[test]
     fn buffer_integrity_two_step_sync() {
-        let msg = TwoStepSyncMessage::new(7.into());
+        let msg = TwoStepSyncMessage::new(7.into(), LogMessageInterval::new(-3));
         let mut buf = MessageBuffer::new(
             TransportSpecific,
             PtpVersion::V2,
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn buffer_integrity_follow_up() {
-        let msg = FollowUpMessage::new(9.into(), TimeStamp::new(1, 2));
+        let msg = FollowUpMessage::new(9.into(), LogMessageInterval::new(-3), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
             TransportSpecific,
             PtpVersion::V2,

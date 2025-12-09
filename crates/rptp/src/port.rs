@@ -355,6 +355,7 @@ mod tests {
     use crate::message::{DelayRequestMessage, FollowUpMessage};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakeTimerHost, FakeTimestamping};
+    use crate::time::LogMessageInterval;
 
     struct CapturePort {
         sent: Rc<RefCell<Vec<Vec<u8>>>>,
@@ -448,7 +449,8 @@ mod tests {
             port_number,
         );
 
-        let follow = FollowUpMessage::new(7.into(), TimeStamp::new(1, 2));
+        let follow =
+            FollowUpMessage::new(7.into(), LogMessageInterval::new(3), TimeStamp::new(1, 2));
         let _ = port.send_general(GeneralMessage::FollowUp(follow));
         let bufs = sent.borrow();
         assert!(!bufs.is_empty());

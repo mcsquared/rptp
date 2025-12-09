@@ -136,7 +136,8 @@ impl<T: Timeout> EndToEndDelayMechanism<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{test_support::FakeTimeout, time::LogInterval};
+    use crate::test_support::FakeTimeout;
+    use crate::time::{LogInterval, LogMessageInterval};
 
     use super::*;
 
@@ -149,8 +150,10 @@ mod tests {
     #[test]
     fn sync_exchange_no_master_slave_offset_on_two_step_sync_only() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange
-            .record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
+        sync_exchange.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(2, 0),
+        );
 
         assert_eq!(sync_exchange.master_slave_offset(), None);
     }
@@ -158,7 +161,11 @@ mod tests {
     #[test]
     fn sync_exchange_no_master_slave_offset_on_follow_up_only() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        sync_exchange.record_follow_up(FollowUpMessage::new(
+            42.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
 
         assert_eq!(sync_exchange.master_slave_offset(), None);
     }
@@ -166,7 +173,8 @@ mod tests {
     #[test]
     fn sync_exchange_produces_master_slave_offset_on_one_step_sync_only() {
         let mut sync_exchange = SyncExchange::new();
-        let one_step = OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0));
+        let one_step =
+            OneStepSyncMessage::new(42.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0));
 
         sync_exchange.record_one_step_sync(one_step, TimeStamp::new(2, 0));
 
@@ -181,12 +189,19 @@ mod tests {
         let mut sync_exchange = SyncExchange::new();
 
         // Two-step path: master at t=1, ingress at t=2 -> offset 1s
-        sync_exchange
-            .record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
-        sync_exchange.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        sync_exchange.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(2, 0),
+        );
+        sync_exchange.record_follow_up(FollowUpMessage::new(
+            42.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
 
         // One-step path: master at t=10, ingress at t=13 -> offset 3s
-        let one_step = OneStepSyncMessage::new(42.into(), TimeStamp::new(10, 0));
+        let one_step =
+            OneStepSyncMessage::new(42.into(), LogMessageInterval::new(0), TimeStamp::new(10, 0));
         sync_exchange.record_one_step_sync(one_step, TimeStamp::new(13, 0));
 
         // One-step should take precedence
@@ -201,13 +216,20 @@ mod tests {
         let mut sync_exchange = SyncExchange::new();
 
         // First record a one-step sync: master at t=1, ingress at t=2 -> offset 1s
-        let one_step = OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0));
+        let one_step =
+            OneStepSyncMessage::new(42.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0));
         sync_exchange.record_one_step_sync(one_step, TimeStamp::new(2, 0));
 
         // Then a two-step sync + follow-up: master at t=4, ingress at t=6 -> offset 2s
-        sync_exchange
-            .record_two_step_sync(TwoStepSyncMessage::new(43.into()), TimeStamp::new(6, 0));
-        sync_exchange.record_follow_up(FollowUpMessage::new(43.into(), TimeStamp::new(4, 0)));
+        sync_exchange.record_two_step_sync(
+            TwoStepSyncMessage::new(43.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(6, 0),
+        );
+        sync_exchange.record_follow_up(FollowUpMessage::new(
+            43.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(4, 0),
+        ));
 
         // Two-step path should now be used; prior one-step is ignored
         assert_eq!(
@@ -219,9 +241,15 @@ mod tests {
     #[test]
     fn sync_exchange_produces_master_slave_offset_on_two_step_sync_then_follow_up() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange
-            .record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
-        sync_exchange.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        sync_exchange.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(2, 0),
+        );
+        sync_exchange.record_follow_up(FollowUpMessage::new(
+            42.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
@@ -232,9 +260,15 @@ mod tests {
     #[test]
     fn sync_exchange_produces_master_slave_offset_on_follow_up_then_two_step_sync() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
-        sync_exchange
-            .record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
+        sync_exchange.record_follow_up(FollowUpMessage::new(
+            42.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
+        sync_exchange.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(2, 0),
+        );
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
@@ -245,9 +279,15 @@ mod tests {
     #[test]
     fn sync_exchange_produces_no_master_slave_offset_on_non_matching_follow_up() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange
-            .record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
-        sync_exchange.record_follow_up(FollowUpMessage::new(43.into(), TimeStamp::new(1, 0)));
+        sync_exchange.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(2, 0),
+        );
+        sync_exchange.record_follow_up(FollowUpMessage::new(
+            43.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
 
         assert_eq!(sync_exchange.master_slave_offset(), None);
     }
@@ -255,9 +295,15 @@ mod tests {
     #[test]
     fn sync_exchange_produces_no_master_slave_offset_on_non_matching_two_step_sync() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
-        sync_exchange
-            .record_two_step_sync(TwoStepSyncMessage::new(43.into()), TimeStamp::new(2, 0));
+        sync_exchange.record_follow_up(FollowUpMessage::new(
+            42.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
+        sync_exchange.record_two_step_sync(
+            TwoStepSyncMessage::new(43.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(2, 0),
+        );
 
         assert_eq!(sync_exchange.master_slave_offset(), None);
     }
@@ -265,10 +311,20 @@ mod tests {
     #[test]
     fn sync_exchange_recovers_when_matching_follow_up_arrives_later() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
-        sync_exchange
-            .record_two_step_sync(TwoStepSyncMessage::new(43.into()), TimeStamp::new(2, 0));
-        sync_exchange.record_follow_up(FollowUpMessage::new(43.into(), TimeStamp::new(1, 0)));
+        sync_exchange.record_follow_up(FollowUpMessage::new(
+            42.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
+        sync_exchange.record_two_step_sync(
+            TwoStepSyncMessage::new(43.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(2, 0),
+        );
+        sync_exchange.record_follow_up(FollowUpMessage::new(
+            43.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
@@ -279,11 +335,19 @@ mod tests {
     #[test]
     fn sync_exchange_recovers_when_matching_two_step_sync_arrives_later() {
         let mut sync_exchange = SyncExchange::new();
-        sync_exchange
-            .record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
-        sync_exchange.record_follow_up(FollowUpMessage::new(43.into(), TimeStamp::new(1, 0)));
-        sync_exchange
-            .record_two_step_sync(TwoStepSyncMessage::new(43.into()), TimeStamp::new(2, 0));
+        sync_exchange.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(2, 0),
+        );
+        sync_exchange.record_follow_up(FollowUpMessage::new(
+            43.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
+        sync_exchange.record_two_step_sync(
+            TwoStepSyncMessage::new(43.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(2, 0),
+        );
 
         assert_eq!(
             sync_exchange.master_slave_offset(),
@@ -405,8 +469,15 @@ mod tests {
             LogInterval::new(0),
         ));
 
-        e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(1, 0));
-        e2e.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        e2e.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(1, 0),
+        );
+        e2e.record_follow_up(FollowUpMessage::new(
+            42.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
         e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
@@ -427,8 +498,15 @@ mod tests {
             LogInterval::new(0),
         ));
 
-        e2e.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
-        e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(1, 0));
+        e2e.record_follow_up(FollowUpMessage::new(
+            42.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
+        e2e.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(1, 0),
+        );
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
         e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
@@ -450,7 +528,7 @@ mod tests {
         ));
 
         e2e.record_one_step_sync(
-            OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),
+            OneStepSyncMessage::new(42.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
             TimeStamp::new(1, 0),
         );
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
@@ -473,9 +551,12 @@ mod tests {
             LogInterval::new(0),
         ));
 
-        e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(0, 0));
+        e2e.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(0, 0),
+        );
         e2e.record_one_step_sync(
-            OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),
+            OneStepSyncMessage::new(42.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
             TimeStamp::new(1, 0),
         );
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
@@ -499,10 +580,13 @@ mod tests {
         ));
 
         e2e.record_one_step_sync(
-            OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),
+            OneStepSyncMessage::new(42.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
             TimeStamp::new(1, 0),
         );
-        e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(0, 0));
+        e2e.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(0, 0),
+        );
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
         e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(2, 0)));
 
@@ -518,11 +602,18 @@ mod tests {
         ));
 
         e2e.record_one_step_sync(
-            OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 0)),
+            OneStepSyncMessage::new(42.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
             TimeStamp::new(1, 0),
         );
-        e2e.record_two_step_sync(TwoStepSyncMessage::new(42.into()), TimeStamp::new(2, 0));
-        e2e.record_follow_up(FollowUpMessage::new(42.into(), TimeStamp::new(1, 0)));
+        e2e.record_two_step_sync(
+            TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(0)),
+            TimeStamp::new(2, 0),
+        );
+        e2e.record_follow_up(FollowUpMessage::new(
+            42.into(),
+            LogMessageInterval::new(0),
+            TimeStamp::new(1, 0),
+        ));
         e2e.record_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
         e2e.record_delay_response(DelayResponseMessage::new(43.into(), TimeStamp::new(3, 0)));
 

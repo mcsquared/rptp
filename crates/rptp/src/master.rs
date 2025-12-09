@@ -165,7 +165,7 @@ impl<T: Timeout> SyncCycle<T> {
     }
 
     pub fn two_step_sync(&self) -> TwoStepSyncMessage {
-        TwoStepSyncMessage::new(self.sequence_id)
+        TwoStepSyncMessage::new(self.sequence_id, self.log_interval.log_message_interval())
     }
 }
 
@@ -273,7 +273,8 @@ mod tests {
         let messages = port.take_event_messages();
         assert!(
             messages.contains(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(
-                0.into()
+                0.into(),
+                LogMessageInterval::new(0)
             )))
         );
     }
@@ -354,7 +355,10 @@ mod tests {
 
         assert!(
             master
-                .send_follow_up(TwoStepSyncMessage::new(0.into()), TimeStamp::new(0, 0))
+                .send_follow_up(
+                    TwoStepSyncMessage::new(0.into(), LogMessageInterval::new(0)),
+                    TimeStamp::new(0, 0)
+                )
                 .is_ok()
         );
 
@@ -362,6 +366,7 @@ mod tests {
         assert!(
             messages.contains(&GeneralMessage::FollowUp(FollowUpMessage::new(
                 0.into(),
+                LogMessageInterval::new(0),
                 TimeStamp::new(0, 0)
             )))
         );
@@ -710,7 +715,10 @@ mod tests {
         );
         let two_step_sync = sync_cycle.two_step_sync();
 
-        assert_eq!(two_step_sync, TwoStepSyncMessage::new(0.into()));
+        assert_eq!(
+            two_step_sync,
+            TwoStepSyncMessage::new(0.into(), LogMessageInterval::new(0))
+        );
     }
 
     #[test]

@@ -211,6 +211,11 @@ impl LogMessageInterval {
         Self(value)
     }
 
+    pub const fn unspecified() -> Self {
+        // IEEE 1588 defines 0x7F as "not specified"
+        Self(0x7F)
+    }
+
     pub fn log_interval(&self) -> Option<LogInterval> {
         if self.0 >= LogInterval::MIN_LOG_VALUE && self.0 <= LogInterval::MAX_LOG_VALUE {
             Some(LogInterval::new(self.0))

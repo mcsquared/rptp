@@ -401,7 +401,7 @@ mod tests {
     use crate::test_support::{
         FailingPort, FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping,
     };
-    use crate::time::TimeStamp;
+    use crate::time::{LogMessageInterval, TimeStamp};
 
     #[test]
     fn portstate_listening_to_master_transition() {
@@ -1470,7 +1470,7 @@ mod tests {
             NoopPortLog,
         );
 
-        let sync_msg = TwoStepSyncMessage::new(0.into());
+        let sync_msg = TwoStepSyncMessage::new(0.into(), LogMessageInterval::new(0));
         let ts_msg =
             TimestampMessage::new(EventMessage::TwoStepSync(sync_msg), TimeStamp::new(0, 0));
 

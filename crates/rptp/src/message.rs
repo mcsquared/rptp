@@ -28,6 +28,7 @@ impl<'a> DomainMessage<'a> {
             self.header.message_type()?,
             self.header.sequence_id(),
             self.header.flags(),
+            self.header.log_message_interval(),
             self.header.payload(),
         )?;
         port.process_event_message(source_port_identity, msg, timestamp);
@@ -85,15 +86,20 @@ impl EventMessage {
         msg_type: MessageType,
         sequence_id: SequenceId,
         flags: MessageFlags,
+        log_message_interval: LogMessageInterval,
         payload: &[u8],
     ) -> Result<Self> {
         match msg_type {
             MessageType::Sync => {
                 if flags.contains(MessageFlags::TWO_STEP) {
-                    Ok(Self::TwoStepSync(TwoStepSyncMessage::new(sequence_id)))
+                    Ok(Self::TwoStepSync(TwoStepSyncMessage::new(
+                        sequence_id,
+                        log_message_interval,
+                    )))
                 } else {
                     Ok(Self::OneStepSync(OneStepSyncMessage::new(
                         sequence_id,
+                        log_message_interval,
                         SyncPayload::new(payload).origin_timestamp()?,
                     )))
                 }
@@ -130,6 +136,7 @@ impl GeneralMessage {
             }
             MessageType::FollowUp => Ok(Self::FollowUp(FollowUpMessage::new(
                 sequence_id,
+                log_message_interval,
                 FollowUpPayload::new(payload).precise_origin_timestamp()?,
             ))),
             MessageType::DelayResponse => Ok(Self::DelayResp(DelayResponseMessage::new(
@@ -251,13 +258,19 @@ impl AnnounceMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OneStepSyncMessage {
     sequence_id: SequenceId,
+    log_message_interval: LogMessageInterval,
     origin_timestamp: TimeStamp,
 }
 
 impl OneStepSyncMessage {
-    pub fn new(sequence_id: SequenceId, origin_timestamp: TimeStamp) -> Self {
+    pub fn new(
+        sequence_id: SequenceId,
+        log_message_interval: LogMessageInterval,
+        origin_timestamp: TimeStamp,
+    ) -> Self {
         Self {
             sequence_id,
+            log_message_interval,
             origin_timestamp,
         }
     }
@@ -271,7 +284,7 @@ impl OneStepSyncMessage {
             .typed(MessageType::Sync, ControlField::Sync)
             .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
-            .with_log_message_interval(LogMessageInterval::new(0x7F))
+            .with_log_message_interval(self.log_message_interval)
             .payload();
 
         let payload_buf = payload.buf();
@@ -284,15 +297,23 @@ impl OneStepSyncMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TwoStepSyncMessage {
     sequence_id: SequenceId,
+    log_message_interval: LogMessageInterval,
 }
 
 impl TwoStepSyncMessage {
-    pub fn new(sequence_id: SequenceId) -> Self {
-        Self { sequence_id }
+    pub fn new(sequence_id: SequenceId, log_message_interval: LogMessageInterval) -> Self {
+        Self {
+            sequence_id,
+            log_message_interval,
+        }
     }
 
     pub fn follow_up(self, precise_origin_timestamp: TimeStamp) -> FollowUpMessage {
-        FollowUpMessage::new(self.sequence_id, precise_origin_timestamp)
+        FollowUpMessage::new(
+            self.sequence_id,
+            self.log_message_interval,
+            precise_origin_timestamp,
+        )
     }
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
@@ -300,7 +321,7 @@ impl TwoStepSyncMessage {
             .typed(MessageType::Sync, ControlField::Sync)
             .flagged(MessageFlags::TWO_STEP)
             .sequenced(self.sequence_id)
-            .with_log_message_interval(LogMessageInterval::new(0x7F))
+            .with_log_message_interval(self.log_message_interval)
             .payload();
 
         payload.finalize(10)
@@ -310,13 +331,19 @@ impl TwoStepSyncMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FollowUpMessage {
     sequence_id: SequenceId,
+    log_message_interval: LogMessageInterval,
     precise_origin_timestamp: TimeStamp,
 }
 
 impl FollowUpMessage {
-    pub fn new(sequence_id: SequenceId, precise_origin_timestamp: TimeStamp) -> Self {
+    pub fn new(
+        sequence_id: SequenceId,
+        log_message_interval: LogMessageInterval,
+        precise_origin_timestamp: TimeStamp,
+    ) -> Self {
         Self {
             sequence_id,
+            log_message_interval,
             precise_origin_timestamp,
         }
     }
@@ -338,7 +365,7 @@ impl FollowUpMessage {
             .typed(MessageType::FollowUp, ControlField::FollowUp)
             .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
-            .with_log_message_interval(LogMessageInterval::new(0x7F))
+            .with_log_message_interval(self.log_message_interval)
             .payload();
 
         let payload_buf = payload.buf();
@@ -367,7 +394,7 @@ impl DelayRequestMessage {
             .typed(MessageType::DelayRequest, ControlField::DelayRequest)
             .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
-            .with_log_message_interval(LogMessageInterval::new(0x7F))
+            .with_log_message_interval(LogMessageInterval::unspecified())
             .payload();
 
         payload.finalize(10)
@@ -405,7 +432,7 @@ impl DelayResponseMessage {
             .typed(MessageType::DelayResponse, ControlField::DelayResponse)
             .flagged(MessageFlags::empty())
             .sequenced(self.sequence_id)
-            .with_log_message_interval(LogMessageInterval::new(0x7F))
+            .with_log_message_interval(LogMessageInterval::unspecified())
             .payload();
 
         let payload_buf = payload.buf();
@@ -470,7 +497,7 @@ mod tests {
 
     use crate::bmca::{Priority1, Priority2};
     use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved};
-    use crate::port::{DomainNumber, PortNumber};
+    use crate::port::{DomainNumber, PortIdentity, PortNumber};
     use crate::time::LogMessageInterval;
     use crate::wire::{PtpVersion, TransportSpecific};
 
@@ -502,7 +529,8 @@ mod tests {
 
     #[test]
     fn one_step_sync_message_wire_roundtrip() {
-        let sync = OneStepSyncMessage::new(42.into(), TimeStamp::new(1, 2));
+        let sync =
+            OneStepSyncMessage::new(42.into(), LogMessageInterval::new(5), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
             TransportSpecific,
             PtpVersion::V2,
@@ -517,7 +545,7 @@ mod tests {
 
     #[test]
     fn two_step_sync_message_wire_roundtrip() {
-        let sync = TwoStepSyncMessage::new(42.into());
+        let sync = TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(7));
         let mut buf = MessageBuffer::new(
             TransportSpecific,
             PtpVersion::V2,
@@ -532,7 +560,8 @@ mod tests {
 
     #[test]
     fn follow_up_message_wire_roundtrip() {
-        let follow_up = FollowUpMessage::new(42.into(), TimeStamp::new(1, 2));
+        let follow_up =
+            FollowUpMessage::new(42.into(), LogMessageInterval::new(3), TimeStamp::new(1, 2));
         let mut buf = MessageBuffer::new(
             TransportSpecific,
             PtpVersion::V2,
@@ -579,7 +608,13 @@ mod tests {
     fn event_message_new_reports_short_sync_payload() {
         let payload = [0u8; 5]; // less than 10 bytes required for origin_timestamp
 
-        let res = EventMessage::new(MessageType::Sync, 1.into(), MessageFlags::empty(), &payload);
+        let res = EventMessage::new(
+            MessageType::Sync,
+            1.into(),
+            MessageFlags::empty(),
+            LogMessageInterval::new(3),
+            &payload,
+        );
 
         assert_eq!(
             res,
@@ -666,19 +701,20 @@ mod tests {
 
     #[test]
     fn twostep_sync_message_produces_follow_up() {
-        let sync = TwoStepSyncMessage::new(42.into());
+        let sync = TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(9));
         let follow_up = sync.follow_up(TimeStamp::new(4, 0));
 
         assert_eq!(
             follow_up,
-            FollowUpMessage::new(42.into(), TimeStamp::new(4, 0))
+            FollowUpMessage::new(42.into(), LogMessageInterval::new(9), TimeStamp::new(4, 0))
         );
     }
 
     #[test]
     fn follow_up_message_produces_master_slave_offset() {
-        let sync = TwoStepSyncMessage::new(42.into());
-        let follow_up = FollowUpMessage::new(42.into(), TimeStamp::new(4, 0));
+        let sync = TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(11));
+        let follow_up =
+            FollowUpMessage::new(42.into(), LogMessageInterval::new(11), TimeStamp::new(4, 0));
 
         let sync_ingress_timestamp = TimeStamp::new(5, 0);
         let offset = follow_up.master_slave_offset(sync, sync_ingress_timestamp);
@@ -688,8 +724,9 @@ mod tests {
 
     #[test]
     fn follow_up_message_with_different_sequence_id_produces_no_master_slave_offset() {
-        let sync = TwoStepSyncMessage::new(42.into());
-        let follow_up = FollowUpMessage::new(43.into(), TimeStamp::new(4, 0));
+        let sync = TwoStepSyncMessage::new(42.into(), LogMessageInterval::new(11));
+        let follow_up =
+            FollowUpMessage::new(43.into(), LogMessageInterval::new(11), TimeStamp::new(4, 0));
 
         let sync_ingress_timestamp = TimeStamp::new(5, 0);
         let offset = follow_up.master_slave_offset(sync, sync_ingress_timestamp);
@@ -735,8 +772,15 @@ mod tests {
         let mut sync_window = MessageWindow::new();
         let mut follow_up_window = MessageWindow::new();
 
-        sync_window.record((TwoStepSyncMessage::new(1.into()), TimeStamp::new(2, 0)));
-        follow_up_window.record(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0)));
+        sync_window.record((
+            TwoStepSyncMessage::new(1.into(), LogMessageInterval::new(5)),
+            TimeStamp::new(2, 0),
+        ));
+        follow_up_window.record(FollowUpMessage::new(
+            1.into(),
+            LogMessageInterval::new(5),
+            TimeStamp::new(1, 0),
+        ));
 
         let offset = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
@@ -750,7 +794,10 @@ mod tests {
         let mut sync_window = MessageWindow::new();
         let follow_up_window = MessageWindow::<FollowUpMessage>::new();
 
-        sync_window.record((TwoStepSyncMessage::new(1.into()), TimeStamp::new(2, 0)));
+        sync_window.record((
+            TwoStepSyncMessage::new(1.into(), LogMessageInterval::new(3)),
+            TimeStamp::new(2, 0),
+        ));
 
         let offset = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
@@ -765,15 +812,26 @@ mod tests {
         let mut sync_window = MessageWindow::new();
         let mut follow_up_window = MessageWindow::new();
 
-        sync_window.record((TwoStepSyncMessage::new(1.into()), TimeStamp::new(2, 0)));
-        follow_up_window.record(FollowUpMessage::new(2.into(), TimeStamp::new(1, 0)));
+        sync_window.record((
+            TwoStepSyncMessage::new(1.into(), LogMessageInterval::new(3)),
+            TimeStamp::new(2, 0),
+        ));
+        follow_up_window.record(FollowUpMessage::new(
+            2.into(),
+            LogMessageInterval::new(3),
+            TimeStamp::new(1, 0),
+        ));
 
         let no_match = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });
         assert_eq!(no_match, None);
 
-        follow_up_window.record(FollowUpMessage::new(1.into(), TimeStamp::new(1, 0)));
+        follow_up_window.record(FollowUpMessage::new(
+            1.into(),
+            LogMessageInterval::new(3),
+            TimeStamp::new(1, 0),
+        ));
         let matched = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });
@@ -786,15 +844,25 @@ mod tests {
         let mut sync_window = MessageWindow::new();
         let mut follow_up_window = MessageWindow::new();
 
-        follow_up_window.record(FollowUpMessage::new(3.into(), TimeStamp::new(1, 0)));
-        sync_window.record((TwoStepSyncMessage::new(4.into()), TimeStamp::new(2, 0)));
+        follow_up_window.record(FollowUpMessage::new(
+            3.into(),
+            LogMessageInterval::new(3),
+            TimeStamp::new(1, 0),
+        ));
+        sync_window.record((
+            TwoStepSyncMessage::new(4.into(), LogMessageInterval::new(3)),
+            TimeStamp::new(2, 0),
+        ));
 
         let no_match = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });
         assert_eq!(no_match, None);
 
-        sync_window.record((TwoStepSyncMessage::new(3.into()), TimeStamp::new(2, 0)));
+        sync_window.record((
+            TwoStepSyncMessage::new(3.into(), LogMessageInterval::new(3)),
+            TimeStamp::new(2, 0),
+        ));
         let matched = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });
@@ -807,8 +875,15 @@ mod tests {
         let mut sync_window = MessageWindow::new();
         let mut follow_up_window = MessageWindow::new();
 
-        follow_up_window.record(FollowUpMessage::new(5.into(), TimeStamp::new(10, 0)));
-        sync_window.record((TwoStepSyncMessage::new(5.into()), TimeStamp::new(11, 0)));
+        follow_up_window.record(FollowUpMessage::new(
+            5.into(),
+            LogMessageInterval::new(3),
+            TimeStamp::new(10, 0),
+        ));
+        sync_window.record((
+            TwoStepSyncMessage::new(5.into(), LogMessageInterval::new(3)),
+            TimeStamp::new(11, 0),
+        ));
 
         let matched = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
@@ -823,16 +898,30 @@ mod tests {
         let mut follow_up_window = MessageWindow::new();
 
         // First pair -> 2s offset
-        sync_window.record((TwoStepSyncMessage::new(1.into()), TimeStamp::new(5, 0)));
-        follow_up_window.record(FollowUpMessage::new(1.into(), TimeStamp::new(3, 0)));
+        sync_window.record((
+            TwoStepSyncMessage::new(1.into(), LogMessageInterval::new(5)),
+            TimeStamp::new(5, 0),
+        ));
+        follow_up_window.record(FollowUpMessage::new(
+            1.into(),
+            LogMessageInterval::new(5),
+            TimeStamp::new(3, 0),
+        ));
         let first = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });
         assert_eq!(first, Some(TimeInterval::new(2, 0)));
 
         // Second pair -> 3s offset overwrites windows
-        sync_window.record((TwoStepSyncMessage::new(2.into()), TimeStamp::new(9, 0)));
-        follow_up_window.record(FollowUpMessage::new(2.into(), TimeStamp::new(6, 0)));
+        sync_window.record((
+            TwoStepSyncMessage::new(2.into(), LogMessageInterval::new(5)),
+            TimeStamp::new(9, 0),
+        ));
+        follow_up_window.record(FollowUpMessage::new(
+            2.into(),
+            LogMessageInterval::new(5),
+            TimeStamp::new(6, 0),
+        ));
         let second = follow_up_window.combine_latest(&sync_window, |&follow, &(sync, ts)| {
             follow.master_slave_offset(sync, ts)
         });

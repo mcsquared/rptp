@@ -345,7 +345,7 @@ mod tests {
     use rptp::sync::EndToEndDelayMechanism;
     use rptp::test_support::FakeClock;
     use rptp::test_support::FakeTimestamping;
-    use rptp::time::{LogInterval, TimeStamp};
+    use rptp::time::{LogInterval, LogMessageInterval, TimeStamp};
     use rptp::wire::{MessageBuffer, PtpVersion, TransportSpecific};
 
     use crate::log::TracingPortLog;
@@ -714,7 +714,7 @@ mod tests {
             DomainNumber::new(7),
             PortIdentity::fake(),
         );
-        let sync_msg = TwoStepSyncMessage::new(1.into());
+        let sync_msg = TwoStepSyncMessage::new(1.into(), LogMessageInterval::new(0));
         let wire = sync_msg.serialize(&mut msg_buf);
         event_queue
             .lock()
@@ -758,7 +758,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::fake(),
         );
-        let sync_msg = TwoStepSyncMessage::new(2.into());
+        let sync_msg = TwoStepSyncMessage::new(2.into(), LogMessageInterval::new(0));
         let wire = sync_msg.serialize(&mut msg_buf);
         let mut bytes = wire.as_ref().to_vec();
         // Overwrite the PTP version field (offset 1) with an unsupported value.
@@ -835,7 +835,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::fake(),
         );
-        let sync_msg = TwoStepSyncMessage::new(10.into());
+        let sync_msg = TwoStepSyncMessage::new(10.into(), LogMessageInterval::new(0));
         let wire = sync_msg.serialize(&mut msg_buf);
         let mut bytes = wire.as_ref().to_vec();
         let len = bytes.len() as u16;
@@ -882,7 +882,8 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::fake(),
         );
-        let sync_msg = OneStepSyncMessage::new(11.into(), TimeStamp::new(1, 2));
+        let sync_msg =
+            OneStepSyncMessage::new(11.into(), LogMessageInterval::new(0), TimeStamp::new(1, 2));
         let wire = sync_msg.serialize(&mut msg_buf);
         let mut bytes = wire.as_ref().to_vec();
         // Ensure length is at least header (34) + some payload, but less than 34 + 10.
