@@ -8,13 +8,14 @@
 
 ## Introduction
 
-`rptp` is a domain-driven implementation of IEEE 1588‑2019 / PTP in Rust, exploratory and growing.
+`rptp` is an early domain-driven implementation of IEEE 1588‑2019 / PTP in Rust, exploratory and growing.
 
 This repository contains:
 
 - `crates/rptp` – the core PTP domain model (no async/runtime dependencies). 
-- `crates/rptp-daemon` – a thin Tokio-based infrastructure layer that wires the core to UDP multicast sockets, system timers and virtual clocks.
-- `tests/e2e` – end-to-end acceptance test scenarios 
+- `crates/rptp-daemon` – a thin, Tokio-based infrastructure layer that currently serves as a test harness and playground for the core: it wires `rptp` to UDP multicast sockets, system timers and virtual clocks, and is expected to evolve into a full daemon as the model stabilizes.
+- `crates/rptp-embedded-demo` – an experimental bare-metal harness for `rptp` targeting `thumbv7m-none-eabi` and a 12 MHz, 64‑KiB‑class Cortex‑M MCU; see `crates/rptp-embedded-demo/README.md` for building, QEMU usage, and Docker-based e2e tests.
+- `tests/e2e` – end-to-end acceptance "smoke" test scenarios, including QEMU + `ptp4l` interoperability.
 
 ### How it started
 
@@ -29,7 +30,8 @@ This project began as:
 - A growing **domain-driven model** of PTP: behavior-rich objects (clocks, ports, BMCA roles, servos, delay mechanisms) that talk in the language of the IEEE 1588 standard.  
 - A **test-heavy core**: the vast majority of tests live in the `rptp` crate (clocks, BMCA, port state machine, sync/delay, servo). The Tokio layer has only the minimal tests needed to drive and probe the core.  
 - A **portable foundation**: the core runs without async/runtime dependencies and is designed to sit behind different runtimes and timestamping backends (Tokio today, embedded/PHC or bare metal tomorrow).  
-- An intentionally **thin Tokio adapter**: `crates/rptp-daemon` exists to exercise the model end-to-end, not as the primary product yet. It will grow as the domain model and the Rust/Tokio integration mature.  
+- A first **bare-metal embedded demo** (`crates/rptp-embedded-demo`) that compiles for `thumbv7m-none-eabi`, currently fits comfortably into a 12 MHz, 64‑KiB‑RAM‑class Cortex‑M MCU, and passes a QEMU + Docker-based smoke test against `ptp4l` (embedded node as grandmaster, `ptp4l` as slave). This is an early but important milestone for the embedded trajectory of the project.  
+- An intentionally **thin Tokio adapter**: `crates/rptp-daemon` is, for now, a test harness and playground for the domain core: it exists to exercise the model end-to-end and drive experiments, not as a production daemon yet. It is expected to grow into a full daemon as the domain model and the Rust/Tokio integration mature.  
 
 ### What this project is not (yet)
 
@@ -44,7 +46,7 @@ Expect **0.x** semantics: the design and APIs will evolve as the model matures.
 
 ## Status & Agenda
 
-This is an **early-stage, experimental project**, with a deliberate focus on the **domain core first**:
+This is an **early-stage, experimental project**, with a deliberate focus on a testable **domain core first**:
 
 - APIs are **unstable** and may change in 0.x releases.
 - The design is actively evolving as domain understanding deepens.
@@ -61,7 +63,8 @@ You **must not** treat `rptp` or `rptp-daemon` as a hardened, production-ready P
 - Core PTPv2 message flows: BMCA, port state machine, and end-to-end delay mechanism for a single-port, single-domain topology.  
 - A rich, **core-centered test suite**: 200+ unit and integration tests around the domain logic; a small Tokio/e2e layer that is just large enough to drive the core.  
 - Virtual clocks and software timestamping for simulation & tests.  
-- Thin, Tokio-driven integration that wires the core to UDP multicast sockets and system timers for experiments.  
+- A deliberately rough but effective **bare-metal QEMU demo harness** (`crates/rptp-embedded-demo`) that runs as grandmaster on a 12 MHz Cortex‑M target, still fits within a 64‑KiB MCU budget, and is exercised by Dockerized e2e tests against `ptp4l`. It exists to keep the embedded trajectory honest, not as production firmware yet.  
+- Thin, Tokio-driven integration that wires the core to UDP multicast sockets and system timers for tests and experiments.  
 - Promising early locality/performance behavior in the core, with the hot paths kept free from unnecessary allocation, infrastructure or framework concerns.  
 
 ### On the Agenda
@@ -81,7 +84,7 @@ For details on how to report potential vulnerabilities or security-sensitive iss
 
 ---
 
-## Getting started
+## Getting Started
 
 ### Prerequisites
 
@@ -125,7 +128,7 @@ By design this is still a **playground**:
 
 ---
 
-## Design & architecture
+## Design & Architecture
 
 If you’re interested in the modeling approach:
 
@@ -140,7 +143,7 @@ A few high-level points:
 
 ---
 
-## Support & collaboration
+## Support & Collaboration
 
 Building a production-ready, clean, portable PTP implementation is a serious project.
 
@@ -178,7 +181,7 @@ If you’re excited about:
 
 - domain-driven, object-rich modeling,
 - test-guided design in systems / embedded contexts,
-- and clean, maintainable PTP implementations,
+- and clean, maintainable PTP implementation,
 you’re very much invited to participate.
 
 ---

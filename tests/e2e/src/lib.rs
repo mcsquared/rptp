@@ -104,10 +104,7 @@ impl TestImage {
                 ),
                 ("tests/e2e/scenarios".into(), "tests/e2e/scenarios".into()),
             ],
-            buildargs: HashMap::from([(
-                "MANIFEST_DIR".into(),
-                "tests/e2e/scenarios".into(),
-            )]),
+            buildargs: HashMap::from([("MANIFEST_DIR".into(), "tests/e2e/scenarios".into())]),
         }
     }
 
@@ -127,11 +124,26 @@ impl TestImage {
         }
     }
 
+    pub fn qemu(docker: Docker) -> Self {
+        Self {
+            docker,
+            tag: "qemu".into(),
+            dockerfile: "tests/e2e/docker/qemu.Dockerfile".into(),
+            context_pairs: vec![
+                (".dockerignore".into(), ".dockerignore".into()),
+                ("crates".into(), "crates".into()),
+                (
+                    "tests/e2e/docker/qemu.Dockerfile".into(),
+                    "tests/e2e/docker/qemu.Dockerfile".into(),
+                ),
+                ("tests/e2e/scenarios".into(), "tests/e2e/scenarios".into()),
+            ],
+            buildargs: HashMap::from([("MANIFEST_DIR".into(), "crates/rptp-embedded-demo".into())]),
+        }
+    }
+
     pub async fn build(&self) -> anyhow::Result<String> {
-        let ctx = BuildContext::new(
-            repo_root()?,
-            self.context_pairs.clone().into_iter(),
-        );
+        let ctx = BuildContext::new(repo_root()?, self.context_pairs.clone().into_iter());
 
         let ctx_tar = ctx.tar()?;
 
