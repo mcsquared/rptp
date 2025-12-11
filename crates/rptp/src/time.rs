@@ -147,7 +147,7 @@ impl core::ops::Sub for TimeInterval {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Instant {
     nanos: u64,
 }
