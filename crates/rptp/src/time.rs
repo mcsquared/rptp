@@ -153,6 +153,10 @@ pub struct Instant {
 }
 
 impl Instant {
+    pub const fn zero() -> Self {
+        Self { nanos: 0 }
+    }
+
     pub fn from_nanos(nanos: u64) -> Self {
         Self { nanos }
     }
