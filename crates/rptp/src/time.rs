@@ -156,16 +156,12 @@ impl Instant {
             nanos: (secs as u64) * 1_000_000_000,
         }
     }
-}
 
-impl core::ops::Sub for Instant {
-    type Output = Duration;
-
-    fn sub(self, rhs: Self) -> Self::Output {
+    pub fn checked_sub(self, rhs: Instant) -> Option<Duration> {
         if self.nanos >= rhs.nanos {
-            Duration::from_nanos(self.nanos - rhs.nanos)
+            Some(Duration::from_nanos(self.nanos - rhs.nanos))
         } else {
-            Duration::from_nanos(rhs.nanos - self.nanos)
+            None
         }
     }
 }

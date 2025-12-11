@@ -739,18 +739,17 @@ impl SlidingWindowQualification {
     }
 
     fn is_qualified(&self) -> bool {
-        match self.prev {
-            Some(prev) => {
-                // Strict sliding window: both timestamps must lie
-                // within a window of length FOREIGN_MASTER_TIME_WINDOW.
-                (self.last - prev) < self.window
-            }
-            None => false,
-        }
+        let delta = match self.prev {
+            Some(prev) => self.last.checked_sub(prev),
+            None => None,
+        };
+
+        delta.is_some_and(|delta| delta <= self.window)
     }
 
     fn is_stale(&self, now: Instant) -> bool {
-        (now - self.last) > self.window
+        let delta = now.checked_sub(self.last);
+        delta.is_none_or(|delta| delta > self.window)
     }
 }
 
@@ -1208,26 +1207,26 @@ pub(crate) mod tests {
             t0,
         );
 
-        // Announce exactly once per foreignMasterTimeWindow; density never reaches 2
+        // Announce just slower than foreignMasterTimeWindow; density never reaches 2
         // within any sliding window.
         record.consider(
             ForeignClockDS::high_grade_test_clock(),
             LogInterval::new(0),
-            Instant::from_secs(4),
+            Instant::from_secs(5),
         );
         assert!(record.dataset().is_none());
 
         record.consider(
             ForeignClockDS::high_grade_test_clock(),
             LogInterval::new(0),
-            Instant::from_secs(8),
+            Instant::from_secs(10),
         );
         assert!(record.dataset().is_none());
 
         record.consider(
             ForeignClockDS::high_grade_test_clock(),
             LogInterval::new(0),
-            Instant::from_secs(12),
+            Instant::from_secs(15),
         );
         assert!(record.dataset().is_none());
     }
@@ -1292,7 +1291,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn sliding_window_can_be_unqualified_but_not_stale() {
+    fn sliding_window_edge_drops_qualification_but_not_stale() {
         let t0 = Instant::from_secs(0);
         let mut record = ForeignClockRecord::new(
             PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
@@ -1309,9 +1308,9 @@ pub(crate) mod tests {
         );
         assert!(record.dataset().is_some());
 
-        // Next Announce spaced exactly at the edge of the window drops qualification
+        // Next Announce spaced just beyond the window drops qualification
         // but the record is not stale yet.
-        let now = Instant::from_secs(5);
+        let now = Instant::from_nanos(5_000_000_001);
         let _ = record.consider(
             ForeignClockDS::high_grade_test_clock(),
             LogInterval::new(0),
