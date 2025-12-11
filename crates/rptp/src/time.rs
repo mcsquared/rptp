@@ -88,6 +88,12 @@ impl TimeInterval {
         Self { seconds, nanos }
     }
 
+    pub fn from_u64_nanos(nanos: u64) -> Self {
+        let seconds = (nanos / 1_000_000_000) as i64;
+        let nanos = (nanos % 1_000_000_000) as u32;
+        Self::new(seconds, nanos)
+    }
+
     fn total_nanos(&self) -> i128 {
         (self.seconds as i128 * 1_000_000_000) + self.nanos as i128
     }
