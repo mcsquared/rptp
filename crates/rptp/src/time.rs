@@ -167,6 +167,12 @@ impl Instant {
         }
     }
 
+    pub fn saturating_add(self, rhs: Duration) -> Self {
+        Self {
+            nanos: self.nanos.saturating_add(rhs.nanos),
+        }
+    }
+
     pub fn checked_sub(self, rhs: Instant) -> Option<Duration> {
         if self.nanos >= rhs.nanos {
             Some(Duration::from_nanos(self.nanos - rhs.nanos))
