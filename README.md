@@ -28,10 +28,7 @@ This project began as:
 ### How it’s going
 
 - A growing **domain-driven model** of PTP: behavior-rich objects (clocks, ports, BMCA roles, servos, delay mechanisms) that talk in the language of the IEEE 1588 standard.  
-- A **test-heavy core**: the vast majority of tests live in the `rptp` crate (clocks, BMCA, port state machine, sync/delay, servo). The Tokio layer has only the minimal tests needed to drive and probe the core.  
-- A **portable foundation**: the core runs without async/runtime dependencies and is designed to sit behind different runtimes and timestamping backends (Tokio today, embedded/PHC or bare metal tomorrow).  
-- A first **bare-metal embedded demo** (`crates/rptp-embedded-demo`) that compiles for `thumbv7m-none-eabi`, currently fits comfortably into a 12 MHz, 64‑KiB‑RAM‑class Cortex‑M MCU, and passes a QEMU + Docker-based smoke test against `ptp4l` (embedded node as grandmaster, `ptp4l` as slave). This is an early but important milestone for the embedded trajectory of the project.  
-- An intentionally **thin Tokio adapter**: `crates/rptp-daemon` is, for now, a test harness and playground for the domain core: it exists to exercise the model end-to-end and drive experiments, not as a production daemon yet. It is expected to grow into a full daemon as the domain model and the Rust/Tokio integration mature.  
+- A **test-heavy, portable core**: most tests live next to the domain logic in the `rptp` crate, and the core runs without async/runtime dependencies so it can sit behind different runtimes and timestamping backends (Tokio today, embedded/PHC or bare metal tomorrow).  
 
 ### What this project is not (yet)
 
@@ -67,18 +64,36 @@ You **must not** treat `rptp` or `rptp-daemon` as a hardened, production-ready P
 - Thin, Tokio-driven integration that wires the core to UDP multicast sockets and system timers for tests and experiments.  
 - Promising early locality/performance behavior in the core, with the hot paths kept free from unnecessary allocation, infrastructure or framework concerns.  
 
+### Near‑Term Focus (0.x)
+
+These are concrete areas of work planned for the near term, before the project claims broader feature coverage or stability:
+
+- **Broader protocol field coverage**  
+  Improve evaluation of message fields, including coarse origin timestamps in Announce and two‑step Sync messages, and other currently underused fields.
+
+- **Timescale and UTC handling**  
+  Make the PTP timescale handling explicit and correct, including leap seconds, UTC offset fields, and related flags, and reflect this clearly in the servo and tests.
+
+- **Multi-domain and multi-port setups**  
+  Extend support beyond single-domain / single-port topologies to validate and exercise the `DomainMessage` ↔ `PortMap` collaboration in more realistic deployments, including multi-port configurations and BMCA behavior for boundary clock ports.
+
+- **PI servo tuning and constraints**  
+  Tune the PI servo (`kp`/`ki`) based on the Sync log message interval, clamp drift in the PI servo, and derive parameters such as `min_delta` from `ki` rather than ad‑hoc choices.
+
+- **Stronger acceptance tests vs. `ptp4l`**  
+  Tighten interoperability and acceptance criteria against `ptp4l`, including timescale awareness and correctness, not just message flow compatibility.
+
 ### On the Agenda
 
 These are planned directions and areas of interest, not yet hard commitments; progress will depend on available time and funding.
 
-- End-to-end interoperability and testing against `ptp4l`  
-- Exploration of OS-level and hardware timestamping paths  
-- Expanded protocol coverage and profile support  
-- Broader testing for edge cases, failure modes, and error conditions  
-- Stronger runtime and infrastructure abstractions  
-- Evolving `rptp-daemon` from a thin test harness into a production-grade daemon as the model and understanding solidify  
-- Embedded and system/PHC clock backends  
-- Systematic benchmarking & profiling  
+- Deeper interoperability work and long-running scenarios beyond the near-term acceptance tests against `ptp4l`.  
+- Evaluation and processing of the correction field and other profile-specific fields once the core flows are stable.  
+- OS-level and hardware timestamping paths, including PHC-backed system and embedded clock backends for constrained or specialized targets.  
+- Expanded protocol coverage and support for additional PTP profiles beyond the default.  
+- Stronger runtime and infrastructure abstractions, configuration surfaces, and observability as `rptp-daemon` evolves from a thin test harness into a production-grade daemon.  
+- Systematic benchmarking and profiling to understand performance envelopes and trade-offs.  
+- A richer and more aggressive testing strategy: property-based testing (e.g. `proptest`), fuzzing, mutation testing, and pcap replay support for real-world captures (e.g. from Wireshark), covering edge cases, failure modes, packet loss/reordering, and other conditions beyond the initial interoperability and timescale checks.  
 
 For details on how to report potential vulnerabilities or security-sensitive issues, see `SECURITY.md`.
 
