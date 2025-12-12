@@ -117,7 +117,7 @@ impl PortIdentity {
         }
     }
 
-    pub fn from_slice(buf: &[u8; 10]) -> Self {
+    pub fn from_wire(buf: &[u8; 10]) -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[
                 buf[Self::CLOCK_IDENTITY_RANGE.start],
@@ -136,7 +136,7 @@ impl PortIdentity {
         }
     }
 
-    pub fn to_bytes(&self) -> [u8; 10] {
+    pub fn to_wire(&self) -> [u8; 10] {
         let mut bytes = [0u8; 10];
         bytes[Self::CLOCK_IDENTITY_RANGE].copy_from_slice(self.clock_identity.as_bytes());
         bytes[Self::PORT_NUMBER_RANGE].copy_from_slice(&self.port_number.to_be_bytes());
@@ -223,7 +223,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestampi
             self.domain_number,
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
         );
-        let finalized = msg.serialize(&mut buf);
+        let finalized = msg.to_wire(&mut buf);
         let res = self.physical_port.send_event(finalized.as_ref());
         if res.is_ok() {
             self.timestamping.stamp_egress(msg);
@@ -238,7 +238,7 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestampi
             self.domain_number,
             PortIdentity::new(*self.local_clock.identity(), self.port_number),
         );
-        let finalized = msg.serialize(&mut buf);
+        let finalized = msg.to_wire(&mut buf);
         self.physical_port.send_general(finalized.as_ref())
     }
 
@@ -418,7 +418,7 @@ mod tests {
         assert_eq!(bytes[4], domain_number.as_u8());
         assert_eq!(
             &bytes[20..30],
-            &crate::port::PortIdentity::new(identity, port_number).to_bytes()
+            &crate::port::PortIdentity::new(identity, port_number).to_wire()
         );
     }
 
@@ -460,7 +460,7 @@ mod tests {
         assert_eq!(bytes[4], domain_number.as_u8());
         assert_eq!(
             &bytes[20..30],
-            &crate::port::PortIdentity::new(identity, port_number).to_bytes()
+            &crate::port::PortIdentity::new(identity, port_number).to_wire()
         );
     }
 }

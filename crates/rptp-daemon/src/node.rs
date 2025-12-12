@@ -720,7 +720,7 @@ mod tests {
             PortIdentity::fake(),
         );
         let sync_msg = TwoStepSyncMessage::new(1.into(), LogMessageInterval::new(0));
-        let wire = sync_msg.serialize(&mut msg_buf);
+        let wire = sync_msg.to_wire(&mut msg_buf);
         event_queue
             .lock()
             .unwrap()
@@ -765,7 +765,7 @@ mod tests {
             PortIdentity::fake(),
         );
         let sync_msg = TwoStepSyncMessage::new(2.into(), LogMessageInterval::new(0));
-        let wire = sync_msg.serialize(&mut msg_buf);
+        let wire = sync_msg.to_wire(&mut msg_buf);
         let mut bytes = wire.as_ref().to_vec();
         // Overwrite the PTP version field (offset 1) with an unsupported value.
         bytes[1] = 1;
@@ -844,7 +844,7 @@ mod tests {
             PortIdentity::fake(),
         );
         let sync_msg = TwoStepSyncMessage::new(10.into(), LogMessageInterval::new(0));
-        let wire = sync_msg.serialize(&mut msg_buf);
+        let wire = sync_msg.to_wire(&mut msg_buf);
         let mut bytes = wire.as_ref().to_vec();
         let len = bytes.len() as u16;
         let bad_len = len.wrapping_add(1);
@@ -893,7 +893,7 @@ mod tests {
         );
         let sync_msg =
             OneStepSyncMessage::new(11.into(), LogMessageInterval::new(0), TimeStamp::new(1, 2));
-        let wire = sync_msg.serialize(&mut msg_buf);
+        let wire = sync_msg.to_wire(&mut msg_buf);
         let mut bytes = wire.as_ref().to_vec();
         // Ensure length is at least header (34) + some payload, but less than 34 + 10.
         let truncated_len = 40usize;

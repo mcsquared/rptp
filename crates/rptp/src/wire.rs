@@ -115,7 +115,7 @@ impl<'a> MessageHeader<'a> {
     }
 
     pub fn source_port_identity(&self) -> PortIdentity {
-        PortIdentity::from_slice(
+        PortIdentity::from_wire(
             self.length_checked.buf()[PTP_SOURCE_PORT_IDENTITY_RANGE]
                 .try_into()
                 .unwrap(),
@@ -150,7 +150,7 @@ impl<'a> AnnouncePayload<'a> {
                 found: self.payload.len().saturating_sub(13),
             })?;
 
-        Ok(ForeignClockDS::from_slice(fc_bytes.try_into().map_err(
+        Ok(ForeignClockDS::from_wire(fc_bytes.try_into().map_err(
             |_| ParseError::PayloadTooShort {
                 field: "Announce.foreign_clock_ds",
                 expected: 16,
@@ -256,7 +256,7 @@ impl<'a> DelayResponsePayload<'a> {
                 found: self.payload.len().saturating_sub(10),
             })?;
 
-        Ok(PortIdentity::from_slice(pi_bytes.try_into().map_err(
+        Ok(PortIdentity::from_wire(pi_bytes.try_into().map_err(
             |_| ParseError::PayloadTooShort {
                 field: "DelayResponse.requesting_port_identity",
                 expected: 10,
@@ -351,7 +351,7 @@ impl MessageBuffer {
         buf[PTP_VERSION_OFFSET] = version.as_u8() & 0x0F;
         buf[PTP_DOMAIN_NUMBER_OFFSET] = domain_number.as_u8();
         buf[PTP_SOURCE_PORT_IDENTITY_RANGE]
-            .copy_from_slice(source_port_identity.to_bytes().as_ref());
+            .copy_from_slice(source_port_identity.to_wire().as_ref());
 
         Self { buf }
     }
@@ -512,7 +512,7 @@ mod tests {
                 PortNumber::new(2),
             ),
         );
-        let wire = msg.serialize(&mut buf);
+        let wire = msg.to_wire(&mut buf);
         let bytes = wire.as_ref();
         let len = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
         assert_eq!(len, bytes.len());
@@ -529,7 +529,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::fake(),
         );
-        let wire = msg.serialize(&mut buf);
+        let wire = msg.to_wire(&mut buf);
         let bytes = wire.as_ref();
         let len = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
         assert_eq!(len, bytes.len());
@@ -554,7 +554,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::fake(),
         );
-        let wire = msg.serialize(&mut buf);
+        let wire = msg.to_wire(&mut buf);
         let bytes = wire.as_ref();
         let len = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
         assert_eq!(len, bytes.len());
@@ -571,7 +571,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
-        let wire = msg.serialize(&mut buf);
+        let wire = msg.to_wire(&mut buf);
         let bytes = wire.as_ref();
         let len = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
         assert_eq!(len, bytes.len());
@@ -599,7 +599,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
-        let wire = msg.serialize(&mut buf);
+        let wire = msg.to_wire(&mut buf);
         let bytes = wire.as_ref();
         let len = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
         assert_eq!(len, bytes.len());

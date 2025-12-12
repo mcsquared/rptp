@@ -65,7 +65,7 @@ impl ClockQuality {
         self.clock_class >= 1 && self.clock_class <= 127
     }
 
-    pub fn from_slice(buf: &[u8; 4]) -> Self {
+    pub fn from_wire(buf: &[u8; 4]) -> Self {
         Self {
             clock_class: buf[Self::CLOCK_CLASS_OFFSET],
             clock_accuracy: buf[Self::CLOCK_ACCURACY_OFFSET],
@@ -76,7 +76,7 @@ impl ClockQuality {
         }
     }
 
-    pub fn to_bytes(&self) -> [u8; 4] {
+    pub fn to_wire(&self) -> [u8; 4] {
         let mut bytes = [0u8; 4];
         bytes[Self::CLOCK_CLASS_OFFSET] = self.clock_class;
         bytes[Self::CLOCK_ACCURACY_OFFSET] = self.clock_accuracy;

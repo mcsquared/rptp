@@ -110,11 +110,11 @@ impl EventMessage {
         }
     }
 
-    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         match self {
-            EventMessage::DelayReq(msg) => msg.serialize(buf),
-            EventMessage::OneStepSync(msg) => msg.serialize(buf),
-            EventMessage::TwoStepSync(msg) => msg.serialize(buf),
+            EventMessage::DelayReq(msg) => msg.to_wire(buf),
+            EventMessage::OneStepSync(msg) => msg.to_wire(buf),
+            EventMessage::TwoStepSync(msg) => msg.to_wire(buf),
         }
     }
 }
@@ -159,11 +159,11 @@ impl GeneralMessage {
         }
     }
 
-    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         match self {
-            GeneralMessage::Announce(msg) => msg.serialize(buf),
-            GeneralMessage::DelayResp(msg) => msg.serialize(buf),
-            GeneralMessage::FollowUp(msg) => msg.serialize(buf),
+            GeneralMessage::Announce(msg) => msg.to_wire(buf),
+            GeneralMessage::DelayResp(msg) => msg.to_wire(buf),
+            GeneralMessage::FollowUp(msg) => msg.to_wire(buf),
         }
     }
 }
@@ -261,7 +261,7 @@ impl AnnounceMessage {
         }
     }
 
-    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let ptp_timescale_flag = match self.ptp_timescale {
             TimeScale::Ptp => MessageFlags::PTP_TIMESCALE,
             TimeScale::Arb => MessageFlags::empty(),
@@ -275,7 +275,7 @@ impl AnnounceMessage {
             .payload();
 
         let payload_buf = payload.buf();
-        payload_buf[13..29].copy_from_slice(&self.foreign_clock_ds.to_bytes());
+        payload_buf[13..29].copy_from_slice(&self.foreign_clock_ds.to_wire());
 
         payload.finalize(30)
     }
@@ -305,7 +305,7 @@ impl OneStepSyncMessage {
         ingress_timestamp - self.origin_timestamp
     }
 
-    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
             .with_message_type(MessageType::Sync, ControlField::Sync)
             .with_flags(MessageFlags::empty())
@@ -342,7 +342,7 @@ impl TwoStepSyncMessage {
         )
     }
 
-    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let payload = buf
             .with_message_type(MessageType::Sync, ControlField::Sync)
             .with_flags(MessageFlags::TWO_STEP)
@@ -386,7 +386,7 @@ impl FollowUpMessage {
         }
     }
 
-    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
             .with_message_type(MessageType::FollowUp, ControlField::FollowUp)
             .with_flags(MessageFlags::empty())
@@ -425,7 +425,7 @@ impl DelayRequestMessage {
         )
     }
 
-    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let payload = buf
             .with_message_type(MessageType::DelayRequest, ControlField::DelayRequest)
             .with_flags(MessageFlags::empty())
@@ -472,7 +472,7 @@ impl DelayResponseMessage {
         }
     }
 
-    pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
             .with_message_type(MessageType::DelayResponse, ControlField::DelayResponse)
             .with_flags(MessageFlags::empty())
@@ -482,7 +482,7 @@ impl DelayResponseMessage {
 
         let payload_buf = payload.buf();
         payload_buf[..10].copy_from_slice(&self.receive_timestamp.to_wire());
-        payload_buf[10..20].copy_from_slice(&self.requesting_port_identity.to_bytes());
+        payload_buf[10..20].copy_from_slice(&self.requesting_port_identity.to_wire());
 
         payload.finalize(20)
     }
@@ -568,7 +568,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
-        let wire = announce.serialize(&mut buf);
+        let wire = announce.to_wire(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, GeneralMessage::Announce(announce));
@@ -584,7 +584,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
-        let wire = sync.serialize(&mut buf);
+        let wire = sync.to_wire(&mut buf);
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, EventMessage::OneStepSync(sync));
@@ -599,7 +599,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
-        let wire = sync.serialize(&mut buf);
+        let wire = sync.to_wire(&mut buf);
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, EventMessage::TwoStepSync(sync));
@@ -615,7 +615,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
-        let wire = follow_up.serialize(&mut buf);
+        let wire = follow_up.to_wire(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, GeneralMessage::FollowUp(follow_up));
@@ -630,7 +630,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
-        let wire = delay_req.serialize(&mut buf);
+        let wire = delay_req.to_wire(&mut buf);
         let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, EventMessage::DelayReq(delay_req));
@@ -654,7 +654,7 @@ mod tests {
             DomainNumber::new(0),
             PortIdentity::fake(),
         );
-        let wire = delay_resp.serialize(&mut buf);
+        let wire = delay_resp.to_wire(&mut buf);
         let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
 
         assert_eq!(parsed, GeneralMessage::DelayResp(delay_resp));

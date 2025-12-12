@@ -879,7 +879,7 @@ impl ForeignClockDS {
 
     /// Parse a `ForeignClockDS` from the binary representation used on the
     /// wire (16‑byte BMCA comparison tuple).
-    pub fn from_slice(buf: &[u8; 16]) -> Self {
+    pub fn from_wire(buf: &[u8; 16]) -> Self {
         Self {
             identity: ClockIdentity::new(&[
                 buf[Self::IDENTITY_RANGE.start],
@@ -893,7 +893,7 @@ impl ForeignClockDS {
             ]),
             priority1: Priority1::new(buf[ForeignClockDS::PRIORITY1_OFFSET]),
             priority2: Priority2::new(buf[ForeignClockDS::PRIORITY2_OFFSET]),
-            quality: ClockQuality::from_slice(&[
+            quality: ClockQuality::from_wire(&[
                 buf[ForeignClockDS::QUALITY_RANGE.start],
                 buf[ForeignClockDS::QUALITY_RANGE.start + 1],
                 buf[ForeignClockDS::QUALITY_RANGE.start + 2],
@@ -941,10 +941,10 @@ impl ForeignClockDS {
 
     /// Serialize this data set into the 16‑byte BMCA comparison tuple
     /// representation.
-    pub fn to_bytes(&self) -> [u8; 16] {
+    pub fn to_wire(&self) -> [u8; 16] {
         let mut bytes = [0u8; 16];
         bytes[Self::PRIORITY1_OFFSET] = self.priority1.as_u8();
-        bytes[Self::QUALITY_RANGE].copy_from_slice(&self.quality.to_bytes());
+        bytes[Self::QUALITY_RANGE].copy_from_slice(&self.quality.to_wire());
         bytes[Self::PRIORITY2_OFFSET] = self.priority2.as_u8();
         bytes[Self::IDENTITY_RANGE].copy_from_slice(self.identity.as_bytes());
         bytes[Self::STEPS_REMOVED_OFFSET.start..Self::STEPS_REMOVED_OFFSET.end]
