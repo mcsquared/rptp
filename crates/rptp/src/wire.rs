@@ -356,7 +356,7 @@ impl MessageBuffer {
         Self { buf }
     }
 
-    pub fn typed<'a>(
+    pub fn with_message_type<'a>(
         &'a mut self,
         msg_type: MessageType,
         control: ControlField,
@@ -373,7 +373,7 @@ pub struct TypedBuffer<'a> {
 }
 
 impl<'a> TypedBuffer<'a> {
-    pub fn flagged(self, flags: MessageFlags) -> FlaggedBuffer<'a> {
+    pub fn with_flags(self, flags: MessageFlags) -> FlaggedBuffer<'a> {
         self.buf[PTP_FLAGS_RANGE].copy_from_slice(&flags.bits().to_be_bytes());
         FlaggedBuffer { buf: self.buf }
     }
@@ -384,7 +384,7 @@ pub struct FlaggedBuffer<'a> {
 }
 
 impl<'a> FlaggedBuffer<'a> {
-    pub fn sequenced(self, sequence_id: SequenceId) -> SequencedBuffer<'a> {
+    pub fn with_sequence_id(self, sequence_id: SequenceId) -> SequencedBuffer<'a> {
         self.buf[PTP_SEQUENCE_ID_RANGE].copy_from_slice(&sequence_id.to_be_bytes());
         SequencedBuffer { buf: self.buf }
     }

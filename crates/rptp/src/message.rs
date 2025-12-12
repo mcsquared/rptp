@@ -268,9 +268,9 @@ impl AnnounceMessage {
         };
 
         let mut payload = buf
-            .typed(MessageType::Announce, ControlField::Other)
-            .flagged(ptp_timescale_flag)
-            .sequenced(self.sequence_id)
+            .with_message_type(MessageType::Announce, ControlField::Other)
+            .with_flags(ptp_timescale_flag)
+            .with_sequence_id(self.sequence_id)
             .with_log_message_interval(self.log_message_interval)
             .payload();
 
@@ -307,9 +307,9 @@ impl OneStepSyncMessage {
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
-            .typed(MessageType::Sync, ControlField::Sync)
-            .flagged(MessageFlags::empty())
-            .sequenced(self.sequence_id)
+            .with_message_type(MessageType::Sync, ControlField::Sync)
+            .with_flags(MessageFlags::empty())
+            .with_sequence_id(self.sequence_id)
             .with_log_message_interval(self.log_message_interval)
             .payload();
 
@@ -344,9 +344,9 @@ impl TwoStepSyncMessage {
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let payload = buf
-            .typed(MessageType::Sync, ControlField::Sync)
-            .flagged(MessageFlags::TWO_STEP)
-            .sequenced(self.sequence_id)
+            .with_message_type(MessageType::Sync, ControlField::Sync)
+            .with_flags(MessageFlags::TWO_STEP)
+            .with_sequence_id(self.sequence_id)
             .with_log_message_interval(self.log_message_interval)
             .payload();
 
@@ -388,9 +388,9 @@ impl FollowUpMessage {
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
-            .typed(MessageType::FollowUp, ControlField::FollowUp)
-            .flagged(MessageFlags::empty())
-            .sequenced(self.sequence_id)
+            .with_message_type(MessageType::FollowUp, ControlField::FollowUp)
+            .with_flags(MessageFlags::empty())
+            .with_sequence_id(self.sequence_id)
             .with_log_message_interval(self.log_message_interval)
             .payload();
 
@@ -427,9 +427,9 @@ impl DelayRequestMessage {
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let payload = buf
-            .typed(MessageType::DelayRequest, ControlField::DelayRequest)
-            .flagged(MessageFlags::empty())
-            .sequenced(self.sequence_id)
+            .with_message_type(MessageType::DelayRequest, ControlField::DelayRequest)
+            .with_flags(MessageFlags::empty())
+            .with_sequence_id(self.sequence_id)
             .with_log_message_interval(LogMessageInterval::unspecified())
             .payload();
 
@@ -474,9 +474,9 @@ impl DelayResponseMessage {
 
     pub fn serialize<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
-            .typed(MessageType::DelayResponse, ControlField::DelayResponse)
-            .flagged(MessageFlags::empty())
-            .sequenced(self.sequence_id)
+            .with_message_type(MessageType::DelayResponse, ControlField::DelayResponse)
+            .with_flags(MessageFlags::empty())
+            .with_sequence_id(self.sequence_id)
             .with_log_message_interval(self.log_message_interval)
             .payload();
 
