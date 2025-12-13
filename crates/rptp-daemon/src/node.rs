@@ -333,6 +333,7 @@ mod tests {
         DefaultDS, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1, Priority2,
     };
     use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
+    use rptp::e2e::EndToEndDelayMechanism;
     use rptp::infra::infra_support::SortedForeignClockRecordsVec;
     use rptp::log::NOOP_CLOCK_METRICS;
     use rptp::message::{
@@ -344,7 +345,6 @@ mod tests {
     use rptp::portstate::{PortProfile, PortState};
     use rptp::servo::{Servo, SteppingServo};
     use rptp::slave::{DelayCycle, SlavePort};
-    use rptp::sync::EndToEndDelayMechanism;
     use rptp::test_support::FakeClock;
     use rptp::test_support::FakeTimestamping;
     use rptp::time::{LogInterval, LogMessageInterval, TimeStamp};

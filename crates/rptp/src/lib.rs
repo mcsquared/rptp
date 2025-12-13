@@ -2,6 +2,7 @@
 
 pub mod bmca;
 pub mod clock;
+pub mod e2e;
 pub mod faulty;
 pub mod initializing;
 pub mod listening;
@@ -14,7 +15,6 @@ pub mod premaster;
 pub mod result;
 pub mod servo;
 pub mod slave;
-pub mod sync;
 pub mod time;
 pub mod timestamping;
 pub mod uncalibrated;

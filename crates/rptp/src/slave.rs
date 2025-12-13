@@ -2,6 +2,7 @@ use crate::bmca::{
     Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
     ParentTrackingBmca,
 };
+use crate::e2e::EndToEndDelayMechanism;
 use crate::log::{PortEvent, PortLog};
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
@@ -10,7 +11,6 @@ use crate::message::{
 use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity, SendResult, Timeout};
 use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::servo::ServoState;
-use crate::sync::EndToEndDelayMechanism;
 use crate::time::{Instant, LogInterval, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 

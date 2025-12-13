@@ -4,6 +4,7 @@ use crate::bmca::{
     Bmca, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca, ParentTrackingBmca,
     QualificationTimeoutPolicy,
 };
+use crate::e2e::EndToEndDelayMechanism;
 use crate::faulty::FaultyPort;
 use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
@@ -13,7 +14,6 @@ use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity};
 use crate::premaster::PreMasterPort;
 use crate::slave::{DelayCycle, SlavePort};
-use crate::sync::EndToEndDelayMechanism;
 use crate::time::{Duration, Instant, LogInterval, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 
