@@ -322,9 +322,9 @@ impl<S: SortedForeignClockRecords> BestMasterClockAlgorithm<S> {
         };
 
         if d_0.is_grandmaster_capable() {
-            d0_better_or_better_by_topology_than_e_rbest(d_0, e_rbest)
+            Self::d0_better_or_better_by_topology_than_e_rbest(d_0, e_rbest)
         } else {
-            d0_better_or_better_by_topology_than_e_best(
+            Self::d0_better_or_better_by_topology_than_e_best(
                 d_0,
                 e_rbest, // TODO: once multi-port is supported, introduce e_best here
                 e_rbest,
@@ -332,44 +332,44 @@ impl<S: SortedForeignClockRecords> BestMasterClockAlgorithm<S> {
             )
         }
     }
-}
 
-fn d0_better_or_better_by_topology_than_e_rbest<C: SynchronizableClock>(
-    d_0: &LocalClock<C>,
-    e_rbest: &ForeignClockDS,
-) -> BmcaDecision {
-    if d_0.better_than(e_rbest) {
-        BmcaDecision::Master(BmcaMasterDecision::new(
-            BmcaMasterDecisionPoint::M1,
-            StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
-        ))
-    } else {
-        BmcaDecision::Passive // Passive decision point P1
+    fn d0_better_or_better_by_topology_than_e_rbest<C: SynchronizableClock>(
+        d_0: &LocalClock<C>,
+        e_rbest: &ForeignClockDS,
+    ) -> BmcaDecision {
+        if d_0.better_than(e_rbest) {
+            BmcaDecision::Master(BmcaMasterDecision::new(
+                BmcaMasterDecisionPoint::M1,
+                StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
+            ))
+        } else {
+            BmcaDecision::Passive // Passive decision point P1
+        }
     }
-}
 
-fn d0_better_or_better_by_topology_than_e_best<C: SynchronizableClock>(
-    d_0: &LocalClock<C>,
-    e_best: &ForeignClockDS,
-    _e_rbest: &ForeignClockDS,
-    source_port_identity: PortIdentity,
-) -> BmcaDecision {
-    if d_0.better_than(e_best) {
-        BmcaDecision::Master(BmcaMasterDecision::new(
-            BmcaMasterDecisionPoint::M2,
-            StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
-        ))
-    } else {
-        // TODO: as the implementation supports only a single port at the
-        // moment, we can directly recommend slave here, which corresponds to
-        // slave decision point S1. In a multi-port implementation, we would
-        // need to compare against e_best. When e_rbest == e_best, we'd had
-        // slave decision point S1, we'd compare e_best against e_rbest and
-        // decide between master decision point M3 and passive decision point P2.
-        BmcaDecision::Slave(BmcaSlaveDecision::new(
-            ParentPortIdentity::new(source_port_identity),
-            e_best.steps_removed().increment(),
-        ))
+    fn d0_better_or_better_by_topology_than_e_best<C: SynchronizableClock>(
+        d_0: &LocalClock<C>,
+        e_best: &ForeignClockDS,
+        _e_rbest: &ForeignClockDS,
+        source_port_identity: PortIdentity,
+    ) -> BmcaDecision {
+        if d_0.better_than(e_best) {
+            BmcaDecision::Master(BmcaMasterDecision::new(
+                BmcaMasterDecisionPoint::M2,
+                StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
+            ))
+        } else {
+            // TODO: as the implementation supports only a single port at the
+            // moment, we can directly recommend slave here, which corresponds to
+            // slave decision point S1. In a multi-port implementation, we would
+            // need to compare against e_best. When e_rbest == e_best, we'd had
+            // slave decision point S1, we'd compare e_best against e_rbest and
+            // decide between master decision point M3 and passive decision point P2.
+            BmcaDecision::Slave(BmcaSlaveDecision::new(
+                ParentPortIdentity::new(source_port_identity),
+                e_best.steps_removed().increment(),
+            ))
+        }
     }
 }
 
