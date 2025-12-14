@@ -22,7 +22,7 @@ use crate::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, Synchr
 use crate::log::PortLog;
 use crate::message::{AnnounceMessage, SequenceId, TimeScale};
 use crate::port::{ParentPortIdentity, Port, PortIdentity};
-use crate::portstate::{PortProfile, PortState};
+use crate::portstate::PortState;
 use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
 /// Core BMCA trait implemented by BMCA strategies.
@@ -238,8 +238,8 @@ impl<B: Bmca> Bmca for ParentTrackingBmca<B> {
         let decision = self.inner.decision(local_clock);
 
         match decision {
-            BmcaDecision::Slave(ref slave_decision) => {
-                if self.parent_port_identity.get() != *slave_decision.parent_port_identity() {
+            BmcaDecision::Slave(slave_decision) => {
+                if !slave_decision.matches_parent(self.parent_port_identity.get()) {
                     decision
                 } else {
                     BmcaDecision::Undecided
@@ -445,22 +445,17 @@ impl BmcaMasterDecision {
 
     /// Apply this master decision to a [`Port`], producing a new
     /// [`PortState`] in the pre‑master state.
-    pub(crate) fn apply<P: Port, B: Bmca, L: PortLog>(
-        &self,
-        port: P,
-        bmca: B,
-        log: L,
-        profile: PortProfile,
-    ) -> PortState<P, B, L> {
+    pub(crate) fn apply<F, P, B, L>(&self, new_port_state: F) -> PortState<P, B, L>
+    where
+        P: Port,
+        B: Bmca,
+        L: PortLog,
+        F: FnOnce(QualificationTimeoutPolicy, StepsRemoved) -> PortState<P, B, L>,
+    {
         let qualification_timeout_policy =
             QualificationTimeoutPolicy::new(self.decision_point, self.steps_removed);
 
-        // Update steps removed as part of the decision as per IEEE 1588-2019 Section 9.3.5, Table 13
-        port.update_steps_removed(self.steps_removed);
-
-        let bmca = LocalMasterTrackingBmca::new(bmca);
-
-        profile.pre_master(port, bmca, log, qualification_timeout_policy)
+        new_port_state(qualification_timeout_policy, self.steps_removed)
     }
 }
 
@@ -517,26 +512,21 @@ impl BmcaSlaveDecision {
         }
     }
 
-    /// Return the parent port identity chosen by BMCA.
-    pub(crate) fn parent_port_identity(&self) -> &ParentPortIdentity {
-        &self.parent_port_identity
+    /// Return `true` if the given source port identity matches the chosen parent.
+    pub(crate) fn matches_parent(&self, parent: ParentPortIdentity) -> bool {
+        self.parent_port_identity == parent
     }
 
     /// Apply this slave decision to a [`Port`], producing a new [`PortState`]
     /// in the uncalibrated state.
-    pub(crate) fn apply<P: Port, B: Bmca, L: PortLog>(
-        self,
-        port: P,
-        bmca: B,
-        log: L,
-        profile: PortProfile,
-    ) -> PortState<P, B, L> {
-        let parent_tracking_bmca = ParentTrackingBmca::new(bmca, self.parent_port_identity);
-
-        // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
-        port.update_steps_removed(self.steps_removed);
-
-        profile.uncalibrated(port, parent_tracking_bmca, log)
+    pub(crate) fn apply<F, P, B, L>(self, next_port_state: F) -> PortState<P, B, L>
+    where
+        P: Port,
+        B: Bmca,
+        L: PortLog,
+        F: FnOnce(ParentPortIdentity, StepsRemoved) -> PortState<P, B, L>,
+    {
+        next_port_state(self.parent_port_identity, self.steps_removed)
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::bmca::{
     Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
+    ParentTrackingBmca,
 };
 use crate::log::{PortEvent, PortLog};
 use crate::message::AnnounceMessage;
@@ -35,15 +36,30 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
     }
 
     pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::RecommendedSlave {
-            parent: *decision.parent_port_identity(),
-        });
-        decision.apply(self.port, self.bmca, self.log, self.profile)
+        decision.apply(|parent_port_identity, steps_removed| {
+            self.log.port_event(PortEvent::RecommendedSlave {
+                parent: parent_port_identity,
+            });
+
+            let parent_tracking_bmca = ParentTrackingBmca::new(self.bmca, parent_port_identity);
+
+            // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
+            self.port.update_steps_removed(steps_removed);
+
+            self.profile
+                .uncalibrated(self.port, parent_tracking_bmca, self.log)
+        })
     }
 
     pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedMaster);
-        decision.apply(self.port, self.bmca, self.log, self.profile)
+        let bmca = LocalMasterTrackingBmca::new(self.bmca);
+
+        decision.apply(|qualification_timeout_policy, steps_removed| {
+            self.port.update_steps_removed(steps_removed);
+            self.profile
+                .pre_master(self.port, bmca, self.log, qualification_timeout_policy)
+        })
     }
 
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {

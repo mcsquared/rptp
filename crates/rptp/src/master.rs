@@ -1,5 +1,6 @@
 use crate::bmca::{
     Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
+    ParentTrackingBmca,
 };
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::{PortEvent, PortLog};
@@ -113,15 +114,35 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
 
     pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedMaster);
-        decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
+
+        let new_master_tracking_bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
+
+        decision.apply(|qualification_timeout_policy, steps_removed| {
+            self.port.update_steps_removed(steps_removed);
+            self.profile.pre_master(
+                self.port,
+                new_master_tracking_bmca,
+                self.log,
+                qualification_timeout_policy,
+            )
+        })
     }
 
     pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::RecommendedSlave {
-            parent: *decision.parent_port_identity(),
-        });
+        decision.apply(|parent_port_identity, steps_removed| {
+            self.log.port_event(PortEvent::RecommendedSlave {
+                parent: parent_port_identity,
+            });
 
-        decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
+            let parent_tracking_bmca =
+                ParentTrackingBmca::new(self.bmca.into_inner(), parent_port_identity);
+
+            // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
+            self.port.update_steps_removed(steps_removed);
+
+            self.profile
+                .uncalibrated(self.port, parent_tracking_bmca, self.log)
+        })
     }
 }
 

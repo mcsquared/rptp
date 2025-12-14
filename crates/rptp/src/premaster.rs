@@ -1,4 +1,6 @@
-use crate::bmca::{Bmca, BmcaDecision, BmcaSlaveDecision, LocalMasterTrackingBmca};
+use crate::bmca::{
+    Bmca, BmcaDecision, BmcaSlaveDecision, LocalMasterTrackingBmca, ParentTrackingBmca,
+};
 use crate::log::{PortEvent, PortLog};
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity};
@@ -56,10 +58,20 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
     }
 
     pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::RecommendedSlave {
-            parent: *decision.parent_port_identity(),
-        });
-        decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
+        decision.apply(|parent_port_identity, steps_removed| {
+            self.log.port_event(PortEvent::RecommendedSlave {
+                parent: parent_port_identity,
+            });
+
+            let parent_tracking_bmca =
+                ParentTrackingBmca::new(self.bmca.into_inner(), parent_port_identity);
+
+            // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
+            self.port.update_steps_removed(steps_removed);
+
+            self.profile
+                .uncalibrated(self.port, parent_tracking_bmca, self.log)
+        })
     }
 }
 
