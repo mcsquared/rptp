@@ -1,12 +1,14 @@
 use std::rc::Rc;
 
-use rptp::clock::Clock;
 use tokio::sync::mpsc;
 
-use rptp::message::{EventMessage, SystemMessage, TimestampMessage};
-use rptp::port::DomainNumber;
-use rptp::time::TimeStamp;
-use rptp::timestamping::TxTimestamping;
+use rptp::{
+    clock::Clock,
+    message::{EventMessage, SystemMessage, TimestampMessage},
+    port::DomainNumber,
+    time::TimeStamp,
+    timestamping::TxTimestamping,
+};
 
 pub trait RxTimestamping {
     fn ingress_stamp(&self) -> TimeStamp;

@@ -54,11 +54,11 @@ impl PortNumber {
         Self(n)
     }
 
-    pub fn to_be_bytes(self) -> [u8; 2] {
+    pub(crate) fn to_be_bytes(self) -> [u8; 2] {
         self.0.to_be_bytes()
     }
 
-    pub fn from_be_bytes(bytes: [u8; 2]) -> Self {
+    pub(crate) fn from_be_bytes(bytes: [u8; 2]) -> Self {
         Self(u16::from_be_bytes(bytes))
     }
 }
@@ -83,7 +83,7 @@ impl DomainNumber {
         Self(n)
     }
 
-    pub fn as_u8(self) -> u8 {
+    pub(crate) fn as_u8(self) -> u8 {
         self.0
     }
 }
@@ -117,7 +117,7 @@ impl PortIdentity {
         }
     }
 
-    pub fn from_wire(buf: &[u8; 10]) -> Self {
+    pub(crate) fn from_wire(buf: &[u8; 10]) -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[
                 buf[Self::CLOCK_IDENTITY_RANGE.start],
@@ -136,7 +136,7 @@ impl PortIdentity {
         }
     }
 
-    pub fn to_wire(&self) -> [u8; 10] {
+    pub(crate) fn to_wire(self) -> [u8; 10] {
         let mut bytes = [0u8; 10];
         bytes[Self::CLOCK_IDENTITY_RANGE].copy_from_slice(self.clock_identity.as_bytes());
         bytes[Self::PORT_NUMBER_RANGE].copy_from_slice(&self.port_number.to_be_bytes());
@@ -162,7 +162,7 @@ impl ParentPortIdentity {
         }
     }
 
-    pub fn matches(&self, source_port_identity: &PortIdentity) -> bool {
+    pub(crate) fn matches(&self, source_port_identity: &PortIdentity) -> bool {
         self.parent_port_identity == *source_port_identity
     }
 }
@@ -327,7 +327,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortIngress for Option<PortState<P, B, L>> {
     }
 }
 
-pub struct AnnounceReceiptTimeout<T: Timeout> {
+pub(crate) struct AnnounceReceiptTimeout<T: Timeout> {
     timeout: T,
     interval: Duration,
 }

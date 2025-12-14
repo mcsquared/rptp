@@ -19,7 +19,7 @@ impl ClockIdentity {
         Self { id: *id }
     }
 
-    pub fn as_bytes(&self) -> &[u8; 8] {
+    pub(crate) fn as_bytes(&self) -> &[u8; 8] {
         &self.id
     }
 }
@@ -61,11 +61,11 @@ impl ClockQuality {
         }
     }
 
-    pub fn is_grandmaster_capable(&self) -> bool {
+    pub(crate) fn is_grandmaster_capable(&self) -> bool {
         self.clock_class >= 1 && self.clock_class <= 127
     }
 
-    pub fn from_wire(buf: &[u8; 4]) -> Self {
+    pub(crate) fn from_wire(buf: &[u8; 4]) -> Self {
         Self {
             clock_class: buf[Self::CLOCK_CLASS_OFFSET],
             clock_accuracy: buf[Self::CLOCK_ACCURACY_OFFSET],
@@ -76,7 +76,7 @@ impl ClockQuality {
         }
     }
 
-    pub fn to_wire(&self) -> [u8; 4] {
+    pub(crate) fn to_wire(self) -> [u8; 4] {
         let mut bytes = [0u8; 4];
         bytes[Self::CLOCK_CLASS_OFFSET] = self.clock_class;
         bytes[Self::CLOCK_ACCURACY_OFFSET] = self.clock_accuracy;
@@ -142,15 +142,17 @@ impl<C: SynchronizableClock> LocalClock<C> {
     pub fn now(&self) -> TimeStamp {
         self.clock.now()
     }
-    pub fn steps_removed(&self) -> StepsRemoved {
+
+    #[cfg(test)]
+    pub(crate) fn steps_removed(&self) -> StepsRemoved {
         self.steps_removed.get()
     }
 
-    pub fn set_steps_removed(&self, steps_removed: StepsRemoved) {
+    pub(crate) fn set_steps_removed(&self, steps_removed: StepsRemoved) {
         self.steps_removed.set(steps_removed);
     }
 
-    pub fn announce(
+    pub(crate) fn announce(
         &self,
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
@@ -159,16 +161,16 @@ impl<C: SynchronizableClock> LocalClock<C> {
             .announce(sequence_id, log_message_interval, self.steps_removed.get())
     }
 
-    pub fn is_grandmaster_capable(&self) -> bool {
+    pub(crate) fn is_grandmaster_capable(&self) -> bool {
         self.default_ds.is_grandmaster_capable()
     }
 
-    pub fn better_than(&self, other: &ForeignClockDS) -> bool {
+    pub(crate) fn better_than(&self, other: &ForeignClockDS) -> bool {
         self.default_ds
             .better_than(other, &self.steps_removed.get())
     }
 
-    pub fn discipline(&self, sample: ServoSample) -> ServoState {
+    pub(crate) fn discipline(&self, sample: ServoSample) -> ServoState {
         self.servo.feed(&self.clock, sample)
     }
 }
@@ -187,15 +189,15 @@ impl StepsRemoved {
         Self(steps_removed)
     }
 
-    pub fn increment(self) -> Self {
+    pub(crate) fn increment(self) -> Self {
         Self(self.0.saturating_add(1))
     }
 
-    pub fn as_u16(&self) -> u16 {
+    pub(crate) fn as_u16(&self) -> u16 {
         self.0
     }
 
-    pub fn to_be_bytes(&self) -> [u8; 2] {
+    pub(crate) fn to_be_bytes(self) -> [u8; 2] {
         self.0.to_be_bytes()
     }
 }

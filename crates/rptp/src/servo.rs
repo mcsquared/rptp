@@ -17,7 +17,11 @@ pub enum Servo {
 }
 
 impl Servo {
-    pub fn feed<C: SynchronizableClock>(&self, clock: &C, sample: ServoSample) -> ServoState {
+    pub(crate) fn feed<C: SynchronizableClock>(
+        &self,
+        clock: &C,
+        sample: ServoSample,
+    ) -> ServoState {
         match self {
             Servo::Stepping(servo) => servo.feed(clock, sample),
             Servo::PI(servo) => servo.feed(clock, sample),
@@ -34,7 +38,11 @@ impl SteppingServo {
         Self { metrics }
     }
 
-    pub fn feed<C: SynchronizableClock>(&self, clock: &C, sample: ServoSample) -> ServoState {
+    pub(crate) fn feed<C: SynchronizableClock>(
+        &self,
+        clock: &C,
+        sample: ServoSample,
+    ) -> ServoState {
         clock.step(sample.master_estimate());
         sample.log(self.metrics);
         ServoState::Locked
@@ -150,7 +158,7 @@ impl Drift {
         }
     }
 
-    fn new(drift: f64) -> Self {
+    pub fn new(drift: f64) -> Self {
         Self { drift }
     }
 
@@ -208,7 +216,7 @@ impl ServoDriftEstimate {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ServoStepDecision {
+pub(crate) enum ServoStepDecision {
     StepTo(TimeStamp),
     NoStep,
 }
@@ -273,13 +281,13 @@ enum ServoSampleOrdering {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ServoSample {
+pub(crate) struct ServoSample {
     ingress: TimeStamp,
     offset: TimeInterval,
 }
 
 impl ServoSample {
-    pub fn new(ingress: TimeStamp, offset: TimeInterval) -> Self {
+    pub(crate) fn new(ingress: TimeStamp, offset: TimeInterval) -> Self {
         Self { ingress, offset }
     }
 

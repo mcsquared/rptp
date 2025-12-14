@@ -9,13 +9,15 @@ use std::rc::Rc;
 
 use tokio::sync::mpsc;
 
-use rptp::bmca::{DefaultDS, Priority1, Priority2};
-use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved};
-use rptp::log::NOOP_CLOCK_METRICS;
-use rptp::message::TimeScale;
-use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
-use rptp::servo::{Servo, SteppingServo};
-use rptp::time::TimeStamp;
+use rptp::{
+    bmca::{DefaultDS, Priority1, Priority2},
+    clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved},
+    log::NOOP_CLOCK_METRICS,
+    message::TimeScale,
+    port::{DomainNumber, PortNumber, SingleDomainPortMap},
+    servo::{Servo, SteppingServo},
+    time::TimeStamp,
+};
 
 use crate::net::MulticastSocket;
 use crate::node::TokioPortsLoop;

@@ -10,22 +10,22 @@ use cortex_m_rt::{entry, exception};
 use cortex_m_semihosting::hprintln;
 use heapless::{Deque, Vec};
 use panic_halt as _;
-use rptp::bmca::{DefaultDS, IncrementalBmca, Priority1, Priority2};
-use rptp::clock::{
-    Clock, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock,
+use rptp::{
+    bmca::{DefaultDS, IncrementalBmca, Priority1, Priority2},
+    clock::{Clock, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock},
+    heapless::HeaplessSortedForeignClockRecords,
+    log::{PortEvent, PortLog, NOOP_CLOCK_METRICS},
+    message::{DomainMessage, EventMessage, SystemMessage, TimeScale, TimestampMessage},
+    port::{
+        DomainNumber, DomainPort, PhysicalPort, PortMap, PortNumber, SendResult,
+        SingleDomainPortMap, Timeout, TimerHost,
+    },
+    portstate::PortProfile,
+    servo::{Servo, SteppingServo},
+    time::{Duration, Instant, TimeInterval, TimeStamp},
+    timestamping::TxTimestamping,
+    wire::UnvalidatedMessage,
 };
-use rptp::heapless::HeaplessSortedForeignClockRecords;
-use rptp::log::{NOOP_CLOCK_METRICS, PortEvent, PortLog};
-use rptp::message::{DomainMessage, EventMessage, SystemMessage, TimeScale, TimestampMessage};
-use rptp::port::{
-    DomainNumber, DomainPort, PhysicalPort, PortMap, PortNumber, SendResult, SingleDomainPortMap,
-    Timeout, TimerHost,
-};
-use rptp::portstate::PortProfile;
-use rptp::servo::{Servo, SteppingServo};
-use rptp::time::{Duration, Instant, TimeInterval, TimeStamp};
-use rptp::timestamping::TxTimestamping;
-use rptp::wire::UnvalidatedMessage;
 use smoltcp::time::Instant as SmolInstant;
 use smoltcp::wire::Ipv4Address;
 

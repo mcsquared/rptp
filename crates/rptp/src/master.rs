@@ -21,7 +21,7 @@ pub struct MasterPort<P: Port, B: Bmca, L: PortLog> {
 }
 
 impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
-    pub fn new(
+    pub(crate) fn new(
         port: P,
         bmca: LocalMasterTrackingBmca<B>,
         announce_cycle: AnnounceCycle<P::Timeout>,
@@ -41,7 +41,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         }
     }
 
-    pub fn send_announce(&mut self) -> SendResult {
+    pub(crate) fn send_announce(&mut self) -> SendResult {
         let announce_message = self.announce_cycle.announce(self.port.local_clock());
         self.port
             .send_general(GeneralMessage::Announce(announce_message))?;
@@ -50,7 +50,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         Ok(())
     }
 
-    pub fn process_announce(
+    pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
@@ -68,7 +68,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         }
     }
 
-    pub fn process_delay_request(
+    pub(crate) fn process_delay_request(
         &mut self,
         req: DelayRequestMessage,
         ingress_timestamp: TimeStamp,
@@ -91,7 +91,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         result
     }
 
-    pub fn send_sync(&mut self) -> SendResult {
+    pub(crate) fn send_sync(&mut self) -> SendResult {
         let sync_message = self.sync_cycle.two_step_sync();
         self.port
             .send_event(EventMessage::TwoStepSync(sync_message))?;
@@ -100,7 +100,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         Ok(())
     }
 
-    pub fn send_follow_up(
+    pub(crate) fn send_follow_up(
         &mut self,
         sync: TwoStepSyncMessage,
         egress_timestamp: TimeStamp,
@@ -111,12 +111,12 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         Ok(())
     }
 
-    pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedMaster);
         decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
     }
 
-    pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedSlave {
             parent: *decision.parent_port_identity(),
         });
@@ -126,7 +126,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct AnnounceCycle<T: Timeout> {
+pub(crate) struct AnnounceCycle<T: Timeout> {
     sequence_id: SequenceId,
     timeout: T,
     log_interval: LogInterval,
@@ -152,7 +152,7 @@ impl<T: Timeout> AnnounceCycle<T> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct SyncCycle<T: Timeout> {
+pub(crate) struct SyncCycle<T: Timeout> {
     sequence_id: SequenceId,
     timeout: T,
     log_interval: LogInterval,

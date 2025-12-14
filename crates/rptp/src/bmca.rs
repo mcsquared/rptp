@@ -147,7 +147,7 @@ impl<B: Bmca> LocalMasterTrackingBmca<B> {
     }
 
     /// Consume the wrapper and return the inner BMCA.
-    pub fn into_inner(self) -> B {
+    pub(crate) fn into_inner(self) -> B {
         self.inner
     }
 }
@@ -202,18 +202,18 @@ impl<B: Bmca> ParentTrackingBmca<B> {
     }
 
     /// Return the currently tracked parent port identity.
-    pub fn parent(&self) -> ParentPortIdentity {
+    pub(crate) fn parent(&self) -> ParentPortIdentity {
         self.parent_port_identity.get()
     }
 
     /// Return `true` if the given source port identity matches the tracked
     /// parent.
-    pub fn matches_parent(&self, source: &PortIdentity) -> bool {
+    pub(crate) fn matches_parent(&self, source: &PortIdentity) -> bool {
         self.parent_port_identity.get().matches(source)
     }
 
     /// Consume the wrapper and return the inner BMCA.
-    pub fn into_inner(self) -> B {
+    pub(crate) fn into_inner(self) -> B {
         self.inner
     }
 }
@@ -268,7 +268,7 @@ struct BestMasterClockAlgorithm<S: SortedForeignClockRecords> {
 
 impl<S: SortedForeignClockRecords> BestMasterClockAlgorithm<S> {
     /// Create a new full BMCA.
-    pub fn new(sorted_clock_records: S) -> Self {
+    fn new(sorted_clock_records: S) -> Self {
         Self {
             sorted_clock_records,
         }
@@ -377,7 +377,8 @@ impl<S: SortedForeignClockRecords> BestMasterClockAlgorithm<S> {
 ///
 /// This is primarily useful for testing or when an application wants to
 /// manage port states manually.
-pub struct NoopBmca;
+#[allow(dead_code)]
+pub(crate) struct NoopBmca;
 
 impl Bmca for NoopBmca {
     fn consider(
@@ -399,12 +400,13 @@ impl Bmca for NoopBmca {
 
 /// Master decision point as defined in IEEE 1588-2019 Section 9.3.1 (Figure 26).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BmcaMasterDecisionPoint {
+pub(crate) enum BmcaMasterDecisionPoint {
     /// Decision point M1.
     M1,
     /// Decision point M2.
     M2,
     /// Decision point M3.
+    #[allow(dead_code)]
     M3,
 }
 
@@ -431,7 +433,10 @@ pub struct BmcaMasterDecision {
 impl BmcaMasterDecision {
     /// Create a new master decision for the given decision point and
     /// `stepsRemoved`.
-    pub fn new(decision_point: BmcaMasterDecisionPoint, steps_removed: StepsRemoved) -> Self {
+    pub(crate) fn new(
+        decision_point: BmcaMasterDecisionPoint,
+        steps_removed: StepsRemoved,
+    ) -> Self {
         Self {
             decision_point,
             steps_removed,
@@ -440,7 +445,7 @@ impl BmcaMasterDecision {
 
     /// Apply this master decision to a [`Port`], producing a new
     /// [`PortState`] in the pre‑master state.
-    pub fn apply<P: Port, B: Bmca, L: PortLog>(
+    pub(crate) fn apply<P: Port, B: Bmca, L: PortLog>(
         &self,
         port: P,
         bmca: B,
@@ -461,7 +466,7 @@ impl BmcaMasterDecision {
 
 /// Qualification timeout policy as defined in IEEE 1588-2019 Section 9.2.6.10.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct QualificationTimeoutPolicy {
+pub(crate) struct QualificationTimeoutPolicy {
     master_decision_point: BmcaMasterDecisionPoint,
     steps_removed: StepsRemoved,
 }
@@ -502,7 +507,10 @@ pub struct BmcaSlaveDecision {
 
 impl BmcaSlaveDecision {
     /// Create a new slave decision with the given parent and `stepsRemoved`.
-    pub fn new(parent_port_identity: ParentPortIdentity, steps_removed: StepsRemoved) -> Self {
+    pub(crate) fn new(
+        parent_port_identity: ParentPortIdentity,
+        steps_removed: StepsRemoved,
+    ) -> Self {
         Self {
             parent_port_identity,
             steps_removed,
@@ -510,13 +518,13 @@ impl BmcaSlaveDecision {
     }
 
     /// Return the parent port identity chosen by BMCA.
-    pub fn parent_port_identity(&self) -> &ParentPortIdentity {
+    pub(crate) fn parent_port_identity(&self) -> &ParentPortIdentity {
         &self.parent_port_identity
     }
 
     /// Apply this slave decision to a [`Port`], producing a new [`PortState`]
     /// in the uncalibrated state.
-    pub fn apply<P: Port, B: Bmca, L: PortLog>(
+    pub(crate) fn apply<P: Port, B: Bmca, L: PortLog>(
         self,
         port: P,
         bmca: B,
@@ -545,7 +553,7 @@ pub struct ForeignClockRecord {
 impl ForeignClockRecord {
     /// Create a record for a new foreign clock with an initial validation
     /// count of one Announce.
-    pub fn new(
+    pub(crate) fn new(
         source_port_identity: PortIdentity,
         foreign_clock_ds: ForeignClockDS,
         log_announce_interval: LogInterval,
@@ -562,7 +570,7 @@ impl ForeignClockRecord {
 
     /// Create a record for a new foreign clock that is already qualified. This is mainly
     /// useful for tests, where we want to set up qualified foreign clock records directly.
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn qualified(
         source_port_identity: PortIdentity,
@@ -584,13 +592,13 @@ impl ForeignClockRecord {
     }
 
     /// Return `true` if this record originates from `source_port_identity`.
-    pub fn same_source_as(&self, source_port_identity: &PortIdentity) -> bool {
+    pub(crate) fn same_source_as(&self, source_port_identity: &PortIdentity) -> bool {
         self.source_port_identity == *source_port_identity
     }
 
     /// Return `true` if this record is better than `other` purely based on the data sets,
     /// ignoring qualification status.
-    pub fn better_by_dataset_than(&self, other: &ForeignClockRecord) -> bool {
+    pub(crate) fn better_by_dataset_than(&self, other: &ForeignClockRecord) -> bool {
         self.foreign_clock_ds.better_than(&other.foreign_clock_ds)
     }
 
@@ -600,7 +608,7 @@ impl ForeignClockRecord {
     /// data set is updated when it changes.  The return value describes
     /// whether the record became qualified or changed in a way that may
     /// affect the overall BMCA outcome.
-    pub fn consider(
+    pub(crate) fn consider(
         &mut self,
         foreign_clock_ds: ForeignClockDS,
         log_announce_interval: LogInterval,
@@ -626,7 +634,7 @@ impl ForeignClockRecord {
 
     /// Return the underlying data set if this record has become qualified as
     /// a foreign master candidate, or `None` otherwise.
-    pub fn dataset(&self) -> Option<&ForeignClockDS> {
+    pub(crate) fn dataset(&self) -> Option<&ForeignClockDS> {
         if self.qualification.is_qualified() {
             Some(&self.foreign_clock_ds)
         } else {
@@ -635,12 +643,12 @@ impl ForeignClockRecord {
     }
 
     /// Return the source port identity that originated this record.
-    pub fn source_port_identity(&self) -> PortIdentity {
+    pub(crate) fn source_port_identity(&self) -> PortIdentity {
         self.source_port_identity
     }
 
     /// Return `true` if this record is stale at the given time.
-    pub fn is_stale(&self, now: Instant) -> bool {
+    pub(crate) fn is_stale(&self, now: Instant) -> bool {
         self.qualification.is_stale(now)
     }
 }
@@ -784,12 +792,12 @@ impl DefaultDS {
     }
 
     /// Return the local clock identity.
-    pub fn identity(&self) -> &ClockIdentity {
+    pub(crate) fn identity(&self) -> &ClockIdentity {
         &self.identity
     }
 
     /// Return whether the local clock is grandmaster‑capable.
-    pub fn is_grandmaster_capable(&self) -> bool {
+    pub(crate) fn is_grandmaster_capable(&self) -> bool {
         self.quality.is_grandmaster_capable()
     }
 
@@ -797,7 +805,11 @@ impl DefaultDS {
     ///
     /// `steps_removed` is the local `stepsRemoved` value; this method returns
     /// `true` when the local clock is strictly better than the foreign one.
-    pub fn better_than(&self, foreign: &ForeignClockDS, steps_removed: &StepsRemoved) -> bool {
+    pub(crate) fn better_than(
+        &self,
+        foreign: &ForeignClockDS,
+        steps_removed: &StepsRemoved,
+    ) -> bool {
         foreign.worse_than(&BmcaRank {
             identity: &self.identity,
             priority1: &self.priority1,
@@ -808,7 +820,7 @@ impl DefaultDS {
     }
 
     /// Create an [`AnnounceMessage`] advertising this clock’s data set.
-    pub fn announce(
+    pub(crate) fn announce(
         &self,
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
@@ -850,7 +862,7 @@ impl ForeignClockDS {
     const STEPS_REMOVED_OFFSET: Range<usize> = 14..16;
 
     /// Construct a new foreign clock data set from individual fields.
-    pub fn new(
+    pub(crate) fn new(
         identity: ClockIdentity,
         priority1: Priority1,
         priority2: Priority2,
@@ -866,20 +878,14 @@ impl ForeignClockDS {
         }
     }
 
-    /// Return whether this clock is grandmaster‑capable according to its
-    /// advertised [`ClockQuality`].
-    pub fn is_grandmaster_capable(&self) -> bool {
-        self.quality.is_grandmaster_capable()
-    }
-
     /// Return the number of steps this clock is removed from the grandmaster.
-    pub fn steps_removed(&self) -> StepsRemoved {
+    pub(crate) fn steps_removed(&self) -> StepsRemoved {
         self.steps_removed
     }
 
     /// Parse a `ForeignClockDS` from the binary representation used on the
     /// wire (16‑byte BMCA comparison tuple).
-    pub fn from_wire(buf: &[u8; 16]) -> Self {
+    pub(crate) fn from_wire(buf: &[u8; 16]) -> Self {
         Self {
             identity: ClockIdentity::new(&[
                 buf[Self::IDENTITY_RANGE.start],
@@ -908,7 +914,7 @@ impl ForeignClockDS {
 
     /// Return `true` if this foreign clock is strictly better than `other`
     /// according to BMCA ranking rules.
-    pub fn better_than(&self, other: &ForeignClockDS) -> bool {
+    fn better_than(&self, other: &ForeignClockDS) -> bool {
         let a = BmcaRank {
             identity: &self.identity,
             priority1: &self.priority1,
@@ -941,7 +947,7 @@ impl ForeignClockDS {
 
     /// Serialize this data set into the 16‑byte BMCA comparison tuple
     /// representation.
-    pub fn to_wire(&self) -> [u8; 16] {
+    pub(crate) fn to_wire(self) -> [u8; 16] {
         let mut bytes = [0u8; 16];
         bytes[Self::PRIORITY1_OFFSET] = self.priority1.as_u8();
         bytes[Self::QUALITY_RANGE].copy_from_slice(&self.quality.to_wire());
@@ -964,7 +970,7 @@ impl Priority1 {
     }
 
     /// Return the underlying `u8` value.
-    pub fn as_u8(self) -> u8 {
+    pub(crate) fn as_u8(self) -> u8 {
         self.0
     }
 }
@@ -986,7 +992,7 @@ impl Priority2 {
     }
 
     /// Return the underlying `u8` value.
-    pub fn as_u8(self) -> u8 {
+    pub(crate) fn as_u8(self) -> u8 {
         self.0
     }
 }
@@ -1003,7 +1009,7 @@ impl From<u8> for Priority2 {
 /// steps removed into a single ordering, matching IEEE 1588’s rules for
 /// selecting the best grandmaster.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct BmcaRank<'a> {
+struct BmcaRank<'a> {
     identity: &'a ClockIdentity,
     priority1: &'a Priority1,
     quality: &'a ClockQuality,
@@ -1017,7 +1023,7 @@ impl BmcaRank<'_> {
     /// When both ranks refer to the same clock identity, the comparison is
     /// based solely on `steps_removed`; otherwise it follows the BMCA tuple
     /// ordering (priority1, clock quality, priority2, identity).
-    pub fn better_than(&self, other: &BmcaRank) -> bool {
+    fn better_than(&self, other: &BmcaRank) -> bool {
         if self.identity == other.identity {
             return self.steps_removed < other.steps_removed;
         }

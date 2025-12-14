@@ -11,7 +11,7 @@ impl TimeStamp {
         Self { seconds, nanos }
     }
 
-    pub fn to_wire(&self) -> [u8; 10] {
+    pub(crate) fn to_wire(self) -> [u8; 10] {
         let mut buf = [0; 10];
         buf[0..2].copy_from_slice(&((self.seconds >> 32) as u16).to_be_bytes());
         buf[2..6].copy_from_slice(&(self.seconds as u32).to_be_bytes());
@@ -228,7 +228,7 @@ impl LogMessageInterval {
         Self(0x7F)
     }
 
-    pub fn log_interval(&self) -> Option<LogInterval> {
+    pub(crate) fn log_interval(&self) -> Option<LogInterval> {
         if self.0 >= LogInterval::MIN_LOG_VALUE && self.0 <= LogInterval::MAX_LOG_VALUE {
             Some(LogInterval::new(self.0))
         } else {
@@ -236,7 +236,7 @@ impl LogMessageInterval {
         }
     }
 
-    pub fn as_u8(self) -> u8 {
+    pub(crate) fn as_u8(self) -> u8 {
         self.0 as u8
     }
 }
@@ -272,7 +272,7 @@ impl LogInterval {
         }
     }
 
-    pub fn log_message_interval(&self) -> LogMessageInterval {
+    pub(crate) fn log_message_interval(&self) -> LogMessageInterval {
         LogMessageInterval::new(self.log_value)
     }
 }

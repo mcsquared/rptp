@@ -4,14 +4,16 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
-use rptp::bmca::{DefaultDS, Priority1, Priority2};
-use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved};
-use rptp::log::NOOP_CLOCK_METRICS;
-use rptp::message::TimeScale;
-use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
-use rptp::servo::{Servo, SteppingServo};
-use rptp::test_support::FakeClock;
-use rptp::time::TimeStamp;
+use rptp::{
+    bmca::{DefaultDS, Priority1, Priority2},
+    clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved},
+    log::NOOP_CLOCK_METRICS,
+    message::TimeScale,
+    port::{DomainNumber, PortNumber, SingleDomainPortMap},
+    servo::{Servo, SteppingServo},
+    test_support::FakeClock,
+    time::TimeStamp,
+};
 use rptp_daemon::net::MulticastSocket;
 use rptp_daemon::node::TokioPortsLoop;
 use rptp_daemon::ordinary::ordinary_clock_port;

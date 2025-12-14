@@ -7,7 +7,8 @@ pub trait PortLog {
     fn port_event(&self, event: PortEvent);
 }
 
-pub struct NoopPortLog;
+#[allow(dead_code)]
+pub(crate) struct NoopPortLog;
 
 impl PortLog for NoopPortLog {
     fn message_sent(&self, _msg: &str) {}

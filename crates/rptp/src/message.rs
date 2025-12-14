@@ -83,7 +83,7 @@ pub enum SystemMessage {
 }
 
 impl EventMessage {
-    pub fn new(
+    pub(crate) fn new(
         msg_type: MessageType,
         sequence_id: SequenceId,
         flags: MessageFlags,
@@ -110,7 +110,7 @@ impl EventMessage {
         }
     }
 
-    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub(crate) fn to_wire<'a>(self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         match self {
             EventMessage::DelayReq(msg) => msg.to_wire(buf),
             EventMessage::OneStepSync(msg) => msg.to_wire(buf),
@@ -120,7 +120,7 @@ impl EventMessage {
 }
 
 impl GeneralMessage {
-    pub fn new(
+    pub(crate) fn new(
         msg_type: MessageType,
         sequence_id: SequenceId,
         flags: MessageFlags,
@@ -159,7 +159,7 @@ impl GeneralMessage {
         }
     }
 
-    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub(crate) fn to_wire<'a>(self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         match self {
             GeneralMessage::Announce(msg) => msg.to_wire(buf),
             GeneralMessage::DelayResp(msg) => msg.to_wire(buf),
@@ -174,21 +174,22 @@ pub struct SequenceId {
 }
 
 impl SequenceId {
-    pub fn new(id: u16) -> Self {
+    pub(crate) fn new(id: u16) -> Self {
         Self { id }
     }
 
-    pub fn follows(&self, previous: SequenceId) -> bool {
+    #[cfg(test)]
+    pub(crate) fn follows(&self, previous: SequenceId) -> bool {
         self.id.wrapping_sub(previous.id) == 1
     }
 
-    pub fn next(&self) -> Self {
+    pub(crate) fn next(&self) -> Self {
         Self {
             id: self.id.wrapping_add(1),
         }
     }
 
-    pub fn to_be_bytes(&self) -> [u8; 2] {
+    pub(crate) fn to_be_bytes(self) -> [u8; 2] {
         self.id.to_be_bytes()
     }
 }
@@ -236,7 +237,7 @@ pub struct AnnounceMessage {
 }
 
 impl AnnounceMessage {
-    pub fn new(
+    pub(crate) fn new(
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
         foreign_clock_ds: ForeignClockDS,
@@ -250,7 +251,12 @@ impl AnnounceMessage {
         }
     }
 
-    pub fn feed_bmca(self, bmca: &mut impl Bmca, source_port_identity: PortIdentity, now: Instant) {
+    pub(crate) fn feed_bmca(
+        self,
+        bmca: &mut impl Bmca,
+        source_port_identity: PortIdentity,
+        now: Instant,
+    ) {
         if let Some(log_interval) = self.log_message_interval.log_interval() {
             bmca.consider(
                 source_port_identity,
@@ -261,7 +267,7 @@ impl AnnounceMessage {
         }
     }
 
-    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub(crate) fn to_wire<'a>(self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let ptp_timescale_flag = match self.ptp_timescale {
             TimeScale::Ptp => MessageFlags::PTP_TIMESCALE,
             TimeScale::Arb => MessageFlags::empty(),
@@ -289,7 +295,7 @@ pub struct OneStepSyncMessage {
 }
 
 impl OneStepSyncMessage {
-    pub fn new(
+    pub(crate) fn new(
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
         origin_timestamp: TimeStamp,
@@ -301,11 +307,11 @@ impl OneStepSyncMessage {
         }
     }
 
-    pub fn master_slave_offset(&self, ingress_timestamp: TimeStamp) -> TimeInterval {
+    pub(crate) fn master_slave_offset(&self, ingress_timestamp: TimeStamp) -> TimeInterval {
         ingress_timestamp - self.origin_timestamp
     }
 
-    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub(crate) fn to_wire<'a>(self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
             .with_message_type(MessageType::Sync, ControlField::Sync)
             .with_flags(MessageFlags::empty())
@@ -327,14 +333,14 @@ pub struct TwoStepSyncMessage {
 }
 
 impl TwoStepSyncMessage {
-    pub fn new(sequence_id: SequenceId, log_message_interval: LogMessageInterval) -> Self {
+    pub(crate) fn new(sequence_id: SequenceId, log_message_interval: LogMessageInterval) -> Self {
         Self {
             sequence_id,
             log_message_interval,
         }
     }
 
-    pub fn follow_up(self, precise_origin_timestamp: TimeStamp) -> FollowUpMessage {
+    pub(crate) fn follow_up(self, precise_origin_timestamp: TimeStamp) -> FollowUpMessage {
         FollowUpMessage::new(
             self.sequence_id,
             self.log_message_interval,
@@ -342,7 +348,7 @@ impl TwoStepSyncMessage {
         )
     }
 
-    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub(crate) fn to_wire<'a>(self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let payload = buf
             .with_message_type(MessageType::Sync, ControlField::Sync)
             .with_flags(MessageFlags::TWO_STEP)
@@ -362,7 +368,7 @@ pub struct FollowUpMessage {
 }
 
 impl FollowUpMessage {
-    pub fn new(
+    pub(crate) fn new(
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
         precise_origin_timestamp: TimeStamp,
@@ -374,7 +380,7 @@ impl FollowUpMessage {
         }
     }
 
-    pub fn master_slave_offset(
+    pub(crate) fn master_slave_offset(
         &self,
         sync: TwoStepSyncMessage,
         sync_ingress_timestamp: TimeStamp,
@@ -386,7 +392,7 @@ impl FollowUpMessage {
         }
     }
 
-    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub(crate) fn to_wire<'a>(self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
             .with_message_type(MessageType::FollowUp, ControlField::FollowUp)
             .with_flags(MessageFlags::empty())
@@ -407,11 +413,11 @@ pub struct DelayRequestMessage {
 }
 
 impl DelayRequestMessage {
-    pub fn new(sequence_id: SequenceId) -> Self {
+    pub(crate) fn new(sequence_id: SequenceId) -> Self {
         Self { sequence_id }
     }
 
-    pub fn response(
+    pub(crate) fn response(
         self,
         log_message_interval: LogMessageInterval,
         receive_timestamp: TimeStamp,
@@ -425,7 +431,7 @@ impl DelayRequestMessage {
         )
     }
 
-    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub(crate) fn to_wire<'a>(self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let payload = buf
             .with_message_type(MessageType::DelayRequest, ControlField::DelayRequest)
             .with_flags(MessageFlags::empty())
@@ -446,7 +452,7 @@ pub struct DelayResponseMessage {
 }
 
 impl DelayResponseMessage {
-    pub fn new(
+    pub(crate) fn new(
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
         receive_timestamp: TimeStamp,
@@ -460,7 +466,7 @@ impl DelayResponseMessage {
         }
     }
 
-    pub fn slave_master_offset(
+    pub(crate) fn slave_master_offset(
         &self,
         delay_req: DelayRequestMessage,
         delay_req_egress_timestamp: TimeStamp,
@@ -472,7 +478,7 @@ impl DelayResponseMessage {
         }
     }
 
-    pub fn to_wire<'a>(&self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
+    pub(crate) fn to_wire<'a>(self, buf: &'a mut MessageBuffer) -> FinalizedBuffer<'a> {
         let mut payload = buf
             .with_message_type(MessageType::DelayResponse, ControlField::DelayResponse)
             .with_flags(MessageFlags::empty())

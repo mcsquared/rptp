@@ -23,7 +23,7 @@ pub struct UncalibratedPort<P: Port, B: Bmca, L: PortLog> {
 }
 
 impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
-    pub fn new(
+    pub(crate) fn new(
         port: P,
         bmca: ParentTrackingBmca<B>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
@@ -43,7 +43,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         }
     }
 
-    pub fn process_announce(
+    pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
@@ -62,7 +62,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         }
     }
 
-    pub fn process_one_step_sync(
+    pub(crate) fn process_one_step_sync(
         &mut self,
         sync: OneStepSyncMessage,
         source_port_identity: PortIdentity,
@@ -87,7 +87,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         }
     }
 
-    pub fn process_two_step_sync(
+    pub(crate) fn process_two_step_sync(
         &mut self,
         sync: TwoStepSyncMessage,
         source_port_identity: PortIdentity,
@@ -104,7 +104,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         None
     }
 
-    pub fn process_follow_up(
+    pub(crate) fn process_follow_up(
         &mut self,
         follow_up: FollowUpMessage,
         source_port_identity: PortIdentity,
@@ -126,7 +126,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         }
     }
 
-    pub fn process_delay_request(
+    pub(crate) fn process_delay_request(
         &mut self,
         req: DelayRequestMessage,
         egress_timestamp: TimeStamp,
@@ -138,7 +138,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         None
     }
 
-    pub fn process_delay_response(
+    pub(crate) fn process_delay_response(
         &mut self,
         resp: DelayResponseMessage,
         source_port_identity: PortIdentity,
@@ -153,7 +153,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         None
     }
 
-    pub fn send_delay_request(&mut self) -> SendResult {
+    pub(crate) fn send_delay_request(&mut self) -> SendResult {
         let delay_request = self.delay_mechanism.delay_request();
         self.port
             .send_event(EventMessage::DelayReq(delay_request))?;
@@ -161,7 +161,7 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
         Ok(())
     }
 
-    pub fn master_clock_selected(self) -> PortState<P, B, L> {
+    pub(crate) fn master_clock_selected(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::MasterClockSelected {
             parent: self.bmca.parent(),
         });
@@ -169,19 +169,19 @@ impl<P: Port, B: Bmca, L: PortLog> UncalibratedPort<P, B, L> {
             .slave(self.port, self.bmca, self.delay_mechanism, self.log)
     }
 
-    pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
+    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::AnnounceReceiptTimeout);
         let local_tracking_bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
         self.profile
             .master(self.port, local_tracking_bmca, self.log)
     }
 
-    pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedMaster);
         decision.apply(self.port, self.bmca.into_inner(), self.log, self.profile)
     }
 
-    pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedSlave {
             parent: *decision.parent_port_identity(),
         });
@@ -198,13 +198,13 @@ mod tests {
         IncrementalBmca,
     };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved};
+    use crate::e2e::DelayCycle;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, DelayResponseMessage, SystemMessage, TimeScale};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::portstate::PortState;
     use crate::servo::{Servo, SteppingServo};
-    use crate::slave::DelayCycle;
     use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 

@@ -11,7 +11,7 @@ pub struct InitializingPort<P: Port, B: Bmca, L: PortLog> {
 }
 
 impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
-    pub fn new(port: P, bmca: B, log: L, profile: PortProfile) -> Self {
+    pub(crate) fn new(port: P, bmca: B, log: L, profile: PortProfile) -> Self {
         log.port_event(PortEvent::Static("Become InitializingPort"));
 
         Self {
@@ -22,7 +22,7 @@ impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
         }
     }
 
-    pub fn initialized(self) -> PortState<P, B, L> {
+    pub(crate) fn initialized(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::Initialized);
         self.profile.listening(self.port, self.bmca, self.log)
     }

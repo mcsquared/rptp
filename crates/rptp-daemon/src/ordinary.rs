@@ -2,13 +2,15 @@ use std::rc::Rc;
 
 use tokio::sync::mpsc;
 
-use rptp::bmca::IncrementalBmca;
-use rptp::clock::{LocalClock, SynchronizableClock};
-use rptp::infra::infra_support::SortedForeignClockRecordsVec;
-use rptp::message::SystemMessage;
-use rptp::port::{DomainNumber, DomainPort, PortIdentity, PortNumber};
-use rptp::portstate::{PortProfile, PortState};
-use rptp::timestamping::TxTimestamping;
+use rptp::{
+    bmca::IncrementalBmca,
+    clock::{LocalClock, SynchronizableClock},
+    infra::infra_support::SortedForeignClockRecordsVec,
+    message::SystemMessage,
+    port::{DomainNumber, DomainPort, PortIdentity, PortNumber, SingleDomainPortMap},
+    portstate::{PortProfile, PortState},
+    timestamping::TxTimestamping,
+};
 
 use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
@@ -22,7 +24,7 @@ pub type OrdinaryPortState<'a, C, N, TS> =
     PortState<Box<OrdinaryPort<'a, C, N, TS>>, OrdinaryBmca, TracingPortLog>;
 
 pub type OrdinaryPortMap<'a, C, N, TS> =
-    rptp::port::SingleDomainPortMap<Box<OrdinaryPort<'a, C, N, TS>>, OrdinaryBmca, TracingPortLog>;
+    SingleDomainPortMap<Box<OrdinaryPort<'a, C, N, TS>>, OrdinaryBmca, TracingPortLog>;
 
 pub fn ordinary_clock_port<'a, C, N, TS: TxTimestamping>(
     local_clock: &'a LocalClock<C>,

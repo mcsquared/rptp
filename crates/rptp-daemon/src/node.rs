@@ -4,12 +4,12 @@ use std::time::Instant as StdInstant;
 
 use tokio::sync::mpsc;
 
-use rptp::wire::UnvalidatedMessage;
 use rptp::{
     message::{DomainMessage, SystemMessage},
-    port::{DomainNumber, PhysicalPort, PortMap, SendResult, Timeout, TimerHost},
+    port::{DomainNumber, PhysicalPort, PortMap, SendError, SendResult, Timeout, TimerHost},
     result::{Error as RptpError, ProtocolError},
     time::{Duration, Instant},
+    wire::UnvalidatedMessage,
 };
 
 use crate::net::NetworkSocket;
@@ -132,7 +132,7 @@ impl<N: NetworkSocket> PhysicalPort for TokioPhysicalPort<N> {
                     error = %e,
                     "event socket send error"
                 );
-                Err(rptp::port::SendError)
+                Err(SendError)
             }
         }
     }
@@ -146,7 +146,7 @@ impl<N: NetworkSocket> PhysicalPort for TokioPhysicalPort<N> {
                     error = %e,
                     "general socket send error"
                 );
-                Err(rptp::port::SendError)
+                Err(SendError)
             }
         }
     }
@@ -329,26 +329,22 @@ mod tests {
     use futures::FutureExt;
     use tokio::time;
 
-    use rptp::bmca::{
-        DefaultDS, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1, Priority2,
+    use rptp::{
+        bmca::{
+            DefaultDS, IncrementalBmca, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1,
+            Priority2,
+        },
+        clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock},
+        e2e::{DelayCycle, EndToEndDelayMechanism},
+        infra::infra_support::SortedForeignClockRecordsVec,
+        log::NOOP_CLOCK_METRICS,
+        message::{EventMessage, GeneralMessage, TimeScale},
+        port::{DomainPort, ParentPortIdentity, PortIdentity, PortNumber, SingleDomainPortMap},
+        portstate::{PortProfile, PortState},
+        servo::{Servo, SteppingServo},
+        test_support::{FakeClock, FakeTimestamping},
+        time::{LogInterval, TimeStamp},
     };
-    use rptp::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
-    use rptp::e2e::EndToEndDelayMechanism;
-    use rptp::infra::infra_support::SortedForeignClockRecordsVec;
-    use rptp::log::NOOP_CLOCK_METRICS;
-    use rptp::message::{
-        EventMessage, GeneralMessage, OneStepSyncMessage, TimeScale, TwoStepSyncMessage,
-    };
-    use rptp::port::{
-        AnnounceReceiptTimeout, DomainPort, ParentPortIdentity, Port, PortIdentity, PortNumber,
-    };
-    use rptp::portstate::{PortProfile, PortState};
-    use rptp::servo::{Servo, SteppingServo};
-    use rptp::slave::{DelayCycle, SlavePort};
-    use rptp::test_support::FakeClock;
-    use rptp::test_support::FakeTimestamping;
-    use rptp::time::{LogInterval, LogMessageInterval, TimeStamp};
-    use rptp::wire::{MessageBuffer, PtpVersion, TransportSpecific};
 
     use crate::log::TracingPortLog;
     use crate::net::{FakeNetworkSocket, MulticastSocket, NetworkSocket};
@@ -359,9 +355,6 @@ mod tests {
     use std::net::SocketAddr;
     use std::time::Duration as StdDuration;
 
-    use rptp::bmca::IncrementalBmca;
-    use rptp::port::SingleDomainPortMap;
-
     type TestPortMap<'a, C, N> = SingleDomainPortMap<
         Box<DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, FakeTimestamping>>,
         IncrementalBmca<SortedForeignClockRecordsVec>,
@@ -369,6 +362,34 @@ mod tests {
     >;
 
     type TestPortsLoop<'a, C, N> = TokioPortsLoop<TestPortMap<'a, C, N>, N, FakeTimestamping>;
+
+    // Prebuilt PTPv2 Sync frames used by error-handling tests.
+    const DOMAIN_SEVEN_SYNC: [u8; 44] = [
+        0x00, 0x02, 0x00, 0x2C, 0x07, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x00, 0x01,
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    // PTPv1 sync
+    const PTP_V1_SYNC: [u8; 44] = [
+        0x00, 0x01, 0x00, 0x2C, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x00, 0x01,
+        0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    // Declared length (0x002D) does not match actual byte length (44).
+    const LENGTH_MISMATCH_SYNC: [u8; 44] = [
+        0x00, 0x02, 0x00, 0x2D, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x00, 0x01,
+        0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    // Length field matches (0x0028) but payload is only 6 bytes (origin timestamp requires 10).
+    const SHORT_PAYLOAD_SYNC: [u8; 40] = [
+        0x00, 0x02, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x00, 0x01,
+        0x00, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xAA, 0xBB,
+    ];
 
     struct MasterTestNode<'a, C: SynchronizableClock, N: NetworkSocket> {
         portsloop: TestPortsLoop<'a, C, N>,
@@ -610,10 +631,13 @@ mod tests {
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         let port_number = PortNumber::new(1);
+        let timer_host = TokioTimerHost::new(domain_number, system_tx.clone());
+        let delay_timeout =
+            timer_host.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
             physical_port,
-            TokioTimerHost::new(domain_number, system_tx.clone()),
+            timer_host,
             FakeTimestamping::new(),
             domain_number,
             port_number,
@@ -626,27 +650,22 @@ mod tests {
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             parent_port_identity,
         );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(10),
-            ),
-            Duration::from_secs(10),
-        );
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
         let log = TracingPortLog::new(port_identity);
-        let port_state = PortState::Slave(SlavePort::new(
+        let port_state = PortProfile::new(
+            Duration::from_secs(10),
+            LogInterval::new(0),
+            LogInterval::new(0),
+            LogInterval::new(0),
+        )
+        .slave(
             domain_port,
             bmca,
-            announce_receipt_timeout,
             EndToEndDelayMechanism::new(delay_cycle),
             log,
-            PortProfile::default(),
-        ));
+        );
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let rx_timestamping = FakeTimestamping::new();
 
@@ -712,19 +731,10 @@ mod tests {
         )
         .await?;
 
-        // Build a valid PTPv2 Sync message for a different domain (e.g., 7).
-        let mut msg_buf = MessageBuffer::new(
-            TransportSpecific,
-            PtpVersion::V2,
-            DomainNumber::new(7),
-            PortIdentity::fake(),
-        );
-        let sync_msg = TwoStepSyncMessage::new(1.into(), LogMessageInterval::new(0));
-        let wire = sync_msg.to_wire(&mut msg_buf);
         event_queue
             .lock()
             .unwrap()
-            .push_back(wire.as_ref().to_vec());
+            .push_back(DOMAIN_SEVEN_SYNC.to_vec());
 
         let shutdown = time::sleep(StdDuration::from_millis(20));
         node.run_until(shutdown).await?;
@@ -757,19 +767,7 @@ mod tests {
         )
         .await?;
 
-        // Build a valid PTPv2 Sync message for domain 0, then corrupt the version field.
-        let mut msg_buf = MessageBuffer::new(
-            TransportSpecific,
-            PtpVersion::V2,
-            DomainNumber::new(0),
-            PortIdentity::fake(),
-        );
-        let sync_msg = TwoStepSyncMessage::new(2.into(), LogMessageInterval::new(0));
-        let wire = sync_msg.to_wire(&mut msg_buf);
-        let mut bytes = wire.as_ref().to_vec();
-        // Overwrite the PTP version field (offset 1) with an unsupported value.
-        bytes[1] = 1;
-        event_queue.lock().unwrap().push_back(bytes);
+        event_queue.lock().unwrap().push_back(PTP_V1_SYNC.to_vec());
 
         let shutdown = time::sleep(StdDuration::from_millis(20));
         node.run_until(shutdown).await?;
@@ -836,21 +834,10 @@ mod tests {
         )
         .await?;
 
-        // Build a valid PTPv2 TwoStepSync message, then corrupt the length field.
-        let mut msg_buf = MessageBuffer::new(
-            TransportSpecific,
-            PtpVersion::V2,
-            DomainNumber::new(0),
-            PortIdentity::fake(),
-        );
-        let sync_msg = TwoStepSyncMessage::new(10.into(), LogMessageInterval::new(0));
-        let wire = sync_msg.to_wire(&mut msg_buf);
-        let mut bytes = wire.as_ref().to_vec();
-        let len = bytes.len() as u16;
-        let bad_len = len.wrapping_add(1);
-        bytes[2] = (bad_len >> 8) as u8;
-        bytes[3] = (bad_len & 0xFF) as u8;
-        event_queue.lock().unwrap().push_back(bytes);
+        event_queue
+            .lock()
+            .unwrap()
+            .push_back(LENGTH_MISMATCH_SYNC.to_vec());
 
         let shutdown = time::sleep(StdDuration::from_millis(20));
         node.run_until(shutdown).await?;
@@ -883,25 +870,10 @@ mod tests {
         )
         .await?;
 
-        // Build a valid PTPv2 OneStepSync message, then truncate the payload
-        // so that the header length matches but the payload is too short.
-        let mut msg_buf = MessageBuffer::new(
-            TransportSpecific,
-            PtpVersion::V2,
-            DomainNumber::new(0),
-            PortIdentity::fake(),
-        );
-        let sync_msg =
-            OneStepSyncMessage::new(11.into(), LogMessageInterval::new(0), TimeStamp::new(1, 2));
-        let wire = sync_msg.to_wire(&mut msg_buf);
-        let mut bytes = wire.as_ref().to_vec();
-        // Ensure length is at least header (34) + some payload, but less than 34 + 10.
-        let truncated_len = 40usize;
-        bytes.truncate(truncated_len);
-        let len_field = truncated_len as u16;
-        bytes[2] = (len_field >> 8) as u8;
-        bytes[3] = (len_field & 0xFF) as u8;
-        event_queue.lock().unwrap().push_back(bytes);
+        event_queue
+            .lock()
+            .unwrap()
+            .push_back(SHORT_PAYLOAD_SYNC.to_vec());
 
         let shutdown = time::sleep(StdDuration::from_millis(20));
         node.run_until(shutdown).await?;

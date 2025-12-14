@@ -3,22 +3,23 @@
 pub mod bmca;
 pub mod clock;
 pub mod e2e;
-pub mod faulty;
-pub mod initializing;
-pub mod listening;
 pub mod log;
-pub mod master;
 pub mod message;
 pub mod port;
 pub mod portstate;
-pub mod premaster;
 pub mod result;
 pub mod servo;
-pub mod slave;
 pub mod time;
 pub mod timestamping;
-pub mod uncalibrated;
 pub mod wire;
+
+mod faulty;
+mod initializing;
+mod listening;
+mod master;
+mod premaster;
+mod slave;
+mod uncalibrated;
 
 #[cfg(feature = "std")]
 pub mod infra;

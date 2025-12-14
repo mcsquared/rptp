@@ -1,11 +1,10 @@
 use crate::message::{
-    DelayRequestMessage, DelayResponseMessage, FollowUpMessage, OneStepSyncMessage,
+    DelayRequestMessage, DelayResponseMessage, FollowUpMessage, OneStepSyncMessage, SequenceId,
     TwoStepSyncMessage,
 };
 use crate::port::Timeout;
 use crate::servo::ServoSample;
-use crate::slave::DelayCycle;
-use crate::time::{TimeInterval, TimeStamp};
+use crate::time::{LogInterval, TimeInterval, TimeStamp};
 
 pub struct EndToEndDelayMechanism<T: Timeout> {
     delay_cycle: DelayCycle<T>,
@@ -131,6 +130,32 @@ impl DelayExchange {
             .combine_latest(&self.delay_request_window, |resp, &(req, ts)| {
                 resp.slave_master_offset(req, ts)
             })
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct DelayCycle<T: Timeout> {
+    sequence_id: SequenceId,
+    timeout: T,
+    log_interval: LogInterval,
+}
+
+impl<T: Timeout> DelayCycle<T> {
+    pub fn new(start: SequenceId, delay_request_timeout: T, log_interval: LogInterval) -> Self {
+        Self {
+            sequence_id: start,
+            timeout: delay_request_timeout,
+            log_interval,
+        }
+    }
+
+    pub(crate) fn next(&mut self) {
+        self.timeout.restart(self.log_interval.duration());
+        self.sequence_id = self.sequence_id.next();
+    }
+
+    pub(crate) fn delay_request(&self) -> DelayRequestMessage {
+        DelayRequestMessage::new(self.sequence_id)
     }
 }
 

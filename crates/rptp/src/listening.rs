@@ -16,7 +16,7 @@ pub struct ListeningPort<P: Port, B: Bmca, L: PortLog> {
 }
 
 impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
-    pub fn new(
+    pub(crate) fn new(
         port: P,
         bmca: B,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
@@ -34,25 +34,25 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
         }
     }
 
-    pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedSlave {
             parent: *decision.parent_port_identity(),
         });
         decision.apply(self.port, self.bmca, self.log, self.profile)
     }
 
-    pub fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedMaster);
         decision.apply(self.port, self.bmca, self.log, self.profile)
     }
 
-    pub fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
+    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::AnnounceReceiptTimeout);
         let bmca = LocalMasterTrackingBmca::new(self.bmca);
         self.profile.master(self.port, bmca, self.log)
     }
 
-    pub fn process_announce(
+    pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,

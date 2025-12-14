@@ -313,7 +313,7 @@ impl<'a> WireTimeStamp<'a> {
 pub struct TransportSpecific;
 
 impl TransportSpecific {
-    pub const fn to_wire(self) -> u8 {
+    pub(crate) const fn to_wire(self) -> u8 {
         0
     }
 }
@@ -330,12 +330,12 @@ pub struct PtpVersion(u8);
 impl PtpVersion {
     pub const V2: Self = Self(2);
 
-    pub const fn as_u8(self) -> u8 {
+    pub(crate) const fn as_u8(self) -> u8 {
         self.0 & 0x0F
     }
 }
 
-pub struct MessageBuffer {
+pub(crate) struct MessageBuffer {
     buf: [u8; 2048],
 }
 
@@ -368,7 +368,7 @@ impl MessageBuffer {
     }
 }
 
-pub struct TypedBuffer<'a> {
+pub(crate) struct TypedBuffer<'a> {
     buf: &'a mut [u8],
 }
 
@@ -379,7 +379,7 @@ impl<'a> TypedBuffer<'a> {
     }
 }
 
-pub struct FlaggedBuffer<'a> {
+pub(crate) struct FlaggedBuffer<'a> {
     buf: &'a mut [u8],
 }
 
@@ -390,7 +390,7 @@ impl<'a> FlaggedBuffer<'a> {
     }
 }
 
-pub struct SequencedBuffer<'a> {
+pub(crate) struct SequencedBuffer<'a> {
     buf: &'a mut [u8],
 }
 
@@ -404,7 +404,7 @@ impl<'a> SequencedBuffer<'a> {
     }
 }
 
-pub struct LogMessageIntervalBuffer<'a> {
+pub(crate) struct LogMessageIntervalBuffer<'a> {
     buf: &'a mut [u8],
 }
 
@@ -414,7 +414,7 @@ impl<'a> LogMessageIntervalBuffer<'a> {
     }
 }
 
-pub struct PayloadBuffer<'a> {
+pub(crate) struct PayloadBuffer<'a> {
     buf: &'a mut [u8],
 }
 
@@ -434,7 +434,7 @@ impl<'a> PayloadBuffer<'a> {
     }
 }
 
-pub struct FinalizedBuffer<'a> {
+pub(crate) struct FinalizedBuffer<'a> {
     buf: &'a mut [u8],
 }
 
@@ -444,7 +444,8 @@ impl AsRef<[u8]> for FinalizedBuffer<'_> {
     }
 }
 
-pub enum MessageType {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MessageType {
     Sync = 0x00,
     DelayRequest = 0x01,
     FollowUp = 0x08,

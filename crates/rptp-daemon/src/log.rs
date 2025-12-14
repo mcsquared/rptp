@@ -1,5 +1,4 @@
-use rptp::log::{PortEvent, PortLog};
-use rptp::port::PortIdentity;
+use rptp::{log::PortEvent, log::PortLog, port::PortIdentity};
 
 #[derive(Clone, Copy, Debug)]
 pub struct TracingPortLog {

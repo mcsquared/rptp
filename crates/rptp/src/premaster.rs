@@ -14,7 +14,7 @@ pub struct PreMasterPort<P: Port, B: Bmca, L: PortLog> {
 }
 
 impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
-    pub fn new(
+    pub(crate) fn new(
         port: P,
         bmca: LocalMasterTrackingBmca<B>,
         _qualification_timeout: P::Timeout,
@@ -32,7 +32,7 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
         }
     }
 
-    pub fn process_announce(
+    pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
@@ -50,12 +50,12 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
         }
     }
 
-    pub fn qualified(self) -> PortState<P, B, L> {
+    pub(crate) fn qualified(self) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::QualifiedMaster);
         self.profile.master(self.port, self.bmca, self.log)
     }
 
-    pub fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
         self.log.port_event(PortEvent::RecommendedSlave {
             parent: *decision.parent_port_identity(),
         });

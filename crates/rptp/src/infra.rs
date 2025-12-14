@@ -56,7 +56,6 @@ pub mod infra_support {
         }
 
         #[cfg(any(test, feature = "test-support"))]
-        #[allow(dead_code)]
         pub fn from_records(records: &[ForeignClockRecord]) -> Self {
             let mut vec = Self {
                 records: records.to_vec(),
@@ -65,11 +64,13 @@ pub mod infra_support {
             vec
         }
 
-        pub fn is_empty(&self) -> bool {
+        #[cfg(test)]
+        fn is_empty(&self) -> bool {
             self.records.is_empty()
         }
 
-        pub fn len(&self) -> usize {
+        #[cfg(test)]
+        pub(crate) fn len(&self) -> usize {
             self.records.len()
         }
 

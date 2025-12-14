@@ -4,7 +4,7 @@ use crate::bmca::{
     Bmca, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca, ParentTrackingBmca,
     QualificationTimeoutPolicy,
 };
-use crate::e2e::EndToEndDelayMechanism;
+use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::faulty::FaultyPort;
 use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
@@ -13,14 +13,14 @@ use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity};
 use crate::premaster::PreMasterPort;
-use crate::slave::{DelayCycle, SlavePort};
+use crate::slave::SlavePort;
 use crate::time::{Duration, Instant, LogInterval, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 
 // Possible decisions that move the port state machine from one state
 // to another as defined in IEEE 1588 Section 9.2.5, figure 24
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StateDecision {
+pub(crate) enum StateDecision {
     Initialized,
     MasterClockSelected,
     RecommendedSlave(BmcaSlaveDecision),
@@ -44,7 +44,7 @@ pub enum PortState<P: Port, B: Bmca, L: PortLog> {
 }
 
 impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
-    pub fn apply(self, decision: StateDecision) -> Self {
+    pub(crate) fn apply(self, decision: StateDecision) -> Self {
         match decision {
             StateDecision::AnnounceReceiptTimeoutExpired => match self {
                 PortState::Listening(listening) => listening.announce_receipt_timeout_expired(),
@@ -95,7 +95,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         }
     }
 
-    pub fn dispatch_event(
+    pub(crate) fn dispatch_event(
         &mut self,
         msg: EventMessage,
         source_port_identity: PortIdentity,
@@ -127,7 +127,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         }
     }
 
-    pub fn dispatch_general(
+    pub(crate) fn dispatch_general(
         &mut self,
         msg: GeneralMessage,
         source_port_identity: PortIdentity,
@@ -160,7 +160,7 @@ impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
         }
     }
 
-    pub fn dispatch_system(&mut self, msg: SystemMessage) -> Option<StateDecision> {
+    pub(crate) fn dispatch_system(&mut self, msg: SystemMessage) -> Option<StateDecision> {
         use PortState::*;
         use SystemMessage::*;
 
@@ -222,7 +222,23 @@ pub struct PortProfile {
 }
 
 impl PortProfile {
-    pub fn new() -> Self {
+    pub fn new(
+        announce_receipt_timeout_interval: Duration,
+        log_announce_interval: LogInterval,
+        log_sync_interval: LogInterval,
+        log_min_delay_request_interval: LogInterval,
+    ) -> Self {
+        Self {
+            announce_receipt_timeout_interval,
+            log_announce_interval,
+            log_sync_interval,
+            log_min_delay_request_interval,
+        }
+    }
+}
+
+impl Default for PortProfile {
+    fn default() -> Self {
         Self {
             announce_receipt_timeout_interval: Duration::from_secs(5),
             log_announce_interval: LogInterval::new(0),
@@ -232,14 +248,8 @@ impl PortProfile {
     }
 }
 
-impl Default for PortProfile {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl PortProfile {
-    pub fn log_min_delay_request_interval(&self) -> LogInterval {
+    pub(crate) fn log_min_delay_request_interval(&self) -> LogInterval {
         self.log_min_delay_request_interval
     }
 
@@ -252,7 +262,7 @@ impl PortProfile {
         PortState::Initializing(InitializingPort::new(port, bmca, log, self))
     }
 
-    pub fn listening<P: Port, B: Bmca, L: PortLog>(
+    pub(crate) fn listening<P: Port, B: Bmca, L: PortLog>(
         self,
         port: P,
         bmca: B,
@@ -323,7 +333,7 @@ impl PortProfile {
         ))
     }
 
-    pub fn pre_master<P: Port, B: Bmca, L: PortLog>(
+    pub(crate) fn pre_master<P: Port, B: Bmca, L: PortLog>(
         self,
         port: P,
         bmca: LocalMasterTrackingBmca<B>,
@@ -344,7 +354,7 @@ impl PortProfile {
         ))
     }
 
-    pub fn uncalibrated<P: Port, B: Bmca, L: PortLog>(
+    pub(crate) fn uncalibrated<P: Port, B: Bmca, L: PortLog>(
         self,
         port: P,
         bmca: ParentTrackingBmca<B>,

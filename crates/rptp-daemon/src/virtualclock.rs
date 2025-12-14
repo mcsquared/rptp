@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 use std::time::Instant as StdInstant;
 
-use rptp::clock::{Clock, SynchronizableClock};
-use rptp::time::{TimeInterval, TimeStamp};
+use rptp::{
+    clock::{Clock, SynchronizableClock},
+    time::{TimeInterval, TimeStamp},
+};
 
 pub struct VirtualClock {
     start: RefCell<StdInstant>,
