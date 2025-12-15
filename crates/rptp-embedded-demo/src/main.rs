@@ -14,17 +14,17 @@ use rptp::{
     bmca::{DefaultDS, IncrementalBmca, Priority1, Priority2},
     clock::{Clock, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock},
     heapless::HeaplessSortedForeignClockRecords,
-    log::{PortEvent, PortLog, NOOP_CLOCK_METRICS},
-    message::{DomainMessage, EventMessage, SystemMessage, TimeScale, TimestampMessage},
+    log::{NOOP_CLOCK_METRICS, PortEvent, PortLog},
+    message::{EventMessage, MessageIngress, SystemMessage, TimeScale, TimestampMessage},
     port::{
         DomainNumber, DomainPort, PhysicalPort, PortMap, PortNumber, SendResult,
         SingleDomainPortMap, Timeout, TimerHost,
     },
     portstate::PortProfile,
+    result::Error as RptpError,
     servo::{Servo, SteppingServo},
     time::{Duration, Instant, TimeInterval, TimeStamp},
     timestamping::TxTimestamping,
-    wire::UnvalidatedMessage,
 };
 use smoltcp::time::Instant as SmolInstant;
 use smoltcp::wire::Ipv4Address;
@@ -553,23 +553,20 @@ fn process_packet<'a>(
     port_map: &mut DemoPortMap<'a>,
     packet: &RxPacket,
     now: Instant,
-    ingress: TimeStamp,
+    ingress_timestamp: TimeStamp,
 ) {
-    let msg = match UnvalidatedMessage::new(&packet.data[..packet.len]).length_checked_v2() {
-        Ok(msg) => msg,
-        Err(e) => {
-            hprintln!("[rx] drop malformed packet: {:?}", e);
-            return;
+    let result = match packet.kind {
+        RxKind::Event => MessageIngress::new(port_map)
+            .receive_event(&packet.data[..packet.len], ingress_timestamp),
+        RxKind::General => {
+            MessageIngress::new(port_map).receive_general(&packet.data[..packet.len], now)
         }
     };
 
-    let domain_msg = DomainMessage::new(msg);
-    let result = match packet.kind {
-        RxKind::Event => domain_msg.dispatch_event(port_map, ingress),
-        RxKind::General => domain_msg.dispatch_general(port_map, now),
-    };
-
     if let Err(e) = result {
-        hprintln!("[rx] drop protocol error: {:?}", e);
+        match e {
+            RptpError::Parse(_) => hprintln!("[rx] drop malformed packet: {:?}", e),
+            _ => hprintln!("[rx] drop protocol error: {:?}", e),
+        }
     }
 }

@@ -194,9 +194,43 @@ impl PortIdentity {
     }
 }
 
+pub struct TestMessage<'a> {
+    buf: &'a [u8],
+}
+
+impl<'a> TestMessage<'a> {
+    pub fn new(buf: &'a [u8]) -> Self {
+        Self { buf }
+    }
+
+    pub fn event(&self) -> Result<EventMessage> {
+        let length_checked = UnvalidatedMessage::new(self.buf).length_checked_v2()?;
+        let header = MessageHeader::new(length_checked);
+        EventMessage::new(
+            header.message_type()?,
+            header.sequence_id(),
+            header.flags(),
+            header.log_message_interval(),
+            header.payload(),
+        )
+    }
+
+    pub fn general(&self) -> Result<GeneralMessage> {
+        let length_checked = UnvalidatedMessage::new(self.buf).length_checked_v2()?;
+        let header = MessageHeader::new(length_checked);
+        GeneralMessage::new(
+            header.message_type()?,
+            header.sequence_id(),
+            header.flags(),
+            header.log_message_interval(),
+            header.payload(),
+        )
+    }
+}
+
 pub struct FakePort {
-    event_messages: Rc<RefCell<Vec<EventMessage>>>,
-    general_messages: Rc<RefCell<Vec<GeneralMessage>>>,
+    event_messages: Rc<RefCell<Vec<Vec<u8>>>>,
+    general_messages: Rc<RefCell<Vec<Vec<u8>>>>,
 }
 
 impl FakePort {
@@ -207,12 +241,24 @@ impl FakePort {
         }
     }
 
-    pub fn take_event_messages(&self) -> Vec<EventMessage> {
-        self.event_messages.borrow_mut().drain(..).collect()
+    pub fn contains_event_message(&self, expected: &EventMessage) -> bool {
+        let messages = self.event_messages.borrow().clone();
+        messages.iter().enumerate().any(|(index, buf)| {
+            let msg = TestMessage::new(buf.as_slice()).event().unwrap_or_else(|err| {
+                panic!("FakePort stored undecodable event message at index {index}: {err:?}")
+            });
+            msg == *expected
+        })
     }
 
-    pub fn take_general_messages(&self) -> Vec<GeneralMessage> {
-        self.general_messages.borrow_mut().drain(..).collect()
+    pub fn contains_general_message(&self, expected: &GeneralMessage) -> bool {
+        let messages = self.general_messages.borrow().clone();
+        messages.iter().enumerate().any(|(index, buf)| {
+            let msg = TestMessage::new(buf.as_slice()).general().unwrap_or_else(|err| {
+                panic!("FakePort stored undecodable general message at index {index}: {err:?}")
+            });
+            msg == *expected
+        })
     }
 }
 
@@ -224,33 +270,23 @@ impl Default for FakePort {
 
 impl PhysicalPort for FakePort {
     fn send_event(&self, buf: &[u8]) -> SendResult {
-        self.event_messages
-            .borrow_mut()
-            .push(EventMessage::try_from(buf).unwrap());
+        self.event_messages.borrow_mut().push(buf.to_vec());
         Ok(())
     }
 
     fn send_general(&self, buf: &[u8]) -> SendResult {
-        self.general_messages
-            .borrow_mut()
-            .push(GeneralMessage::try_from(buf).unwrap());
+        self.general_messages.borrow_mut().push(buf.to_vec());
         Ok(())
     }
 }
 
 impl PhysicalPort for &FakePort {
     fn send_event(&self, buf: &[u8]) -> SendResult {
-        self.event_messages
-            .borrow_mut()
-            .push(EventMessage::try_from(buf).unwrap());
-        Ok(())
+        (*self).send_event(buf)
     }
 
     fn send_general(&self, buf: &[u8]) -> SendResult {
-        self.general_messages
-            .borrow_mut()
-            .push(GeneralMessage::try_from(buf).unwrap());
-        Ok(())
+        (*self).send_general(buf)
     }
 }
 
@@ -263,37 +299,5 @@ impl PhysicalPort for FailingPort {
 
     fn send_general(&self, _buf: &[u8]) -> SendResult {
         Err(SendError)
-    }
-}
-
-impl TryFrom<&[u8]> for EventMessage {
-    type Error = crate::result::Error;
-
-    fn try_from(buf: &[u8]) -> Result<Self> {
-        let length_checked = UnvalidatedMessage::new(buf).length_checked_v2()?;
-        let header = MessageHeader::new(length_checked);
-        let msg_type = header.message_type()?;
-        let sequence_id = header.sequence_id();
-        let flags = header.flags();
-        let log_message_interval = header.log_message_interval();
-        let payload = header.payload();
-
-        EventMessage::new(msg_type, sequence_id, flags, log_message_interval, payload)
-    }
-}
-
-impl TryFrom<&[u8]> for GeneralMessage {
-    type Error = crate::result::Error;
-
-    fn try_from(buf: &[u8]) -> Result<Self> {
-        let length_checked = UnvalidatedMessage::new(buf).length_checked_v2()?;
-        let header = MessageHeader::new(length_checked);
-        let msg_type = header.message_type()?;
-        let sequence_id = header.sequence_id();
-        let flags = header.flags();
-        let log_message_interval = header.log_message_interval();
-        let payload = header.payload();
-
-        GeneralMessage::new(msg_type, sequence_id, flags, log_message_interval, payload)
     }
 }

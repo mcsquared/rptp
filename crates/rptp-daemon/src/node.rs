@@ -5,11 +5,10 @@ use std::time::Instant as StdInstant;
 use tokio::sync::mpsc;
 
 use rptp::{
-    message::{DomainMessage, SystemMessage},
+    message::{MessageIngress, SystemMessage},
     port::{DomainNumber, PhysicalPort, PortMap, SendError, SendResult, Timeout, TimerHost},
     result::{Error as RptpError, ProtocolError},
     time::{Duration, Instant},
-    wire::UnvalidatedMessage,
 };
 
 use crate::net::NetworkSocket;
@@ -254,24 +253,12 @@ where
             RxKind::General => "general",
         };
 
-        let length_checked = match UnvalidatedMessage::new(&buf[..size]).length_checked_v2() {
-            Ok(msg) => msg,
-            Err(e) => {
-                tracing::trace!(
-                    target: "rptp::rx",
-                    error = %e,
-                    "dropping malformed {label} message"
-                );
-                return;
-            }
-        };
-
-        let domain_msg = DomainMessage::new(length_checked);
         let res = match kind {
-            RxKind::Event => {
-                domain_msg.dispatch_event(&mut self.portmap, self.timestamping.ingress_stamp())
+            RxKind::Event => MessageIngress::new(&mut self.portmap)
+                .receive_event(&buf[..size], self.timestamping.ingress_stamp()),
+            RxKind::General => {
+                MessageIngress::new(&mut self.portmap).receive_general(&buf[..size], now)
             }
-            RxKind::General => domain_msg.dispatch_general(&mut self.portmap, now),
         };
 
         if let Err(e) = res {
@@ -342,7 +329,7 @@ mod tests {
         port::{DomainPort, ParentPortIdentity, PortIdentity, PortNumber, SingleDomainPortMap},
         portstate::{PortProfile, PortState},
         servo::{Servo, SteppingServo},
-        test_support::{FakeClock, FakeTimestamping},
+        test_support::{FakeClock, FakeTimestamping, TestMessage},
         time::{LogInterval, TimeStamp},
     };
 
@@ -577,7 +564,7 @@ mod tests {
 
                 while let Ok(msg) = event_socket_rx.try_recv() {
                     if matches!(
-                        EventMessage::try_from(msg.as_ref()),
+                        TestMessage::new(msg.as_ref()).event(),
                         Ok(EventMessage::TwoStepSync(_))
                     ) {
                         sync_count += 1;
@@ -585,7 +572,7 @@ mod tests {
                 }
                 while let Ok(msg) = general_socket_rx.try_recv() {
                     if matches!(
-                        GeneralMessage::try_from(msg.as_ref()),
+                        TestMessage::new(msg.as_ref()).general(),
                         Ok(GeneralMessage::FollowUp(_))
                     ) {
                         follow_up_count += 1;
@@ -686,7 +673,7 @@ mod tests {
 
                 while let Ok(msg) = event_socket_rx.try_recv() {
                     if matches!(
-                        EventMessage::try_from(msg.as_ref()),
+                        TestMessage::new(msg.as_ref()).event(),
                         Ok(EventMessage::DelayReq(_))
                     ) {
                         delay_request_count += 1;

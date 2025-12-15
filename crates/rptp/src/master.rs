@@ -212,7 +212,9 @@ mod tests {
     };
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
+    use crate::test_support::{
+        FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping,
+    };
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]
@@ -265,9 +267,8 @@ mod tests {
                 .is_ok()
         );
 
-        let messages = port.take_general_messages();
         assert!(
-            messages.contains(&GeneralMessage::DelayResp(DelayResponseMessage::new(
+            port.contains_general_message(&GeneralMessage::DelayResp(DelayResponseMessage::new(
                 0.into(),
                 LogMessageInterval::new(0),
                 TimeStamp::new(0, 0),
@@ -305,9 +306,8 @@ mod tests {
 
         master.dispatch_system(SystemMessage::SyncTimeout);
 
-        let messages = port.take_event_messages();
         assert!(
-            messages.contains(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(
+            port.contains_event_message(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(
                 0.into(),
                 LogMessageInterval::new(0)
             )))
@@ -397,9 +397,8 @@ mod tests {
                 .is_ok()
         );
 
-        let messages = port.take_general_messages();
         assert!(
-            messages.contains(&GeneralMessage::FollowUp(FollowUpMessage::new(
+            port.contains_general_message(&GeneralMessage::FollowUp(FollowUpMessage::new(
                 0.into(),
                 LogMessageInterval::new(0),
                 TimeStamp::new(0, 0)
@@ -469,9 +468,8 @@ mod tests {
 
         master.dispatch_system(SystemMessage::AnnounceSendTimeout);
 
-        let messages = port.take_general_messages();
         assert!(
-            messages.contains(&GeneralMessage::Announce(AnnounceMessage::new(
+            port.contains_general_message(&GeneralMessage::Announce(AnnounceMessage::new(
                 0.into(),
                 LogMessageInterval::new(0),
                 ForeignClockDS::high_grade_test_clock(),

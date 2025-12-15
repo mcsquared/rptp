@@ -6,21 +6,42 @@ use crate::{
     wire::{
         AnnouncePayload, ControlField, DelayResponsePayload, FinalizedBuffer, FollowUpPayload,
         LengthCheckedMessage, MessageBuffer, MessageFlags, MessageHeader, MessageType, SyncPayload,
+        UnvalidatedMessage,
     },
 };
 
-pub struct DomainMessage<'a> {
+pub struct MessageIngress<'a, PM: PortMap> {
+    ports: &'a mut PM,
+}
+
+impl<'a, PM: PortMap> MessageIngress<'a, PM> {
+    pub fn new(ports: &'a mut PM) -> Self {
+        Self { ports }
+    }
+
+    pub fn receive_event(&mut self, buf: &[u8], timestamp: TimeStamp) -> Result<()> {
+        let length_checked = UnvalidatedMessage::new(buf).length_checked_v2()?;
+        DomainMessage::new(length_checked).dispatch_event(self.ports, timestamp)
+    }
+
+    pub fn receive_general(&mut self, buf: &[u8], now: Instant) -> Result<()> {
+        let length_checked = UnvalidatedMessage::new(buf).length_checked_v2()?;
+        DomainMessage::new(length_checked).dispatch_general(self.ports, now)
+    }
+}
+
+struct DomainMessage<'a> {
     header: MessageHeader<'a>,
 }
 
 impl<'a> DomainMessage<'a> {
-    pub fn new(length_checked: LengthCheckedMessage<'a>) -> Self {
+    fn new(length_checked: LengthCheckedMessage<'a>) -> Self {
         Self {
             header: MessageHeader::new(length_checked),
         }
     }
 
-    pub fn dispatch_event(self, ports: &mut impl PortMap, timestamp: TimeStamp) -> Result<()> {
+    fn dispatch_event(self, ports: &mut impl PortMap, timestamp: TimeStamp) -> Result<()> {
         let domain_number = self.header.domain_number();
         let port = ports.port_by_domain(domain_number)?;
         let source_port_identity = self.header.source_port_identity();
@@ -36,7 +57,7 @@ impl<'a> DomainMessage<'a> {
         Ok(())
     }
 
-    pub fn dispatch_general(self, ports: &mut impl PortMap, now: Instant) -> Result<()> {
+    fn dispatch_general(self, ports: &mut impl PortMap, now: Instant) -> Result<()> {
         let domain_number = self.header.domain_number();
         let port = ports.port_by_domain(domain_number)?;
         let source_port_identity = self.header.source_port_identity();
@@ -517,9 +538,73 @@ mod tests {
 
     use crate::bmca::{Priority1, Priority2};
     use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved};
-    use crate::port::{DomainNumber, PortIdentity, PortNumber};
+    use crate::port::{DomainNumber, PortIdentity, PortIngress, PortNumber};
     use crate::time::LogMessageInterval;
     use crate::wire::{PtpVersion, TransportSpecific};
+
+    struct CapturingPort {
+        last_event: Option<(PortIdentity, EventMessage, TimeStamp)>,
+        last_general: Option<(PortIdentity, GeneralMessage, Instant)>,
+        last_system: Option<SystemMessage>,
+    }
+
+    impl CapturingPort {
+        fn new() -> Self {
+            Self {
+                last_event: None,
+                last_general: None,
+                last_system: None,
+            }
+        }
+    }
+
+    impl PortIngress for CapturingPort {
+        fn process_event_message(
+            &mut self,
+            source_port_identity: PortIdentity,
+            msg: EventMessage,
+            timestamp: TimeStamp,
+        ) {
+            self.last_event = Some((source_port_identity, msg, timestamp));
+        }
+
+        fn process_general_message(
+            &mut self,
+            source_port_identity: PortIdentity,
+            msg: GeneralMessage,
+            now: Instant,
+        ) {
+            self.last_general = Some((source_port_identity, msg, now));
+        }
+
+        fn process_system_message(&mut self, msg: SystemMessage) {
+            self.last_system = Some(msg);
+        }
+    }
+
+    struct CapturingPortMap {
+        domain: DomainNumber,
+        port: CapturingPort,
+    }
+
+    impl CapturingPortMap {
+        fn new(domain: DomainNumber) -> Self {
+            Self {
+                domain,
+                port: CapturingPort::new(),
+            }
+        }
+    }
+
+    impl PortMap for CapturingPortMap {
+        fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress> {
+            if self.domain == domain_number {
+                Ok(&mut self.port)
+            } else {
+                Err(ProtocolError::DomainNotFound(domain_number.as_u8()).into())
+            }
+        }
+    }
 
     #[test]
     fn announce_message_wire_roundtrip() {
@@ -543,8 +628,18 @@ mod tests {
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
         let wire = announce.to_wire(&mut buf);
-        let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
+        let mut ports = CapturingPortMap::new(DomainNumber::new(0));
+        let now = Instant::from_nanos(42);
+        MessageIngress::new(&mut ports)
+            .receive_general(wire.as_ref(), now)
+            .unwrap();
 
+        let (source_port_identity, parsed, captured_now) = ports.port.last_general.unwrap();
+        assert_eq!(
+            source_port_identity,
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1))
+        );
+        assert_eq!(captured_now, now);
         assert_eq!(parsed, GeneralMessage::Announce(announce));
     }
 
@@ -559,8 +654,18 @@ mod tests {
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
         let wire = sync.to_wire(&mut buf);
-        let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
+        let mut ports = CapturingPortMap::new(DomainNumber::new(0));
+        let timestamp = TimeStamp::new(5, 6);
+        MessageIngress::new(&mut ports)
+            .receive_event(wire.as_ref(), timestamp)
+            .unwrap();
 
+        let (source_port_identity, parsed, captured_timestamp) = ports.port.last_event.unwrap();
+        assert_eq!(
+            source_port_identity,
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1))
+        );
+        assert_eq!(captured_timestamp, timestamp);
         assert_eq!(parsed, EventMessage::OneStepSync(sync));
     }
 
@@ -574,8 +679,18 @@ mod tests {
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
         let wire = sync.to_wire(&mut buf);
-        let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
+        let mut ports = CapturingPortMap::new(DomainNumber::new(0));
+        let timestamp = TimeStamp::new(5, 6);
+        MessageIngress::new(&mut ports)
+            .receive_event(wire.as_ref(), timestamp)
+            .unwrap();
 
+        let (source_port_identity, parsed, captured_timestamp) = ports.port.last_event.unwrap();
+        assert_eq!(
+            source_port_identity,
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1))
+        );
+        assert_eq!(captured_timestamp, timestamp);
         assert_eq!(parsed, EventMessage::TwoStepSync(sync));
     }
 
@@ -590,8 +705,18 @@ mod tests {
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
         let wire = follow_up.to_wire(&mut buf);
-        let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
+        let mut ports = CapturingPortMap::new(DomainNumber::new(0));
+        let now = Instant::from_nanos(42);
+        MessageIngress::new(&mut ports)
+            .receive_general(wire.as_ref(), now)
+            .unwrap();
 
+        let (source_port_identity, parsed, captured_now) = ports.port.last_general.unwrap();
+        assert_eq!(
+            source_port_identity,
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1))
+        );
+        assert_eq!(captured_now, now);
         assert_eq!(parsed, GeneralMessage::FollowUp(follow_up));
     }
 
@@ -605,8 +730,18 @@ mod tests {
             PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1)),
         );
         let wire = delay_req.to_wire(&mut buf);
-        let parsed = EventMessage::try_from(wire.as_ref()).unwrap();
+        let mut ports = CapturingPortMap::new(DomainNumber::new(0));
+        let timestamp = TimeStamp::new(5, 6);
+        MessageIngress::new(&mut ports)
+            .receive_event(wire.as_ref(), timestamp)
+            .unwrap();
 
+        let (source_port_identity, parsed, captured_timestamp) = ports.port.last_event.unwrap();
+        assert_eq!(
+            source_port_identity,
+            PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1))
+        );
+        assert_eq!(captured_timestamp, timestamp);
         assert_eq!(parsed, EventMessage::DelayReq(delay_req));
     }
 
@@ -629,8 +764,15 @@ mod tests {
             PortIdentity::fake(),
         );
         let wire = delay_resp.to_wire(&mut buf);
-        let parsed = GeneralMessage::try_from(wire.as_ref()).unwrap();
+        let mut ports = CapturingPortMap::new(DomainNumber::new(0));
+        let now = Instant::from_nanos(42);
+        MessageIngress::new(&mut ports)
+            .receive_general(wire.as_ref(), now)
+            .unwrap();
 
+        let (source_port_identity, parsed, captured_now) = ports.port.last_general.unwrap();
+        assert_eq!(source_port_identity, PortIdentity::fake());
+        assert_eq!(captured_now, now);
         assert_eq!(parsed, GeneralMessage::DelayResp(delay_resp));
     }
 
@@ -751,7 +893,7 @@ mod tests {
             fn port_by_domain(
                 &mut self,
                 domain_number: DomainNumber,
-            ) -> Result<&mut dyn crate::port::PortIngress> {
+            ) -> Result<&mut dyn PortIngress> {
                 Err(ProtocolError::DomainNotFound(domain_number.as_u8()).into())
             }
         }

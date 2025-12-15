@@ -21,7 +21,7 @@ const PTP_CONTROL_FIELD_OFFSET: usize = 32;
 const PTP_LOG_INTERVAL_OFFSET: usize = 33;
 const PTP_PAYLOAD_OFFSET: usize = 34;
 
-pub struct UnvalidatedMessage<'a> {
+pub(crate) struct UnvalidatedMessage<'a> {
     buf: &'a [u8],
 }
 
@@ -64,7 +64,7 @@ impl<'a> UnvalidatedMessage<'a> {
     }
 }
 
-pub struct LengthCheckedMessage<'a> {
+pub(crate) struct LengthCheckedMessage<'a> {
     buf: &'a [u8],
 }
 
@@ -73,7 +73,7 @@ impl<'a> LengthCheckedMessage<'a> {
         Self { buf }
     }
 
-    pub(crate) fn buf(&self) -> &'a [u8] {
+    fn buf(&self) -> &'a [u8] {
         self.buf
     }
 }
