@@ -42,9 +42,103 @@ impl Display for ClockIdentity {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClockAccuracy {
+    Reserved(u8),
+    Within25ns,
+    Within100ns,
+    Within250ns,
+    Within1us,
+    Within2_5us,
+    Within10us,
+    Within25us,
+    Within100us,
+    Within250us,
+    Within1ms,
+    Within2_5ms,
+    Within10ms,
+    Within25ms,
+    Within100ms,
+    Within250ms,
+    Within1s,
+    Within10s,
+    GreaterThan10s,
+    AlternateProfile(u8),
+    Unknown,
+}
+
+impl ClockAccuracy {
+    pub const fn new(value: u8) -> Self {
+        match value {
+            0x00..=0x1F => Self::Reserved(value),
+            0x20 => Self::Within25ns,
+            0x21 => Self::Within100ns,
+            0x22 => Self::Within250ns,
+            0x23 => Self::Within1us,
+            0x24 => Self::Within2_5us,
+            0x25 => Self::Within10us,
+            0x26 => Self::Within25us,
+            0x27 => Self::Within100us,
+            0x28 => Self::Within250us,
+            0x29 => Self::Within1ms,
+            0x2A => Self::Within2_5ms,
+            0x2B => Self::Within10ms,
+            0x2C => Self::Within25ms,
+            0x2D => Self::Within100ms,
+            0x2E => Self::Within250ms,
+            0x2F => Self::Within1s,
+            0x30 => Self::Within10s,
+            0x31 => Self::GreaterThan10s,
+            0x32..=0x7F => Self::Reserved(value),
+            0x80..=0xFD => Self::AlternateProfile(value),
+            0xFE => Self::Unknown,
+            0xFF => Self::Reserved(value),
+        }
+    }
+
+    pub(crate) const fn as_u8(&self) -> u8 {
+        match self {
+            ClockAccuracy::Reserved(v) | ClockAccuracy::AlternateProfile(v) => *v,
+            ClockAccuracy::Within25ns => 0x20,
+            ClockAccuracy::Within100ns => 0x21,
+            ClockAccuracy::Within250ns => 0x22,
+            ClockAccuracy::Within1us => 0x23,
+            ClockAccuracy::Within2_5us => 0x24,
+            ClockAccuracy::Within10us => 0x25,
+            ClockAccuracy::Within25us => 0x26,
+            ClockAccuracy::Within100us => 0x27,
+            ClockAccuracy::Within250us => 0x28,
+            ClockAccuracy::Within1ms => 0x29,
+            ClockAccuracy::Within2_5ms => 0x2A,
+            ClockAccuracy::Within10ms => 0x2B,
+            ClockAccuracy::Within25ms => 0x2C,
+            ClockAccuracy::Within100ms => 0x2D,
+            ClockAccuracy::Within250ms => 0x2E,
+            ClockAccuracy::Within1s => 0x2F,
+            ClockAccuracy::Within10s => 0x30,
+            ClockAccuracy::GreaterThan10s => 0x31,
+            ClockAccuracy::Unknown => 0xFE,
+        }
+    }
+}
+
+impl Ord for ClockAccuracy {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        let a: u8 = self.as_u8();
+        let b: u8 = other.as_u8();
+        a.cmp(&b)
+    }
+}
+
+impl PartialOrd for ClockAccuracy {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClockQuality {
     clock_class: u8,
-    clock_accuracy: u8,
+    clock_accuracy: ClockAccuracy,
     offset_scaled_log_variance: u16,
 }
 
@@ -53,7 +147,11 @@ impl ClockQuality {
     const CLOCK_ACCURACY_OFFSET: usize = 1;
     const OFFSET_SCALED_LOG_VARIANCE_OFFSET: Range<usize> = 2..4;
 
-    pub const fn new(clock_class: u8, clock_accuracy: u8, offset_scaled_log_variance: u16) -> Self {
+    pub const fn new(
+        clock_class: u8,
+        clock_accuracy: ClockAccuracy,
+        offset_scaled_log_variance: u16,
+    ) -> Self {
         Self {
             clock_class,
             clock_accuracy,
@@ -68,7 +166,7 @@ impl ClockQuality {
     pub(crate) fn from_wire(buf: &[u8; 4]) -> Self {
         Self {
             clock_class: buf[Self::CLOCK_CLASS_OFFSET],
-            clock_accuracy: buf[Self::CLOCK_ACCURACY_OFFSET],
+            clock_accuracy: ClockAccuracy::new(buf[Self::CLOCK_ACCURACY_OFFSET]),
             offset_scaled_log_variance: u16::from_be_bytes([
                 buf[Self::OFFSET_SCALED_LOG_VARIANCE_OFFSET.start],
                 buf[Self::OFFSET_SCALED_LOG_VARIANCE_OFFSET.end - 1],
@@ -79,7 +177,7 @@ impl ClockQuality {
     pub(crate) fn to_wire(self) -> [u8; 4] {
         let mut bytes = [0u8; 4];
         bytes[Self::CLOCK_CLASS_OFFSET] = self.clock_class;
-        bytes[Self::CLOCK_ACCURACY_OFFSET] = self.clock_accuracy;
+        bytes[Self::CLOCK_ACCURACY_OFFSET] = self.clock_accuracy.as_u8();
         bytes[Self::OFFSET_SCALED_LOG_VARIANCE_OFFSET]
             .copy_from_slice(&self.offset_scaled_log_variance.to_be_bytes());
         bytes

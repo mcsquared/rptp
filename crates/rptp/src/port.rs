@@ -355,8 +355,8 @@ mod tests {
     use core::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::bmca::DefaultDS;
-    use crate::clock::{ClockQuality, StepsRemoved};
+    use crate::bmca::{DefaultDS, Priority1, Priority2};
+    use crate::clock::{ClockAccuracy, ClockQuality, StepsRemoved};
     use crate::log::NOOP_CLOCK_METRICS;
     use crate::message::{DelayRequestMessage, FollowUpMessage, TimeScale};
     use crate::servo::{Servo, SteppingServo};
@@ -392,9 +392,9 @@ mod tests {
             FakeClock::default(),
             DefaultDS::new(
                 identity,
-                crate::bmca::Priority1::new(127),
-                crate::bmca::Priority2::new(127),
-                ClockQuality::new(248, 0xFE, 0xFFFF),
+                Priority1::new(127),
+                Priority2::new(127),
+                ClockQuality::new(248, ClockAccuracy::Within100us, 0xFFFF),
                 TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
@@ -435,9 +435,9 @@ mod tests {
             FakeClock::default(),
             DefaultDS::new(
                 identity,
-                crate::bmca::Priority1::new(127),
-                crate::bmca::Priority2::new(127),
-                ClockQuality::new(248, 0xFE, 0xFFFF),
+                Priority1::new(127),
+                Priority2::new(127),
+                ClockQuality::new(248, ClockAccuracy::Within100us, 0xFFFF),
                 TimeScale::Ptp,
             ),
             StepsRemoved::new(0),

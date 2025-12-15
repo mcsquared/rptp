@@ -12,7 +12,10 @@ use heapless::{Deque, Vec};
 use panic_halt as _;
 use rptp::{
     bmca::{DefaultDS, Priority1, Priority2},
-    clock::{Clock, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock},
+    clock::{
+        Clock, ClockAccuracy, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
+        SynchronizableClock,
+    },
     heapless::HeaplessSortedForeignClockRecords,
     log::{NOOP_CLOCK_METRICS, PortEvent, PortLog},
     message::{EventMessage, MessageIngress, SystemMessage, TimeScale, TimestampMessage},
@@ -293,10 +296,7 @@ static TIMER_SLOTS: TimerStorage = TimerStorage {
 };
 
 impl TimerSlot {
-    fn alloc<'a>(
-        instant_clock: &'a InstantClock,
-        msg: SystemMessage,
-    ) -> Option<DemoTimeout<'a>> {
+    fn alloc<'a>(instant_clock: &'a InstantClock, msg: SystemMessage) -> Option<DemoTimeout<'a>> {
         // Safety: single-core, main loop only mutates slots through this API.
         unsafe {
             let slots = &mut *TIMER_SLOTS.slots.get();
@@ -429,7 +429,7 @@ fn demo_default_ds() -> DefaultDS {
         ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
         Priority1::new(100),
         Priority2::new(127),
-        ClockQuality::new(100, 0xFE, 0xFFFF),
+        ClockQuality::new(100, ClockAccuracy::Within10ms, 0xFFFF),
         TimeScale::Ptp,
     )
 }

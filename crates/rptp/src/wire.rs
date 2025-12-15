@@ -492,7 +492,7 @@ mod tests {
     use super::*;
 
     use crate::bmca::{ForeignClockDS, Priority1, Priority2};
-    use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved};
+    use crate::clock::{ClockAccuracy, ClockIdentity, ClockQuality, StepsRemoved};
     use crate::message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage, TimeScale,
         TwoStepSyncMessage,
@@ -589,7 +589,7 @@ mod tests {
                 ClockIdentity::new(&[0; 8]),
                 Priority1::new(127),
                 Priority2::new(127),
-                ClockQuality::new(248, 0xFE, 0xFFFF),
+                ClockQuality::new(248, ClockAccuracy::Within1ms, 0xFFFF),
                 StepsRemoved::new(0),
             ),
             TimeScale::Ptp,

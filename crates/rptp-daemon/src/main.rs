@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 
 use rptp::{
     bmca::{DefaultDS, Priority1, Priority2},
-    clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved},
+    clock::{ClockAccuracy, ClockIdentity, ClockQuality, LocalClock, StepsRemoved},
     log::NOOP_CLOCK_METRICS,
     message::TimeScale,
     port::{DomainNumber, PortNumber, SingleDomainPortMap},
@@ -36,7 +36,7 @@ async fn main() -> std::io::Result<()> {
             ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             Priority1::new(127),
             Priority2::new(127),
-            ClockQuality::new(248, 0xFE, 0xFFFF),
+            ClockQuality::new(248, ClockAccuracy::Within1ms, 0xFFFF),
             TimeScale::Ptp,
         ),
         StepsRemoved::new(0),
