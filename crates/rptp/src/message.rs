@@ -537,7 +537,7 @@ mod tests {
     use crate::wire::UnvalidatedMessage;
 
     use crate::bmca::{Priority1, Priority2};
-    use crate::clock::{ClockAccuracy, ClockIdentity, ClockQuality, StepsRemoved};
+    use crate::clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved};
     use crate::port::{DomainNumber, PortIdentity, PortIngress, PortNumber};
     use crate::time::LogMessageInterval;
     use crate::wire::{PtpVersion, TransportSpecific};
@@ -615,7 +615,7 @@ mod tests {
                 ClockIdentity::new(&[0; 8]),
                 Priority1::new(127),
                 Priority2::new(127),
-                ClockQuality::new(248, ClockAccuracy::Within250ns, 0xFFFF),
+                ClockQuality::new(ClockClass::Default, ClockAccuracy::Within250ns, 0xFFFF),
                 StepsRemoved::new(42),
             ),
             TimeScale::Ptp,

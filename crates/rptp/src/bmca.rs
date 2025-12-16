@@ -1039,7 +1039,7 @@ impl BmcaRank<'_> {
 pub(crate) mod tests {
     use super::*;
 
-    use crate::clock::ClockAccuracy;
+    use crate::clock::{ClockAccuracy, ClockClass};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NOOP_CLOCK_METRICS;
     use crate::port::PortNumber;
@@ -1057,11 +1057,16 @@ pub(crate) mod tests {
         ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x04]);
 
     const CLK_QUALITY_HIGH: ClockQuality =
-        ClockQuality::new(248, ClockAccuracy::Within250ns, 0xFFFF);
+        ClockQuality::new(ClockClass::Default, ClockAccuracy::Within250ns, 0xFFFF);
     const CLK_QUALITY_MID: ClockQuality =
-        ClockQuality::new(250, ClockAccuracy::Within100us, 0xFFFF);
-    const CLK_QUALITY_LOW: ClockQuality = ClockQuality::new(255, ClockAccuracy::Within1ms, 0xFFFF);
-    const CLK_QUALITY_GM: ClockQuality = ClockQuality::new(100, ClockAccuracy::Within100ns, 0xFFFF);
+        ClockQuality::new(ClockClass::Default, ClockAccuracy::Within100us, 0xFFFF);
+    const CLK_QUALITY_LOW: ClockQuality =
+        ClockQuality::new(ClockClass::SlaveOnly, ClockAccuracy::Within1ms, 0xFFFF);
+    const CLK_QUALITY_GM: ClockQuality = ClockQuality::new(
+        ClockClass::PrimaryReference,
+        ClockAccuracy::Within100ns,
+        0xFFFF,
+    );
 
     impl ForeignClockDS {
         pub(crate) fn gm_grade_test_clock() -> ForeignClockDS {
