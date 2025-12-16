@@ -195,6 +195,7 @@ impl<M> Default for MessageWindow<M> {
 mod tests {
     use super::*;
 
+    use crate::message::SystemMessage;
     use crate::port::PortIdentity;
     use crate::test_support::FakeTimeout;
     use crate::time::{LogInterval, LogMessageInterval};
@@ -905,5 +906,55 @@ mod tests {
             follow.master_slave_offset(sync, ts)
         });
         assert_eq!(second, Some(TimeInterval::new(3, 0)));
+    }
+
+    #[test]
+    fn delay_cycle_produces_delay_request_message() {
+        let delay_cycle = DelayCycle::new(
+            42.into(),
+            FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
+        );
+        let delay_request = delay_cycle.delay_request();
+
+        assert_eq!(delay_request, DelayRequestMessage::new(42.into()));
+    }
+
+    #[test]
+    fn delay_cycle_next() {
+        let mut delay_cycle = DelayCycle::new(
+            42.into(),
+            FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
+        );
+        delay_cycle.next();
+
+        assert_eq!(
+            delay_cycle,
+            DelayCycle::new(
+                43.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0)
+            )
+        );
+    }
+
+    #[test]
+    fn delay_cycle_next_wraps() {
+        let mut delay_cycle = DelayCycle::new(
+            u16::MAX.into(),
+            FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+            LogInterval::new(0),
+        );
+        delay_cycle.next();
+
+        assert_eq!(
+            delay_cycle,
+            DelayCycle::new(
+                0.into(),
+                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                LogInterval::new(0),
+            )
+        );
     }
 }
