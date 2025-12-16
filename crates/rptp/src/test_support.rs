@@ -244,9 +244,11 @@ impl FakePort {
     pub fn contains_event_message(&self, expected: &EventMessage) -> bool {
         let messages = self.event_messages.borrow().clone();
         messages.iter().enumerate().any(|(index, buf)| {
-            let msg = TestMessage::new(buf.as_slice()).event().unwrap_or_else(|err| {
-                panic!("FakePort stored undecodable event message at index {index}: {err:?}")
-            });
+            let msg = TestMessage::new(buf.as_slice())
+                .event()
+                .unwrap_or_else(|err| {
+                    panic!("FakePort stored undecodable event message at index {index}: {err:?}")
+                });
             msg == *expected
         })
     }
@@ -254,9 +256,11 @@ impl FakePort {
     pub fn contains_general_message(&self, expected: &GeneralMessage) -> bool {
         let messages = self.general_messages.borrow().clone();
         messages.iter().enumerate().any(|(index, buf)| {
-            let msg = TestMessage::new(buf.as_slice()).general().unwrap_or_else(|err| {
-                panic!("FakePort stored undecodable general message at index {index}: {err:?}")
-            });
+            let msg = TestMessage::new(buf.as_slice())
+                .general()
+                .unwrap_or_else(|err| {
+                    panic!("FakePort stored undecodable general message at index {index}: {err:?}")
+                });
             msg == *expected
         })
     }

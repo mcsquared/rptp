@@ -212,9 +212,7 @@ mod tests {
     };
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{
-        FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping,
-    };
+    use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]
@@ -267,14 +265,14 @@ mod tests {
                 .is_ok()
         );
 
-        assert!(
-            port.contains_general_message(&GeneralMessage::DelayResp(DelayResponseMessage::new(
+        assert!(port.contains_general_message(&GeneralMessage::DelayResp(
+            DelayResponseMessage::new(
                 0.into(),
                 LogMessageInterval::new(0),
                 TimeStamp::new(0, 0),
                 PortIdentity::fake()
-            )))
-        );
+            )
+        )));
 
         assert!(timer_host.take_system_messages().is_empty());
     }

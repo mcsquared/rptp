@@ -220,9 +220,7 @@ mod tests {
     use crate::message::{SystemMessage, TimeScale};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{
-        FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping,
-    };
+    use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     #[test]
@@ -422,9 +420,11 @@ mod tests {
 
         slave.dispatch_system(SystemMessage::DelayRequestTimeout);
 
-        assert!(port.contains_event_message(&EventMessage::DelayReq(
-            DelayRequestMessage::new(0.into())
-        )));
+        assert!(
+            port.contains_event_message(&EventMessage::DelayReq(DelayRequestMessage::new(
+                0.into()
+            )))
+        );
     }
 
     #[test]
