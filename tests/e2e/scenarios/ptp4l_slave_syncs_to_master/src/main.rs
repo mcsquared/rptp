@@ -15,8 +15,8 @@ use rptp::{
 };
 use rptp_daemon::net::MulticastSocket;
 use rptp_daemon::node::TokioPortsLoop;
-use rptp_daemon::ordinary::ordinary_clock_port;
-use rptp_daemon::timestamping::ClockTimestamping;
+use rptp_daemon::ordinary::OrdinaryTokioClock;
+use rptp_daemon::timestamping::{ClockRxTimestamping, ClockTxTimestamping};
 use rptp_daemon::virtualclock::VirtualClock;
 
 #[tokio::main(flavor = "current_thread")]
@@ -50,23 +50,26 @@ async fn main() -> std::io::Result<()> {
     let general_socket = Rc::new(MulticastSocket::general().await?);
 
     let (system_tx, system_rx) = mpsc::unbounded_channel();
-    let timestamping = ClockTimestamping::new(&virtual_clock, system_tx.clone(), domain);
-    let port = ordinary_clock_port(
-        &local_clock,
-        domain,
+    let ordinary_clock =
+        OrdinaryTokioClock::new(&local_clock, domain, PortNumber::new(1));
+
+    let port = ordinary_clock.port(
         event_socket.clone(),
         general_socket.clone(),
-        system_tx,
-        PortNumber::new(1),
-        &timestamping,
+        system_tx.clone(),
+        ClockTxTimestamping::new(
+            &virtual_clock,
+            system_tx.clone(),
+            ordinary_clock.domain_number(),
+        ),
     );
-    let portmap = SingleDomainPortMap::new(domain, port);
+    let portmap = SingleDomainPortMap::new(ordinary_clock.domain_number(), port);
 
     let ports_loop = TokioPortsLoop::new(
         portmap,
         event_socket,
         general_socket,
-        &timestamping,
+        ClockRxTimestamping::new(&virtual_clock),
         system_rx,
     )
     .await?;

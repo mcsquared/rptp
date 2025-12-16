@@ -11,16 +11,16 @@ use cortex_m_semihosting::hprintln;
 use heapless::{Deque, Vec};
 use panic_halt as _;
 use rptp::{
-    bmca::{DefaultDS, IncrementalBmca, Priority1, Priority2},
+    bmca::{DefaultDS, Priority1, Priority2},
     clock::{Clock, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock},
     heapless::HeaplessSortedForeignClockRecords,
     log::{NOOP_CLOCK_METRICS, PortEvent, PortLog},
     message::{EventMessage, MessageIngress, SystemMessage, TimeScale, TimestampMessage},
+    ordinary::OrdinaryClock,
     port::{
-        DomainNumber, DomainPort, PhysicalPort, PortMap, PortNumber, SendResult,
-        SingleDomainPortMap, Timeout, TimerHost,
+        DomainNumber, PhysicalPort, PortMap, PortNumber, SendResult, SingleDomainPortMap, Timeout,
+        TimerHost,
     },
-    portstate::PortProfile,
     result::Error as RptpError,
     servo::{Servo, SteppingServo},
     time::{Duration, Instant, TimeInterval, TimeStamp},
@@ -436,11 +436,6 @@ fn demo_default_ds() -> DefaultDS {
     )
 }
 
-type DemoDomainPort<'a> =
-    DomainPort<'a, &'a CycleClock, DemoPhysicalPort, DemoTimerHost<'a>, DemoTimestamping<'a>>;
-type DemoBmca = IncrementalBmca<HeaplessSortedForeignClockRecords<4>>;
-type DemoPortMap<'a> = SingleDomainPortMap<DemoDomainPort<'a>, DemoBmca, DemoPortLog>;
-
 #[entry]
 fn main() -> ! {
     let cp = cortex_m::Peripherals::take().unwrap();
@@ -490,21 +485,18 @@ fn main() -> ! {
         Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
     );
 
-    let port = DomainPort::new(
-        &local_clock,
+    let ordinary_clock = OrdinaryClock::new(&local_clock, DomainNumber::new(0), PortNumber::new(1));
+
+    let port = ordinary_clock.port(
         DemoPhysicalPort {
             inner: network.physical_port(),
         },
         DemoTimerHost::new(&instant_clock),
         DemoTimestamping::new(&demo_clock),
-        DomainNumber::new(0),
-        PortNumber::new(1),
+        HeaplessSortedForeignClockRecords::<4>::new(),
+        DemoPortLog,
     );
-
-    let bmca = IncrementalBmca::new(HeaplessSortedForeignClockRecords::<4>::new());
-
-    let state = PortProfile::default().initializing(port, bmca, DemoPortLog);
-    let mut port_map: DemoPortMap = SingleDomainPortMap::new(DomainNumber::new(0), state);
+    let mut port_map = SingleDomainPortMap::new(ordinary_clock.domain_number(), port);
     port_map
         .port_by_domain(DomainNumber::new(0))
         .map(|port| port.process_system_message(SystemMessage::Initialized))
@@ -549,8 +541,8 @@ fn main() -> ! {
     }
 }
 
-fn process_packet<'a>(
-    port_map: &mut DemoPortMap<'a>,
+fn process_packet(
+    port_map: &mut impl PortMap,
     packet: &RxPacket,
     now: Instant,
     ingress_timestamp: TimeStamp,

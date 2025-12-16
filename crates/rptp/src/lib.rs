@@ -5,6 +5,7 @@ pub mod clock;
 pub mod e2e;
 pub mod log;
 pub mod message;
+pub mod ordinary;
 pub mod port;
 pub mod portstate;
 pub mod result;

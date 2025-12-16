@@ -335,7 +335,7 @@ mod tests {
 
     use crate::log::TracingPortLog;
     use crate::net::{FakeNetworkSocket, MulticastSocket, NetworkSocket};
-    use crate::timestamping::ClockTimestamping;
+    use crate::timestamping::ClockTxTimestamping;
     use crate::virtualclock::VirtualClock;
 
     use std::collections::VecDeque;
@@ -444,7 +444,7 @@ mod tests {
                         FakeClock,
                         TokioPhysicalPort<MulticastSocket>,
                         TokioTimerHost,
-                        ClockTimestamping<FakeClock>,
+                        ClockTxTimestamping<FakeClock>,
                     >,
                 >,
                 IncrementalBmca<SortedForeignClockRecordsVec>,
@@ -526,7 +526,8 @@ mod tests {
         );
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
-        let timestamping = ClockTimestamping::new(&virtual_clock, system_tx.clone(), domain_number);
+        let timestamping =
+            ClockTxTimestamping::new(&virtual_clock, system_tx.clone(), domain_number);
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         let port_number = PortNumber::new(1);
         let domain_port = Box::new(DomainPort::new(

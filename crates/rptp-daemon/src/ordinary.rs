@@ -7,8 +7,8 @@ use rptp::{
     clock::{LocalClock, SynchronizableClock},
     infra::infra_support::SortedForeignClockRecordsVec,
     message::SystemMessage,
-    port::{DomainNumber, DomainPort, PortIdentity, PortNumber, SingleDomainPortMap},
-    portstate::{PortProfile, PortState},
+    port::{DomainNumber, DomainPort, PortIdentity, PortNumber},
+    portstate::PortState,
     timestamping::TxTimestamping,
 };
 
@@ -16,45 +16,59 @@ use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
 use crate::node::{TokioPhysicalPort, TokioTimerHost};
 
-pub type OrdinaryBmca = IncrementalBmca<SortedForeignClockRecordsVec>;
+pub type TokioPort<'a, C, NS, TS> = PortState<
+    DomainPort<'a, C, TokioPhysicalPort<NS>, TokioTimerHost, TS>,
+    IncrementalBmca<SortedForeignClockRecordsVec>,
+    TracingPortLog,
+>;
 
-pub type OrdinaryPort<'a, C, N, TS> = DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, TS>;
+pub struct OrdinaryTokioClock<'a, C: SynchronizableClock> {
+    ordinary_clock: rptp::ordinary::OrdinaryClock<'a, C>,
+}
 
-pub type OrdinaryPortState<'a, C, N, TS> =
-    PortState<Box<OrdinaryPort<'a, C, N, TS>>, OrdinaryBmca, TracingPortLog>;
+impl<'a, C: SynchronizableClock> OrdinaryTokioClock<'a, C> {
+    pub fn new(
+        local_clock: &'a LocalClock<C>,
+        domain_number: DomainNumber,
+        port_number: PortNumber,
+    ) -> Self {
+        OrdinaryTokioClock {
+            ordinary_clock: rptp::ordinary::OrdinaryClock::new(
+                local_clock,
+                domain_number,
+                port_number,
+            ),
+        }
+    }
 
-pub type OrdinaryPortMap<'a, C, N, TS> =
-    SingleDomainPortMap<Box<OrdinaryPort<'a, C, N, TS>>, OrdinaryBmca, TracingPortLog>;
+    pub fn domain_number(&self) -> DomainNumber {
+        self.ordinary_clock.domain_number()
+    }
 
-pub fn ordinary_clock_port<'a, C, N, TS: TxTimestamping>(
-    local_clock: &'a LocalClock<C>,
-    domain_number: DomainNumber,
-    event_socket: Rc<N>,
-    general_socket: Rc<N>,
-    system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
-    port_number: PortNumber,
-    timestamping: TS,
-) -> OrdinaryPortState<'a, C, N, TS>
-where
-    C: SynchronizableClock,
-    N: NetworkSocket,
-{
-    let physical_port = TokioPhysicalPort::new(event_socket, general_socket);
+    pub fn port_number(&self) -> PortNumber {
+        self.ordinary_clock.port_number()
+    }
 
-    let bmca = OrdinaryBmca::new(SortedForeignClockRecordsVec::new());
-    let timer_host = TokioTimerHost::new(domain_number, system_tx);
-
-    let domain_port = Box::new(DomainPort::new(
-        local_clock,
-        physical_port,
-        timer_host,
-        timestamping,
-        domain_number,
-        port_number,
-    ));
-
-    let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
-    let log = TracingPortLog::new(port_identity);
-
-    PortProfile::default().initializing(domain_port, bmca, log)
+    pub fn port<N, T>(
+        &self,
+        event_socket: Rc<N>,
+        general_socket: Rc<N>,
+        system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
+        timestamping: T,
+    ) -> TokioPort<'a, C, N, T>
+    where
+        N: NetworkSocket,
+        T: TxTimestamping,
+    {
+        self.ordinary_clock.port(
+            TokioPhysicalPort::new(event_socket.clone(), general_socket.clone()),
+            TokioTimerHost::new(self.ordinary_clock.domain_number(), system_tx.clone()),
+            timestamping,
+            SortedForeignClockRecordsVec::new(),
+            TracingPortLog::new(PortIdentity::new(
+                *self.ordinary_clock.local_clock().identity(),
+                self.ordinary_clock.port_number(),
+            )),
+        )
+    }
 }
