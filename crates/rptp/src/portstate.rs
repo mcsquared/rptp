@@ -338,7 +338,8 @@ impl PortProfile {
         qualification_timeout_policy: QualificationTimeoutPolicy,
     ) -> PortState<P, B, L> {
         let qualification_timeout = port.timeout(SystemMessage::QualificationTimeout);
-        qualification_timeout.restart(qualification_timeout_policy.duration(self.log_announce_interval));
+        qualification_timeout
+            .restart(qualification_timeout_policy.duration(self.log_announce_interval));
 
         PortState::PreMaster(PreMasterPort::new(
             port,
@@ -364,11 +365,8 @@ impl PortProfile {
         let delay_timeout = port.timeout(SystemMessage::DelayRequestTimeout);
         delay_timeout.restart(Duration::from_secs(0));
 
-        let delay_cycle = DelayCycle::new(
-            0.into(),
-            delay_timeout,
-            self.log_min_delay_request_interval,
-        );
+        let delay_cycle =
+            DelayCycle::new(0.into(), delay_timeout, self.log_min_delay_request_interval);
 
         PortState::Uncalibrated(UncalibratedPort::new(
             port,
@@ -397,27 +395,143 @@ mod tests {
     };
     use crate::time::{LogMessageInterval, TimeStamp};
 
-    #[test]
-    fn portstate_listening_to_master_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    type PortStateTestDomainPort<'a> =
+        DomainPort<'a, FakeClock, FakePort, FakeTimerHost, FakeTimestamping>;
 
-        let listening = PortProfile::default().listening(
+    struct PortStateTestSetup {
+        local_clock: LocalClock<FakeClock>,
+    }
+
+    impl PortStateTestSetup {
+        fn new(default_ds: DefaultDS, steps_removed: StepsRemoved) -> Self {
+            Self {
+                local_clock: LocalClock::new(
+                    FakeClock::default(),
+                    default_ds,
+                    steps_removed,
+                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+                ),
+            }
+        }
+
+        fn domain_port(&self) -> PortStateTestDomainPort<'_> {
             DomainPort::new(
-                &local_clock,
+                &self.local_clock,
                 FakePort::new(),
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 DomainNumber::new(0),
                 PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
+            )
+        }
+
+        fn initializing_port(
+            &self,
+        ) -> PortState<
+            PortStateTestDomainPort<'_>,
+            IncrementalBmca<SortedForeignClockRecordsVec>,
             NoopPortLog,
-        );
+        > {
+            PortProfile::default().initializing(
+                self.domain_port(),
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                NoopPortLog,
+            )
+        }
+
+        fn listening_port(
+            &self,
+        ) -> PortState<
+            PortStateTestDomainPort<'_>,
+            IncrementalBmca<SortedForeignClockRecordsVec>,
+            NoopPortLog,
+        > {
+            PortProfile::default().listening(
+                self.domain_port(),
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                NoopPortLog,
+            )
+        }
+
+        fn slave_port(
+            &self,
+        ) -> PortState<
+            PortStateTestDomainPort<'_>,
+            IncrementalBmca<SortedForeignClockRecordsVec>,
+            NoopPortLog,
+        > {
+            PortProfile::default().slave(
+                self.domain_port(),
+                ParentTrackingBmca::new(
+                    IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                    ParentPortIdentity::new(PortIdentity::fake()),
+                ),
+                EndToEndDelayMechanism::new(DelayCycle::new(
+                    0.into(),
+                    FakeTimeout::new(SystemMessage::DelayRequestTimeout),
+                    LogInterval::new(0),
+                )),
+                NoopPortLog,
+            )
+        }
+
+        fn master_port(
+            &self,
+        ) -> PortState<
+            PortStateTestDomainPort<'_>,
+            IncrementalBmca<SortedForeignClockRecordsVec>,
+            NoopPortLog,
+        > {
+            PortProfile::default().master(
+                self.domain_port(),
+                LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                    SortedForeignClockRecordsVec::new(),
+                )),
+                NoopPortLog,
+            )
+        }
+
+        fn pre_master_port(
+            &self,
+        ) -> PortState<
+            PortStateTestDomainPort<'_>,
+            IncrementalBmca<SortedForeignClockRecordsVec>,
+            NoopPortLog,
+        > {
+            PortProfile::default().pre_master(
+                self.domain_port(),
+                LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                    SortedForeignClockRecordsVec::new(),
+                )),
+                NoopPortLog,
+                QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
+            )
+        }
+
+        fn uncalibrated_port(
+            &self,
+        ) -> PortState<
+            PortStateTestDomainPort<'_>,
+            IncrementalBmca<SortedForeignClockRecordsVec>,
+            NoopPortLog,
+        > {
+            PortProfile::default().uncalibrated(
+                self.domain_port(),
+                ParentTrackingBmca::new(
+                    IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                    ParentPortIdentity::new(PortIdentity::fake()),
+                ),
+                NoopPortLog,
+            )
+        }
+    }
+
+    #[test]
+    fn portstate_listening_to_master_transition() {
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
+
+        let listening = setup.listening_port();
 
         let master = listening.apply(StateDecision::AnnounceReceiptTimeoutExpired);
 
@@ -426,33 +540,10 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_master_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let slave = PortProfile::default().slave(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-        );
+        let slave = setup.slave_port();
 
         let master = slave.apply(StateDecision::AnnounceReceiptTimeoutExpired);
 
@@ -461,26 +552,10 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_master_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let pre_master = PortProfile::default().pre_master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        );
+        let pre_master = setup.pre_master_port();
 
         let master = pre_master.apply(StateDecision::QualificationTimeoutExpired);
 
@@ -489,28 +564,10 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_master_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let uncalibrated = PortProfile::default().uncalibrated(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            NoopPortLog,
-        );
+        let uncalibrated = setup.uncalibrated_port();
 
         let master = uncalibrated.apply(StateDecision::AnnounceReceiptTimeoutExpired);
 
@@ -519,28 +576,10 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_slave_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let uncalibrated = PortProfile::default().uncalibrated(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            NoopPortLog,
-        );
+        let uncalibrated = setup.uncalibrated_port();
 
         let slave = uncalibrated.apply(StateDecision::MasterClockSelected);
 
@@ -549,25 +588,10 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_uncalibrated_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let listening = PortProfile::default().listening(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let listening = setup.listening_port();
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         let uncalibrated = listening.apply(StateDecision::RecommendedSlave(
@@ -579,25 +603,10 @@ mod tests {
 
     #[test]
     fn portstate_master_to_uncalibrated_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let master = PortProfile::default().master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let master = setup.master_port();
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         let uncalibrated = master.apply(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
@@ -610,25 +619,10 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_pre_master_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let listening = PortProfile::default().listening(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let listening = setup.listening_port();
 
         let pre_master = listening.apply(StateDecision::RecommendedMaster(
             BmcaMasterDecision::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -639,25 +633,10 @@ mod tests {
 
     #[test]
     fn portstate_initializing_to_listening_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let initializing = PortProfile::default().initializing(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopPortLog,
-        );
+        let initializing = setup.initializing_port();
 
         let listening = initializing.apply(StateDecision::Initialized);
 
@@ -667,25 +646,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_initializing_to_master_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let initializing = PortProfile::default().initializing(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopPortLog,
-        );
+        let initializing = setup.initializing_port();
 
         initializing.apply(StateDecision::AnnounceReceiptTimeoutExpired);
     }
@@ -693,25 +657,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_master_to_master_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let master = PortProfile::default().master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let master = setup.master_port();
 
         master.apply(StateDecision::AnnounceReceiptTimeoutExpired);
     }
@@ -721,25 +670,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_initializing_to_slave_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let initializing = PortProfile::default().initializing(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopPortLog,
-        );
+        let initializing = setup.initializing_port();
 
         initializing.apply(StateDecision::MasterClockSelected);
     }
@@ -747,25 +681,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_listening_to_slave_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let listening = PortProfile::default().listening(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let listening = setup.listening_port();
 
         listening.apply(StateDecision::MasterClockSelected);
     }
@@ -773,33 +692,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_slave_to_slave_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let slave = PortProfile::default().slave(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-        );
+        let slave = setup.slave_port();
 
         slave.apply(StateDecision::MasterClockSelected);
     }
@@ -807,25 +703,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_master_to_slave_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let master = PortProfile::default().master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let master = setup.master_port();
 
         master.apply(StateDecision::MasterClockSelected);
     }
@@ -833,26 +714,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_pre_master_to_slave_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let pre_master = PortProfile::default().pre_master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        );
+        let pre_master = setup.pre_master_port();
 
         pre_master.apply(StateDecision::MasterClockSelected);
     }
@@ -860,25 +725,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_initializing_to_uncalibrated_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let initializing = PortProfile::default().initializing(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopPortLog,
-        );
+        let initializing = setup.initializing_port();
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         initializing.apply(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
@@ -889,33 +739,10 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_uncalibrated_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let slave = PortProfile::default().slave(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-        );
+        let slave = setup.slave_port();
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         let result = slave.apply(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
@@ -928,26 +755,10 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_uncalibrated_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let pre_master = PortProfile::default().pre_master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        );
+        let pre_master = setup.pre_master_port();
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         let result = pre_master.apply(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
@@ -960,28 +771,10 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_uncalibrated_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let uncalibrated = PortProfile::default().uncalibrated(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            NoopPortLog,
-        );
+        let uncalibrated = setup.uncalibrated_port();
 
         let result = uncalibrated.apply(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
             ParentPortIdentity::new(PortIdentity::fake()),
@@ -994,25 +787,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_initializing_to_pre_master_illegal_transition_goes_to_faulty() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let initializing = PortProfile::default().initializing(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopPortLog,
-        );
+        let initializing = setup.initializing_port();
 
         let result = initializing.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
@@ -1024,33 +802,10 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_pre_master_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let slave = PortProfile::default().slave(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-        );
+        let slave = setup.slave_port();
 
         let result = slave.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
@@ -1062,25 +817,10 @@ mod tests {
 
     #[test]
     fn portstate_master_to_pre_master_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let master = PortProfile::default().master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let master = setup.master_port();
 
         let result = master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
@@ -1093,26 +833,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_pre_master_to_pre_master_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let pre_master = PortProfile::default().pre_master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        );
+        let pre_master = setup.pre_master_port();
 
         pre_master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
@@ -1122,28 +846,10 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_pre_master_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let uncalibrated = PortProfile::default().uncalibrated(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            NoopPortLog,
-        );
+        let uncalibrated = setup.uncalibrated_port();
 
         let result = uncalibrated.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
@@ -1156,25 +862,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_listening_to_listening_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let listening = PortProfile::default().listening(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopPortLog,
-        );
+        let listening = setup.listening_port();
 
         listening.apply(StateDecision::Initialized);
     }
@@ -1182,33 +873,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_slave_to_listening_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let slave = PortProfile::default().slave(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-        );
+        let slave = setup.slave_port();
 
         slave.apply(StateDecision::Initialized);
     }
@@ -1216,25 +884,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_master_to_listening_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let master = PortProfile::default().master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let master = setup.master_port();
 
         master.apply(StateDecision::Initialized);
     }
@@ -1242,26 +895,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_pre_master_to_listening_illegal_transition_panics() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let pre_master = PortProfile::default().pre_master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        );
+        let pre_master = setup.pre_master_port();
 
         pre_master.apply(StateDecision::Initialized);
     }
@@ -1270,25 +907,10 @@ mod tests {
 
     #[test]
     fn portstate_initializing_to_faulty_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let initializing = PortProfile::default().initializing(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopPortLog,
-        );
+        let initializing = setup.initializing_port();
 
         let result = initializing.apply(StateDecision::FaultDetected);
 
@@ -1297,25 +919,10 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_faulty_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let listening = PortProfile::default().listening(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopPortLog,
-        );
+        let listening = setup.listening_port();
 
         let result = listening.apply(StateDecision::FaultDetected);
 
@@ -1324,33 +931,10 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_faulty_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let slave = PortProfile::default().slave(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-        );
+        let slave = setup.slave_port();
 
         let result = slave.apply(StateDecision::FaultDetected);
 
@@ -1359,25 +943,10 @@ mod tests {
 
     #[test]
     fn portstate_master_to_faulty_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let master = PortProfile::default().master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let master = setup.master_port();
 
         let result = master.apply(StateDecision::FaultDetected);
 
@@ -1547,26 +1116,10 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_faulty_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let pre_master = PortProfile::default().pre_master(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        );
+        let pre_master = setup.pre_master_port();
 
         let result = pre_master.apply(StateDecision::FaultDetected);
 
@@ -1575,28 +1128,10 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_faulty_transition() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            PortStateTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let uncalibrated = PortProfile::default().uncalibrated(
-            DomainPort::new(
-                &local_clock,
-                FakePort::new(),
-                FakeTimerHost::new(),
-                FakeTimestamping::new(),
-                DomainNumber::new(0),
-                PortNumber::new(1),
-            ),
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            NoopPortLog,
-        );
+        let uncalibrated = setup.uncalibrated_port();
 
         let result = uncalibrated.apply(StateDecision::FaultDetected);
 
