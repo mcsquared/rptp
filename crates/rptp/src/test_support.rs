@@ -263,6 +263,10 @@ impl FakePort {
             msg == *expected
         })
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.event_messages.borrow().is_empty() && self.general_messages.borrow().is_empty()
+    }
 }
 
 impl Default for FakePort {

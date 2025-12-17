@@ -223,43 +223,91 @@ mod tests {
     use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
+    type SlaveTestDomainPort<'a> =
+        DomainPort<'a, FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping>;
+
+    type SlaveTestPort<'a> = SlavePort<
+        SlaveTestDomainPort<'a>,
+        IncrementalBmca<SortedForeignClockRecordsVec>,
+        NoopPortLog,
+    >;
+
+    struct SlavePortTestSetup {
+        local_clock: LocalClock<FakeClock>,
+        physical_port: FakePort,
+        timer_host: FakeTimerHost,
+    }
+
+    impl SlavePortTestSetup {
+        fn new() -> Self {
+            Self::new_with_ds(DefaultDS::mid_grade_test_clock())
+        }
+
+        fn new_with_ds(default_ds: DefaultDS) -> Self {
+            Self {
+                local_clock: LocalClock::new(
+                    FakeClock::new(TimeStamp::new(0, 0)),
+                    default_ds,
+                    StepsRemoved::new(0),
+                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+                ),
+                physical_port: FakePort::new(),
+                timer_host: FakeTimerHost::new(),
+            }
+        }
+
+        fn port_under_test(
+            &self,
+            parent: PortIdentity,
+            records: &[ForeignClockRecord],
+        ) -> SlaveTestPort<'_> {
+            let domain_port = DomainPort::new(
+                &self.local_clock,
+                &self.physical_port,
+                &self.timer_host,
+                FakeTimestamping::new(),
+                DomainNumber::new(0),
+                PortNumber::new(1),
+            );
+
+            let delay_request_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
+
+            SlavePort::new(
+                domain_port,
+                ParentTrackingBmca::new(
+                    IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(records)),
+                    ParentPortIdentity::new(parent),
+                ),
+                AnnounceReceiptTimeout::new(
+                    FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
+                    Duration::from_secs(5),
+                ),
+                EndToEndDelayMechanism::new(DelayCycle::new(
+                    0.into(),
+                    delay_request_timeout,
+                    LogInterval::new(0),
+                )),
+                NoopPortLog,
+                PortProfile::default(),
+            )
+        }
+    }
+
+    #[test]
+    fn slave_port_test_setup_is_side_effect_free() {
+        let setup = SlavePortTestSetup::new();
+
+        let _slave = setup.port_under_test(PortIdentity::fake(), &[]);
+
+        assert!(setup.timer_host.take_system_messages().is_empty());
+        assert!(setup.physical_port.is_empty());
+    }
+
     #[test]
     fn slave_port_synchronizes_clock_with_two_step_sync() {
-        let local_clock = LocalClock::new(
-            FakeClock::new(TimeStamp::new(0, 0)),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
+        let setup = SlavePortTestSetup::new();
 
-        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
-
-        let mut slave = SlavePort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            AnnounceReceiptTimeout::new(
-                FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
-                Duration::from_secs(5),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                delay_timeout,
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut slave = setup.port_under_test(PortIdentity::fake(), &[]);
 
         slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
         slave.process_delay_response(
@@ -281,46 +329,14 @@ mod tests {
             PortIdentity::fake(),
         );
 
-        assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
+        assert_eq!(setup.local_clock.now(), TimeStamp::new(2, 0));
     }
 
     #[test]
     fn slave_port_synchronizes_clock_with_one_step_sync() {
-        let local_clock = LocalClock::new(
-            FakeClock::new(TimeStamp::new(0, 0)),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
+        let setup = SlavePortTestSetup::new();
 
-        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
-
-        let mut slave = SlavePort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            AnnounceReceiptTimeout::new(
-                FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
-                Duration::from_secs(5),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                delay_timeout,
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut slave = setup.port_under_test(PortIdentity::fake(), &[]);
 
         slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
         slave.process_delay_response(
@@ -338,153 +354,52 @@ mod tests {
             TimeStamp::new(1, 0),
         );
 
-        assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
+        assert_eq!(setup.local_clock.now(), TimeStamp::new(2, 0));
     }
 
     #[test]
     fn slave_port_schedules_next_delay_request_timeout() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
+        let setup = SlavePortTestSetup::new();
 
-        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
+        let mut slave = setup.port_under_test(PortIdentity::fake(), &[]);
 
-        let mut slave = PortProfile::default().slave(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                delay_timeout,
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-        );
+        slave.send_delay_request().unwrap();
 
-        timer_host.take_system_messages();
-
-        slave.dispatch_system(SystemMessage::DelayRequestTimeout);
-
-        let messages = timer_host.take_system_messages();
+        let messages = setup.timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::DelayRequestTimeout));
     }
 
     #[test]
-    fn slave_port_answers_delay_request_timeout_with_delay_request() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let port = FakePort::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            &port,
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
+    fn slave_port_sends_delay_request() {
+        let setup = SlavePortTestSetup::new();
 
-        let mut slave = PortProfile::default().slave(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-        );
+        let mut slave = setup.port_under_test(PortIdentity::fake(), &[]);
 
-        slave.dispatch_system(SystemMessage::DelayRequestTimeout);
+        slave.send_delay_request().unwrap();
 
         assert!(
-            port.contains_event_message(&EventMessage::DelayReq(DelayRequestMessage::new(
-                0.into()
-            )))
+            setup
+                .physical_port
+                .contains_event_message(&EventMessage::DelayReq(DelayRequestMessage::new(
+                    0.into()
+                )))
         );
     }
 
     #[test]
     fn slave_port_to_master_transition_on_announce_receipt_timeout() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
+        let setup = SlavePortTestSetup::new();
 
-        let mut slave = PortProfile::default().slave(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-        );
+        let slave = setup.port_under_test(PortIdentity::fake(), &[]);
 
-        let transition = slave.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
+        let master = slave.announce_receipt_timeout_expired();
 
-        assert!(matches!(
-            transition,
-            Some(StateDecision::AnnounceReceiptTimeoutExpired)
-        ));
+        assert!(matches!(master, PortState::Master(_)));
     }
 
     #[test]
     fn slave_port_ignores_general_messages_from_non_parent() {
-        let local_clock = LocalClock::new(
-            FakeClock::new(TimeStamp::new(0, 0)),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
-        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
+        let setup = SlavePortTestSetup::new();
 
         // Define a parent and a different non-parent identity
         let parent = PortIdentity::new(
@@ -497,17 +412,7 @@ mod tests {
         );
 
         // Create slave with a chosen parent
-        let mut slave = SlavePort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(parent),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(delay_cycle),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut slave = setup.port_under_test(parent, &[]);
 
         // Record a TwoStepSync from the parent so a matching FollowUp could produce ms_offset
         let transition = slave.process_two_step_sync(
@@ -541,31 +446,12 @@ mod tests {
         assert!(transition.is_none());
 
         // With correct filtering, the local clock should remain unchanged
-        assert_eq!(local_clock.now(), TimeStamp::new(0, 0));
+        assert_eq!(setup.local_clock.now(), TimeStamp::new(0, 0));
     }
 
     #[test]
     fn slave_port_ignores_event_messages_from_non_parent() {
-        let local_clock = LocalClock::new(
-            FakeClock::new(TimeStamp::new(0, 0)),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
-        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
+        let setup = SlavePortTestSetup::new();
 
         // Define a parent and a different non-parent identity
         let parent = PortIdentity::new(
@@ -578,17 +464,7 @@ mod tests {
         );
 
         // Create slave with chosen parent
-        let mut slave = SlavePort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(parent),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(delay_cycle),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut slave = setup.port_under_test(parent, &[]);
 
         // Send a FollowUp from the parent first (ms offset incomplete without sync)
         let transition = slave.process_follow_up(
@@ -622,50 +498,19 @@ mod tests {
         assert!(transition.is_none());
 
         // Local clock remains unchanged
-        assert_eq!(local_clock.now(), TimeStamp::new(0, 0));
+        assert_eq!(setup.local_clock.now(), TimeStamp::new(0, 0));
     }
 
     #[test]
     fn slave_port_disciplines_on_matching_conversation() {
-        let local_clock = LocalClock::new(
-            FakeClock::new(TimeStamp::new(0, 0)),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
-        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
+        let setup = SlavePortTestSetup::new();
 
-        // Parent identity
         let parent = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0xCC, 0xCC, 0xCC]),
             PortNumber::new(1),
         );
 
-        // Create slave with parent
-        let mut slave = SlavePort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(parent),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(delay_cycle),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut slave = setup.port_under_test(parent, &[]);
 
         let transition =
             slave.process_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
@@ -697,17 +542,13 @@ mod tests {
         assert!(transition.is_none());
 
         // Local clock disciplined to 2s
-        assert_eq!(local_clock.now(), TimeStamp::new(2, 0));
+        assert_eq!(setup.local_clock.now(), TimeStamp::new(2, 0));
     }
 
     #[test]
     fn slave_port_produces_no_decision_on_updated_same_parent() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::low_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup = SlavePortTestSetup::new_with_ds(DefaultDS::low_grade_test_clock());
+
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
@@ -719,32 +560,8 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
-        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
-        let mut slave = SlavePort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
-                ParentPortIdentity::new(parent_port),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(delay_cycle),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut slave = setup.port_under_test(parent_port, &prior_records);
 
         // Receive a better announce from the same parent port
         let decision = slave.process_announce(
@@ -766,12 +583,8 @@ mod tests {
     fn slave_port_produces_slave_recommendation_with_new_parent() {
         use crate::bmca::{ForeignClockDS, ForeignClockRecord};
 
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::low_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup = SlavePortTestSetup::new_with_ds(DefaultDS::low_grade_test_clock());
+
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
@@ -783,32 +596,8 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
-        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
-        let mut slave = SlavePort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
-                ParentPortIdentity::new(parent_port),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(delay_cycle),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut slave = setup.port_under_test(parent_port, &prior_records);
 
         // Receive two better announces from another parent port
         let new_parent = PortIdentity::new(
@@ -850,12 +639,8 @@ mod tests {
 
     #[test]
     fn slave_port_produces_master_recommendation_on_worse_announces() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup = SlavePortTestSetup::new_with_ds(DefaultDS::mid_grade_test_clock());
+
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
@@ -867,32 +652,8 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
-        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
-        let mut slave = SlavePort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
-                ParentPortIdentity::new(parent_port),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(delay_cycle),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut slave = setup.port_under_test(parent_port, &prior_records);
 
         // Receive a worse announce from the current parent
         let decision = slave.process_announce(
