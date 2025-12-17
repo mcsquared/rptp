@@ -28,7 +28,10 @@ pub trait PhysicalPort {
 pub trait TimerHost {
     type Timeout: Timeout + Drop;
 
-    fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout;
+    /// Create a timeout handle for a message.
+    ///
+    /// Creating a timeout must not schedule it; scheduling happens when the handle is restarted.
+    fn timeout(&self, msg: SystemMessage) -> Self::Timeout;
 }
 
 pub trait Port {
@@ -39,7 +42,10 @@ pub trait Port {
     fn local_clock(&self) -> &LocalClock<Self::Clock>;
     fn send_event(&self, msg: EventMessage) -> SendResult;
     fn send_general(&self, msg: GeneralMessage) -> SendResult;
-    fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout;
+    /// Create a timeout handle for a message.
+    ///
+    /// Creating a timeout must not schedule it; scheduling happens when the handle is restarted.
+    fn timeout(&self, msg: SystemMessage) -> Self::Timeout;
 
     fn update_steps_removed(&self, steps_removed: StepsRemoved) {
         self.local_clock().set_steps_removed(steps_removed);
@@ -242,8 +248,8 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestampi
         self.physical_port.send_general(finalized.as_ref())
     }
 
-    fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
-        self.timer_host.timeout(msg, delay)
+    fn timeout(&self, msg: SystemMessage) -> Self::Timeout {
+        self.timer_host.timeout(msg)
     }
 }
 

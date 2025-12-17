@@ -267,6 +267,7 @@ struct DemoTimeout<'a> {
 
 #[derive(Clone, Copy)]
 struct TimerSlot {
+    allocated: bool,
     active: bool,
     deadline: Instant,
     msg: SystemMessage,
@@ -283,6 +284,7 @@ unsafe impl Sync for TimerStorage {}
 static TIMER_SLOTS: TimerStorage = TimerStorage {
     slots: UnsafeCell::new(
         [TimerSlot {
+            allocated: false,
             active: false,
             deadline: Instant::zero(),
             msg: SystemMessage::Initialized,
@@ -294,20 +296,17 @@ impl TimerSlot {
     fn alloc<'a>(
         instant_clock: &'a InstantClock,
         msg: SystemMessage,
-        delay: Duration,
     ) -> Option<DemoTimeout<'a>> {
-        let now = instant_clock.now();
-        let deadline = now.saturating_add(delay);
-
         // Safety: single-core, main loop only mutates slots through this API.
         unsafe {
             let slots = &mut *TIMER_SLOTS.slots.get();
             for (idx, slot) in slots.iter_mut().enumerate() {
-                if !slot.active {
-                    slot.active = true;
-                    slot.deadline = deadline;
+                if !slot.allocated {
+                    slot.allocated = true;
+                    slot.active = false;
+                    slot.deadline = Instant::zero();
                     slot.msg = msg;
-                    hprintln!("[timer] alloc slot={} msg={:?} delay={:?}", idx, msg, delay);
+                    hprintln!("[timer] alloc slot={} msg={:?}", idx, msg);
                     return Some(DemoTimeout {
                         slot: idx,
                         instant_clock,
@@ -339,9 +338,8 @@ impl<'a> DemoTimerHost<'a> {
 impl<'a> TimerHost for DemoTimerHost<'a> {
     type Timeout = DemoTimeout<'a>;
 
-    fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
-        hprintln!("[timerhost] schedule msg={:?} delay={:?}", msg, delay);
-        TimerSlot::alloc(self.instant_clock, msg, delay).unwrap_or_else(|| {
+    fn timeout(&self, msg: SystemMessage) -> Self::Timeout {
+        TimerSlot::alloc(self.instant_clock, msg).unwrap_or_else(|| {
             hprintln!("[timerhost] no free timer slots for {:?}", msg);
             panic!("TimerSlot exhausted; increase MAX_TIMERS");
         })

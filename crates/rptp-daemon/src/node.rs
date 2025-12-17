@@ -30,7 +30,6 @@ impl TokioTimeout {
         domain_number: DomainNumber,
         tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
         msg: SystemMessage,
-        delay: Duration,
     ) -> Self {
         let inner = Arc::new(TokioTimeoutInner {
             domain_number,
@@ -39,9 +38,7 @@ impl TokioTimeout {
             handle: Mutex::new(None),
         });
 
-        let timeout = Self { inner };
-        timeout.reset(delay);
-        timeout
+        Self { inner }
     }
 
     fn reset(&self, delay: Duration) {
@@ -102,8 +99,8 @@ impl TokioTimerHost {
 impl TimerHost for TokioTimerHost {
     type Timeout = TokioTimeout;
 
-    fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
-        TokioTimeout::new(self.domain_number, self.tx.clone(), msg, delay)
+    fn timeout(&self, msg: SystemMessage) -> Self::Timeout {
+        TokioTimeout::new(self.domain_number, self.tx.clone(), msg)
     }
 }
 
@@ -620,8 +617,8 @@ mod tests {
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         let port_number = PortNumber::new(1);
         let timer_host = TokioTimerHost::new(domain_number, system_tx.clone());
-        let delay_timeout =
-            timer_host.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = timer_host.timeout(SystemMessage::DelayRequestTimeout);
+        delay_timeout.restart(Duration::from_secs(0));
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
             physical_port,

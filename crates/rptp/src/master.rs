@@ -213,7 +213,7 @@ mod tests {
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
-    use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
+    use crate::time::{Instant, LogInterval, LogMessageInterval};
 
     #[test]
     fn master_port_answers_delay_request_with_delay_response() {
@@ -235,12 +235,12 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
             LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::SyncTimeout),
             LogInterval::new(0),
         );
 
@@ -366,12 +366,12 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
             LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::SyncTimeout),
             LogInterval::new(0),
         );
 
@@ -495,12 +495,12 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
             LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::SyncTimeout),
             LogInterval::new(0),
         );
 
@@ -566,12 +566,12 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
             LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::SyncTimeout),
             LogInterval::new(0),
         );
 
@@ -625,12 +625,12 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
             LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::SyncTimeout),
             LogInterval::new(0),
         );
 
@@ -687,12 +687,12 @@ mod tests {
         );
         let announce_cycle = AnnounceCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
             LogInterval::new(0),
         );
         let sync_cycle = SyncCycle::new(
             0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0)),
+            domain_port.timeout(SystemMessage::SyncTimeout),
             LogInterval::new(0),
         );
 

@@ -11,7 +11,7 @@ use crate::listening::ListeningPort;
 use crate::log::PortLog;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity};
+use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity, Timeout};
 use crate::premaster::PreMasterPort;
 use crate::slave::SlavePort;
 use crate::time::{Duration, Instant, LogInterval, TimeStamp};
@@ -269,12 +269,10 @@ impl PortProfile {
         log: L,
     ) -> PortState<P, B, L> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                self.announce_receipt_timeout_interval,
-            ),
+            port.timeout(SystemMessage::AnnounceReceiptTimeout),
             self.announce_receipt_timeout_interval,
         );
+        announce_receipt_timeout.restart();
 
         PortState::Listening(ListeningPort::new(
             port,
@@ -291,11 +289,12 @@ impl PortProfile {
         bmca: LocalMasterTrackingBmca<B>,
         log: L,
     ) -> PortState<P, B, L> {
-        let announce_send_timeout =
-            port.timeout(SystemMessage::AnnounceSendTimeout, Duration::from_secs(0));
+        let announce_send_timeout = port.timeout(SystemMessage::AnnounceSendTimeout);
+        announce_send_timeout.restart(Duration::from_secs(0));
         let announce_cycle =
             AnnounceCycle::new(0.into(), announce_send_timeout, self.log_announce_interval);
-        let sync_timeout = port.timeout(SystemMessage::SyncTimeout, Duration::from_secs(0));
+        let sync_timeout = port.timeout(SystemMessage::SyncTimeout);
+        sync_timeout.restart(Duration::from_secs(0));
         let sync_cycle = SyncCycle::new(0.into(), sync_timeout, self.log_sync_interval);
 
         PortState::Master(MasterPort::new(
@@ -316,12 +315,10 @@ impl PortProfile {
         log: L,
     ) -> PortState<P, B, L> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                self.announce_receipt_timeout_interval,
-            ),
+            port.timeout(SystemMessage::AnnounceReceiptTimeout),
             self.announce_receipt_timeout_interval,
         );
+        announce_receipt_timeout.restart();
 
         PortState::Slave(SlavePort::new(
             port,
@@ -340,10 +337,8 @@ impl PortProfile {
         log: L,
         qualification_timeout_policy: QualificationTimeoutPolicy,
     ) -> PortState<P, B, L> {
-        let qualification_timeout = port.timeout(
-            SystemMessage::QualificationTimeout,
-            qualification_timeout_policy.duration(self.log_announce_interval),
-        );
+        let qualification_timeout = port.timeout(SystemMessage::QualificationTimeout);
+        qualification_timeout.restart(qualification_timeout_policy.duration(self.log_announce_interval));
 
         PortState::PreMaster(PreMasterPort::new(
             port,
@@ -361,16 +356,17 @@ impl PortProfile {
         log: L,
     ) -> PortState<P, B, L> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                self.announce_receipt_timeout_interval,
-            ),
+            port.timeout(SystemMessage::AnnounceReceiptTimeout),
             self.announce_receipt_timeout_interval,
         );
+        announce_receipt_timeout.restart();
+
+        let delay_timeout = port.timeout(SystemMessage::DelayRequestTimeout);
+        delay_timeout.restart(Duration::from_secs(0));
 
         let delay_cycle = DelayCycle::new(
             0.into(),
-            port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0)),
+            delay_timeout,
             self.log_min_delay_request_interval,
         );
 
@@ -1529,14 +1525,10 @@ mod tests {
         );
 
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(10),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(10),
         );
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         let mut slave = PortState::Slave(SlavePort::new(

@@ -115,7 +115,6 @@ impl FakeTimeout {
         system_messages: Rc<RefCell<Vec<SystemMessage>>>,
         msg: SystemMessage,
     ) -> Self {
-        system_messages.borrow_mut().push(msg);
         Self {
             msg: RefCell::new(msg),
             system_messages,
@@ -166,7 +165,7 @@ impl Default for FakeTimerHost {
 impl TimerHost for FakeTimerHost {
     type Timeout = FakeTimeout;
 
-    fn timeout(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
+    fn timeout(&self, msg: SystemMessage) -> Self::Timeout {
         FakeTimeout::from_system_message(self.system_messages.clone(), msg)
     }
 }
@@ -174,7 +173,7 @@ impl TimerHost for FakeTimerHost {
 impl TimerHost for &FakeTimerHost {
     type Timeout = FakeTimeout;
 
-    fn timeout(&self, msg: SystemMessage, _delay: Duration) -> Self::Timeout {
+    fn timeout(&self, msg: SystemMessage) -> Self::Timeout {
         FakeTimeout::from_system_message(self.system_messages.clone(), msg)
     }
 }

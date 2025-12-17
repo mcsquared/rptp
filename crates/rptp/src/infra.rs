@@ -8,7 +8,7 @@ pub mod infra_support {
     use crate::clock::{Clock, LocalClock, SynchronizableClock};
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
     use crate::port::{Port, PortIdentity, SendResult};
-    use crate::time::{Duration, TimeStamp};
+    use crate::time::TimeStamp;
 
     impl Clock for Rc<dyn SynchronizableClock> {
         fn now(&self) -> TimeStamp {
@@ -33,8 +33,8 @@ pub mod infra_support {
             self.as_ref().send_general(msg)
         }
 
-        fn timeout(&self, msg: SystemMessage, delay: Duration) -> Self::Timeout {
-            self.as_ref().timeout(msg, delay)
+        fn timeout(&self, msg: SystemMessage) -> Self::Timeout {
+            self.as_ref().timeout(msg)
         }
     }
 

@@ -253,10 +253,7 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
 
@@ -339,10 +336,7 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
 
@@ -403,10 +397,7 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
 
@@ -452,10 +443,7 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
 
@@ -532,10 +520,7 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
 

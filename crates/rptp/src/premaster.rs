@@ -84,7 +84,7 @@ mod tests {
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{SystemMessage, TimeScale};
-    use crate::port::{DomainNumber, DomainPort, PortNumber};
+    use crate::port::{DomainNumber, DomainPort, PortNumber, Timeout};
     use crate::portstate::PortState;
     use crate::portstate::StateDecision;
     use crate::servo::{Servo, SteppingServo};
@@ -108,8 +108,8 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let qualification_timeout =
-            domain_port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+        let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
+        qualification_timeout.restart(Duration::from_secs(5));
 
         let _ = PreMasterPort::new(
             domain_port,
@@ -139,8 +139,8 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let qualification_timeout =
-            domain_port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+        let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
+        qualification_timeout.restart(Duration::from_secs(5));
 
         let mut pre_master = PortState::PreMaster(PreMasterPort::new(
             domain_port,
@@ -183,8 +183,8 @@ mod tests {
             DomainNumber::new(0),
             PortNumber::new(1),
         );
-        let qualification_timeout =
-            domain_port.timeout(SystemMessage::QualificationTimeout, Duration::from_secs(5));
+        let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
+        qualification_timeout.restart(Duration::from_secs(5));
 
         let mut pre_master = PreMasterPort::new(
             domain_port,

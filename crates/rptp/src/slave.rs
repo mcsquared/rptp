@@ -240,8 +240,7 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
 
         let mut slave = SlavePort::new(
             domain_port,
@@ -302,8 +301,7 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
 
         let mut slave = SlavePort::new(
             domain_port,
@@ -361,8 +359,7 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
 
         let mut slave = PortProfile::default().slave(
             domain_port,
@@ -483,14 +480,10 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         // Define a parent and a different non-parent identity
@@ -568,14 +561,10 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         // Define a parent and a different non-parent identity
@@ -653,14 +642,10 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         // Parent identity
@@ -743,14 +728,10 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         let mut slave = SlavePort::new(
@@ -811,14 +792,10 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         let mut slave = SlavePort::new(
@@ -899,14 +876,10 @@ mod tests {
             PortNumber::new(1),
         );
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(
-                SystemMessage::AnnounceReceiptTimeout,
-                Duration::from_secs(5),
-            ),
+            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
             Duration::from_secs(5),
         );
-        let delay_timeout =
-            domain_port.timeout(SystemMessage::DelayRequestTimeout, Duration::from_secs(0));
+        let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
         let mut slave = SlavePort::new(
