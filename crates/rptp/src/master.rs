@@ -215,303 +215,204 @@ mod tests {
     use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
     use crate::time::{Instant, LogInterval, LogMessageInterval};
 
+    type MasterTestDomainPort<'a> =
+        DomainPort<'a, FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping>;
+
+    type MasterTestPort<'a> = MasterPort<
+        MasterTestDomainPort<'a>,
+        IncrementalBmca<SortedForeignClockRecordsVec>,
+        NoopPortLog,
+    >;
+
+    struct MasterPortTestSetup {
+        local_clock: LocalClock<FakeClock>,
+        physical_port: FakePort,
+        timer_host: FakeTimerHost,
+    }
+
+    impl MasterPortTestSetup {
+        fn new(default_ds: DefaultDS) -> Self {
+            Self::new_with_time(default_ds, TimeStamp::new(0, 0))
+        }
+
+        fn new_with_time(default_ds: DefaultDS, now: TimeStamp) -> Self {
+            Self {
+                local_clock: LocalClock::new(
+                    FakeClock::new(now),
+                    default_ds,
+                    StepsRemoved::new(0),
+                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+                ),
+                physical_port: FakePort::new(),
+                timer_host: FakeTimerHost::new(),
+            }
+        }
+
+        fn port_under_test(&self, records: &[ForeignClockRecord]) -> MasterTestPort<'_> {
+            let domain_port = DomainPort::new(
+                &self.local_clock,
+                &self.physical_port,
+                &self.timer_host,
+                FakeTimestamping::new(),
+                DomainNumber::new(0),
+                PortNumber::new(1),
+            );
+            let announce_cycle = AnnounceCycle::new(
+                0.into(),
+                domain_port.timeout(SystemMessage::AnnounceSendTimeout),
+                LogInterval::new(0),
+            );
+            let sync_cycle = SyncCycle::new(
+                0.into(),
+                domain_port.timeout(SystemMessage::SyncTimeout),
+                LogInterval::new(0),
+            );
+
+            MasterPort::new(
+                domain_port,
+                LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                    SortedForeignClockRecordsVec::from_records(records),
+                )),
+                announce_cycle,
+                sync_cycle,
+                NoopPortLog,
+                PortProfile::default(),
+            )
+        }
+    }
+
+    #[test]
+    fn master_port_test_setup_is_side_effect_free() {
+        let setup = MasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
+
+        let _slave = setup.port_under_test(&[]);
+
+        assert!(setup.timer_host.take_system_messages().is_empty());
+        assert!(setup.physical_port.is_empty());
+    }
+
     #[test]
     fn master_port_answers_delay_request_with_delay_response() {
-        let local_clock = LocalClock::new(
-            FakeClock::new(TimeStamp::new(0, 0)),
+        let setup = MasterPortTestSetup::new_with_time(
             DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            &port,
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_cycle = AnnounceCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
-            LogInterval::new(0),
-        );
-        let sync_cycle = SyncCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout),
-            LogInterval::new(0),
+            TimeStamp::new(0, 0),
         );
 
-        let mut master = MasterPort::new(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            announce_cycle,
-            sync_cycle,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut master = setup.port_under_test(&[]);
 
-        timer_host.take_system_messages();
+        master
+            .process_delay_request(
+                DelayRequestMessage::new(0.into()),
+                TimeStamp::new(0, 0),
+                PortIdentity::fake(),
+            )
+            .unwrap();
 
         assert!(
-            master
-                .process_delay_request(
-                    DelayRequestMessage::new(0.into()),
+            setup
+                .physical_port
+                .contains_general_message(&GeneralMessage::DelayResp(DelayResponseMessage::new(
+                    0.into(),
+                    LogMessageInterval::new(0),
                     TimeStamp::new(0, 0),
                     PortIdentity::fake()
-                )
-                .is_ok()
+                )))
         );
-
-        assert!(port.contains_general_message(&GeneralMessage::DelayResp(
-            DelayResponseMessage::new(
-                0.into(),
-                LogMessageInterval::new(0),
-                TimeStamp::new(0, 0),
-                PortIdentity::fake()
-            )
-        )));
-
-        assert!(timer_host.take_system_messages().is_empty());
     }
 
     #[test]
-    fn master_port_answers_sync_timeout_with_sync() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            &port,
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
+    fn master_port_sends_sync() {
+        let setup = MasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
 
-        let mut master = PortProfile::default().master(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let mut master = setup.port_under_test(&[]);
 
-        master.dispatch_system(SystemMessage::SyncTimeout);
+        master.send_sync().unwrap();
 
         assert!(
-            port.contains_event_message(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(
-                0.into(),
-                LogMessageInterval::new(0)
-            )))
+            setup
+                .physical_port
+                .contains_event_message(&EventMessage::TwoStepSync(TwoStepSyncMessage::new(
+                    0.into(),
+                    LogMessageInterval::new(0)
+                )))
         );
     }
 
     #[test]
-    fn master_port_schedules_next_sync() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            &port,
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
+    fn master_port_schedules_next_sync_timeout() {
+        let setup = MasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
 
-        let mut master = PortProfile::default().master(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let mut master = setup.port_under_test(&[]);
 
-        // Drain messages that could have been sent during initialization.
-        timer_host.take_system_messages();
+        master.send_sync().unwrap();
 
-        master.dispatch_system(SystemMessage::SyncTimeout);
-
-        let messages = timer_host.take_system_messages();
+        let messages = setup.timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::SyncTimeout));
     }
 
     #[test]
-    fn master_port_answers_timestamped_sync_with_follow_up() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            &port,
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_cycle = AnnounceCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
-            LogInterval::new(0),
-        );
-        let sync_cycle = SyncCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout),
-            LogInterval::new(0),
-        );
+    fn master_port_sends_follow_up() {
+        let setup = MasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
 
-        let mut master = MasterPort::new(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            announce_cycle,
-            sync_cycle,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut master = setup.port_under_test(&[]);
 
-        timer_host.take_system_messages();
+        master
+            .send_follow_up(
+                TwoStepSyncMessage::new(0.into(), LogMessageInterval::new(0)),
+                TimeStamp::new(0, 0),
+            )
+            .unwrap();
 
         assert!(
-            master
-                .send_follow_up(
-                    TwoStepSyncMessage::new(0.into(), LogMessageInterval::new(0)),
+            setup
+                .physical_port
+                .contains_general_message(&GeneralMessage::FollowUp(FollowUpMessage::new(
+                    0.into(),
+                    LogMessageInterval::new(0),
                     TimeStamp::new(0, 0)
-                )
-                .is_ok()
+                )))
         );
-
-        assert!(
-            port.contains_general_message(&GeneralMessage::FollowUp(FollowUpMessage::new(
-                0.into(),
-                LogMessageInterval::new(0),
-                TimeStamp::new(0, 0)
-            )))
-        );
-
-        assert!(timer_host.take_system_messages().is_empty());
     }
 
     #[test]
     fn master_port_schedules_next_announce() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            &port,
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
+        let setup = MasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
 
-        let mut master = PortProfile::default().master(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let mut master = setup.port_under_test(&[]);
 
-        timer_host.take_system_messages();
+        master.send_announce().unwrap();
 
-        master.dispatch_system(SystemMessage::AnnounceSendTimeout);
-
-        let messages = timer_host.take_system_messages();
+        let messages = setup.timer_host.take_system_messages();
         assert!(messages.contains(&SystemMessage::AnnounceSendTimeout));
     }
 
     #[test]
-    fn master_port_sends_announce_on_send_timeout() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            &port,
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
+    fn master_port_sends_announce() {
+        let setup = MasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
 
-        let mut master = PortProfile::default().master(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            NoopPortLog,
-        );
+        let mut master = setup.port_under_test(&[]);
 
-        master.dispatch_system(SystemMessage::AnnounceSendTimeout);
+        master.send_announce().unwrap();
 
         assert!(
-            port.contains_general_message(&GeneralMessage::Announce(AnnounceMessage::new(
-                0.into(),
-                LogMessageInterval::new(0),
-                ForeignClockDS::high_grade_test_clock(),
-                TimeScale::Ptp,
-            )))
+            setup
+                .physical_port
+                .contains_general_message(&GeneralMessage::Announce(AnnounceMessage::new(
+                    0.into(),
+                    LogMessageInterval::new(0),
+                    ForeignClockDS::high_grade_test_clock(),
+                    TimeScale::Ptp,
+                )))
         );
     }
 
     #[test]
-    fn master_port_to_uncalibrated_transition_on_two_announces() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_cycle = AnnounceCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
-            LogInterval::new(0),
-        );
-        let sync_cycle = SyncCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout),
-            LogInterval::new(0),
-        );
+    fn master_port_recommends_slave_on_two_better_announces() {
+        let setup = MasterPortTestSetup::new(DefaultDS::mid_grade_test_clock());
 
-        let mut master = MasterPort::new(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            announce_cycle,
-            sync_cycle,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
+
+        let mut master = setup.port_under_test(&[]);
 
         let decision = master.process_announce(
             AnnounceMessage::new(
@@ -541,12 +442,8 @@ mod tests {
 
     #[test]
     fn master_port_stays_master_on_subsequent_announce() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup = MasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
+
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
         let prior_records = [ForeignClockRecord::qualified(
             PortIdentity::fake(),
@@ -554,40 +451,8 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            &port,
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_cycle = AnnounceCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
-            LogInterval::new(0),
-        );
-        let sync_cycle = SyncCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout),
-            LogInterval::new(0),
-        );
 
-        let mut master = MasterPort::new(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::from_records(&prior_records),
-            )),
-            announce_cycle,
-            sync_cycle,
-            NoopPortLog,
-            PortProfile::default(),
-        );
-
-        // Drain any setup timers
-        timer_host.take_system_messages();
+        let mut master = setup.port_under_test(&prior_records);
 
         let decision = master.process_announce(
             AnnounceMessage::new(
@@ -601,52 +466,18 @@ mod tests {
         );
 
         assert!(decision.is_none());
-        assert!(timer_host.take_system_messages().is_empty());
+        assert!(setup.timer_host.take_system_messages().is_empty());
     }
 
     #[test]
-    fn master_port_stays_master_on_undecided_bmca() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn master_port_stays_master_single_new_announce() {
+        let setup = MasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
+
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
-        let port = FakePort::new();
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            &port,
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_cycle = AnnounceCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
-            LogInterval::new(0),
-        );
-        let sync_cycle = SyncCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout),
-            LogInterval::new(0),
-        );
 
-        let mut master = MasterPort::new(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            announce_cycle,
-            sync_cycle,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut master = setup.port_under_test(&[]);
 
-        // Drain any setup timers
-        timer_host.take_system_messages();
-
-        let transition = master.process_announce(
+        let decision = master.process_announce(
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
@@ -657,18 +488,13 @@ mod tests {
             Instant::from_secs(0),
         );
 
-        assert!(transition.is_none());
-        assert!(timer_host.take_system_messages().is_empty());
+        assert!(decision.is_none());
     }
 
     #[test]
     fn master_port_does_not_recommend_master_when_local_clock_unchanged_but_still_best() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup = MasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
+
         let parent_port = PortIdentity::fake();
         let foreign_clock_ds = ForeignClockDS::low_grade_test_clock();
         let prior_records = [ForeignClockRecord::qualified(
@@ -677,35 +503,8 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_cycle = AnnounceCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::AnnounceSendTimeout),
-            LogInterval::new(0),
-        );
-        let sync_cycle = SyncCycle::new(
-            0.into(),
-            domain_port.timeout(SystemMessage::SyncTimeout),
-            LogInterval::new(0),
-        );
 
-        let mut master = MasterPort::new(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(
-                SortedForeignClockRecordsVec::from_records(&prior_records),
-            )),
-            announce_cycle,
-            sync_cycle,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut master = setup.port_under_test(&prior_records);
 
         // Receive a better announce (but still lower quality than local high-grade clock)
         let decision = master.process_announce(
