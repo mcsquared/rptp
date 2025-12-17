@@ -98,84 +98,97 @@ mod tests {
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{SystemMessage, TimeScale};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
-    use crate::portstate::PortState;
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogMessageInterval};
 
+    type ListeningTestDomainPort<'a> =
+        DomainPort<'a, FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping>;
+
+    type ListeningTestPort<'a> = ListeningPort<
+        ListeningTestDomainPort<'a>,
+        IncrementalBmca<SortedForeignClockRecordsVec>,
+        NoopPortLog,
+    >;
+
+    struct ListeningPortTestSetup {
+        local_clock: LocalClock<FakeClock>,
+        physical_port: FakePort,
+        timer_host: FakeTimerHost,
+    }
+
+    impl ListeningPortTestSetup {
+        fn new(default_ds: DefaultDS, steps_removed: StepsRemoved) -> Self {
+            Self {
+                local_clock: LocalClock::new(
+                    FakeClock::default(),
+                    default_ds,
+                    steps_removed,
+                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+                ),
+                physical_port: FakePort::new(),
+                timer_host: FakeTimerHost::new(),
+            }
+        }
+
+        fn port_under_test(&self) -> ListeningTestPort<'_> {
+            let domain_port = DomainPort::new(
+                &self.local_clock,
+                &self.physical_port,
+                &self.timer_host,
+                FakeTimestamping::new(),
+                DomainNumber::new(0),
+                PortNumber::new(1),
+            );
+
+            let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+                domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
+                Duration::from_secs(5),
+            );
+
+            ListeningPort::new(
+                domain_port,
+                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+                announce_receipt_timeout,
+                NoopPortLog,
+                PortProfile::default(),
+            )
+        }
+    }
+
+    #[test]
+    fn listening_port_test_setup_is_side_effect_free() {
+        let setup =
+            ListeningPortTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
+
+        let _listening = setup.port_under_test();
+
+        assert!(setup.timer_host.take_system_messages().is_empty());
+        assert!(setup.physical_port.is_empty());
+    }
+
     #[test]
     fn listening_port_to_master_transition_on_announce_receipt_timeout() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
+        let setup =
+            ListeningPortTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
 
-        let mut listening = PortState::Listening(ListeningPort::new(
-            domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            announce_receipt_timeout,
-            NoopPortLog,
-            PortProfile::default(),
-        ));
+        let listening = setup.port_under_test();
 
-        let transition = listening.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
+        let master = listening.announce_receipt_timeout_expired();
 
-        assert!(matches!(
-            transition,
-            Some(StateDecision::AnnounceReceiptTimeoutExpired)
-        ));
+        assert!(matches!(master, PortState::Master(_)));
     }
 
     #[test]
     fn listening_port_stays_in_listening_on_single_announce() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
+        let setup =
+            ListeningPortTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let mut listening = ListeningPort::new(
-            domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            announce_receipt_timeout,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut listening = setup.port_under_test();
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
-        // Drain any initial schedules
-        timer_host.take_system_messages();
-
-        let transition = listening.process_announce(
+        let decision = listening.process_announce(
             AnnounceMessage::new(
                 0.into(),
                 LogMessageInterval::new(0),
@@ -186,43 +199,22 @@ mod tests {
             Instant::from_secs(0),
         );
 
-        assert!(transition.is_none());
+        assert!(decision.is_none());
 
-        let system_messages = timer_host.take_system_messages();
+        let system_messages = setup.timer_host.take_system_messages();
         assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
-    fn listening_port_to_pre_master_transition_on_two_announces() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
-        let mut listening = ListeningPort::new(
-            domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            announce_receipt_timeout,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+    fn listening_port_recommends_master_on_two_announces() {
+        let setup =
+            ListeningPortTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
+
+        let mut listening = setup.port_under_test();
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
-        let transition = listening.process_announce(
+        let decision = listening.process_announce(
             AnnounceMessage::new(
                 0.into(),
                 LogMessageInterval::new(0),
@@ -232,9 +224,9 @@ mod tests {
             PortIdentity::fake(),
             Instant::from_secs(0),
         );
-        assert!(transition.is_none());
+        assert!(decision.is_none());
 
-        let transition = listening.process_announce(
+        let decision = listening.process_announce(
             AnnounceMessage::new(
                 1.into(),
                 LogMessageInterval::new(0),
@@ -245,47 +237,24 @@ mod tests {
             Instant::from_secs(0),
         );
         assert!(matches!(
-            transition,
+            decision,
             Some(StateDecision::RecommendedMaster(_))
         ));
+
+        let system_messages = setup.timer_host.take_system_messages();
+        assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
-    fn listening_port_to_uncalibrated_transition_() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
+    fn listening_port_recommends_slave_on_two_announces() {
+        let setup =
+            ListeningPortTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let mut listening = ListeningPort::new(
-            domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            announce_receipt_timeout,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut listening = setup.port_under_test();
 
         let foreign_clock = ForeignClockDS::high_grade_test_clock();
 
-        // Drain any setup timers
-        timer_host.take_system_messages();
-
-        let transition = listening.process_announce(
+        let decision = listening.process_announce(
             AnnounceMessage::new(
                 0.into(),
                 LogMessageInterval::new(0),
@@ -295,9 +264,9 @@ mod tests {
             PortIdentity::fake(),
             Instant::from_secs(0),
         );
-        assert!(transition.is_none());
+        assert!(decision.is_none());
 
-        let transition = listening.process_announce(
+        let decision = listening.process_announce(
             AnnounceMessage::new(
                 1.into(),
                 LogMessageInterval::new(0),
@@ -308,43 +277,18 @@ mod tests {
             Instant::from_secs(0),
         );
 
-        assert!(matches!(
-            transition,
-            Some(StateDecision::RecommendedSlave(_))
-        ));
+        assert!(matches!(decision, Some(StateDecision::RecommendedSlave(_))));
 
-        let system_messages = timer_host.take_system_messages();
+        let system_messages = setup.timer_host.take_system_messages();
         assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
     fn listening_port_updates_steps_removed_on_m1_master_recommendation() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::gm_grade_test_clock(),
-            StepsRemoved::new(5),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
+        let setup =
+            ListeningPortTestSetup::new(DefaultDS::gm_grade_test_clock(), StepsRemoved::new(5));
 
-        let mut listening = ListeningPort::new(
-            domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            announce_receipt_timeout,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut listening = setup.port_under_test();
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
 
@@ -382,37 +326,15 @@ mod tests {
 
         let _state = listening.recommended_master(decision);
 
-        assert_eq!(local_clock.steps_removed(), StepsRemoved::new(0));
+        assert_eq!(setup.local_clock.steps_removed(), StepsRemoved::new(0));
     }
 
     #[test]
     fn listening_port_updates_steps_removed_on_m2_master_recommendation() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(5),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
+        let setup =
+            ListeningPortTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(5));
 
-        let mut listening = ListeningPort::new(
-            domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            announce_receipt_timeout,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut listening = setup.port_under_test();
 
         let foreign_clock = ForeignClockDS::low_grade_test_clock();
 
@@ -450,43 +372,20 @@ mod tests {
 
         let _state = listening.recommended_master(decision);
 
-        assert_eq!(local_clock.steps_removed(), StepsRemoved::new(0));
+        assert_eq!(setup.local_clock.steps_removed(), StepsRemoved::new(0));
     }
 
     #[test]
     fn listening_port_updates_steps_removed_on_s1_slave_recommendation() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(5),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
+        let setup =
+            ListeningPortTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(5));
 
-        let mut listening = ListeningPort::new(
-            domain_port,
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            announce_receipt_timeout,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut listening = setup.port_under_test();
 
         let foreign_clock = ForeignClockDS::high_grade_test_clock();
         let expected_steps_removed = foreign_clock.steps_removed().increment();
 
-        timer_host.take_system_messages();
+        setup.timer_host.take_system_messages();
 
         let _ = listening.process_announce(
             AnnounceMessage::new(
@@ -517,6 +416,6 @@ mod tests {
 
         let _state = listening.recommended_slave(decision);
 
-        assert_eq!(local_clock.steps_removed(), expected_steps_removed);
+        assert_eq!(setup.local_clock.steps_removed(), expected_steps_removed);
     }
 }
