@@ -79,83 +79,90 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{DefaultDS, IncrementalBmca};
+    use crate::bmca::{DefaultDS, ForeignClockRecord, IncrementalBmca};
     use crate::clock::{LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{SystemMessage, TimeScale};
-    use crate::port::{DomainNumber, DomainPort, PortNumber, Timeout};
+    use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
     use crate::portstate::StateDecision;
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
-    use crate::time::{Duration, Instant, LogMessageInterval};
+    use crate::time::{Instant, LogMessageInterval};
 
-    #[test]
-    fn pre_master_port_schedules_qualification_timeout() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let timer_host = FakeTimerHost::new();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            &timer_host,
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
-        qualification_timeout.restart(Duration::from_secs(5));
+    type PreMasterTestDomainPort<'a> =
+        DomainPort<'a, FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping>;
 
-        let _ = PreMasterPort::new(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            qualification_timeout,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+    type PreMasterTestPort<'a> = PreMasterPort<
+        PreMasterTestDomainPort<'a>,
+        IncrementalBmca<SortedForeignClockRecordsVec>,
+        NoopPortLog,
+    >;
 
-        let messages = timer_host.take_system_messages();
-        assert!(messages.contains(&SystemMessage::QualificationTimeout));
+    struct PreMasterPortTestSetup {
+        local_clock: LocalClock<FakeClock>,
+        physical_port: FakePort,
+        timer_host: FakeTimerHost,
+    }
+
+    impl PreMasterPortTestSetup {
+        fn new(default_ds: DefaultDS) -> Self {
+            Self {
+                local_clock: LocalClock::new(
+                    FakeClock::default(),
+                    default_ds,
+                    StepsRemoved::new(0),
+                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+                ),
+                physical_port: FakePort::new(),
+                timer_host: FakeTimerHost::new(),
+            }
+        }
+
+        fn port_under_test(&self, records: &[ForeignClockRecord]) -> PreMasterTestPort<'_> {
+            let domain_port = DomainPort::new(
+                &self.local_clock,
+                &self.physical_port,
+                &self.timer_host,
+                FakeTimestamping::new(),
+                DomainNumber::new(0),
+                PortNumber::new(1),
+            );
+
+            let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
+
+            PreMasterPort::new(
+                domain_port,
+                LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                    SortedForeignClockRecordsVec::from_records(records),
+                )),
+                qualification_timeout,
+                NoopPortLog,
+                PortProfile::default(),
+            )
+        }
     }
 
     #[test]
-    fn pre_master_port_to_master_transition_on_qualification_timeout() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::high_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
-        qualification_timeout.restart(Duration::from_secs(5));
+    fn pre_master_port_test_setup_is_side_effect_free() {
+        let setup = PreMasterPortTestSetup::new(DefaultDS::low_grade_test_clock());
 
-        let mut pre_master = PortState::PreMaster(PreMasterPort::new(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            qualification_timeout,
-            NoopPortLog,
-            PortProfile::default(),
-        ));
+        let _pre_master = setup.port_under_test(&[]);
 
-        let transition = pre_master.dispatch_system(SystemMessage::QualificationTimeout);
+        assert!(setup.timer_host.take_system_messages().is_empty());
+        assert!(setup.physical_port.is_empty());
+    }
 
-        assert!(matches!(
-            transition,
-            Some(StateDecision::QualificationTimeoutExpired)
-        ));
+    #[test]
+    fn pre_master_port_to_master_on_qualified() {
+        let setup = PreMasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
+
+        let pre_master = setup.port_under_test(&[]);
+
+        let master = pre_master.qualified();
+
+        assert!(matches!(master, PortState::Master(_)));
     }
 
     #[test]
@@ -165,34 +172,13 @@ mod tests {
         use crate::message::AnnounceMessage;
         use crate::port::{ParentPortIdentity, PortIdentity, PortNumber};
 
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::low_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup = PreMasterPortTestSetup::new(DefaultDS::low_grade_test_clock());
+
         let better_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
         );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
-        qualification_timeout.restart(Duration::from_secs(5));
-
-        let mut pre_master = PreMasterPort::new(
-            domain_port,
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new())),
-            qualification_timeout,
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut pre_master = setup.port_under_test(&[]);
 
         // Receive first better announce
         let decision = pre_master.process_announce(
