@@ -36,9 +36,8 @@ mod tests {
     use crate::clock::{LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
-    use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, PortNumber};
-    use crate::portstate::{PortState, StateDecision};
+    use crate::portstate::PortState;
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
 
@@ -50,7 +49,7 @@ mod tests {
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut initializing = PortState::Initializing(InitializingPort::new(
+        let initializing = InitializingPort::new(
             DomainPort::new(
                 &local_clock,
                 FakePort::new(),
@@ -62,10 +61,10 @@ mod tests {
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
             NoopPortLog,
             PortProfile::default(),
-        ));
+        );
 
-        let transition = initializing.dispatch_system(SystemMessage::Initialized);
+        let listening = initializing.initialized();
 
-        assert!(matches!(transition, Some(StateDecision::Initialized)));
+        assert!(matches!(listening, PortState::Listening(_)));
     }
 }
