@@ -290,6 +290,17 @@ mod tests {
     }
 
     #[test]
+    fn uncalibrated_port_test_setup_is_side_effect_free() {
+        let setup =
+            UncalibratedPortTestSetup::new(DefaultDS::low_grade_test_clock(), StepsRemoved::new(0));
+
+        let _uncalibrated = setup.port_under_test(PortIdentity::fake(), &[]);
+
+        assert!(setup.timer_host.take_system_messages().is_empty());
+        assert!(setup.physical_port.is_empty());
+    }
+
+    #[test]
     fn uncalibrated_port_produces_slave_recommendation_with_new_parent() {
         let setup =
             UncalibratedPortTestSetup::new(DefaultDS::low_grade_test_clock(), StepsRemoved::new(0));
