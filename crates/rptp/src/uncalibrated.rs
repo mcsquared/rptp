@@ -220,19 +220,80 @@ mod tests {
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, DelayResponseMessage, SystemMessage, TimeScale};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
-    use crate::portstate::PortState;
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
+    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
+
+    type UncalibratedTestDomainPort<'a> =
+        DomainPort<'a, FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping>;
+
+    type UncalibratedTestPort<'a> = UncalibratedPort<
+        UncalibratedTestDomainPort<'a>,
+        IncrementalBmca<SortedForeignClockRecordsVec>,
+        NoopPortLog,
+    >;
+
+    struct UncalibratedPortTestSetup {
+        local_clock: LocalClock<FakeClock>,
+        physical_port: FakePort,
+        timer_host: FakeTimerHost,
+    }
+
+    impl UncalibratedPortTestSetup {
+        fn new(default_ds: DefaultDS, steps_removed: StepsRemoved) -> Self {
+            Self {
+                local_clock: LocalClock::new(
+                    FakeClock::default(),
+                    default_ds,
+                    steps_removed,
+                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+                ),
+                physical_port: FakePort::new(),
+                timer_host: FakeTimerHost::new(),
+            }
+        }
+
+        fn port_under_test(
+            &self,
+            parent_port: PortIdentity,
+            records: &[ForeignClockRecord],
+        ) -> UncalibratedTestPort<'_> {
+            let domain_port = DomainPort::new(
+                &self.local_clock,
+                &self.physical_port,
+                &self.timer_host,
+                FakeTimestamping::new(),
+                DomainNumber::new(0),
+                PortNumber::new(1),
+            );
+
+            let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+                domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
+                Duration::from_secs(5),
+            );
+
+            let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
+            let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
+
+            UncalibratedPort::new(
+                domain_port,
+                ParentTrackingBmca::new(
+                    IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(records)),
+                    ParentPortIdentity::new(parent_port),
+                ),
+                announce_receipt_timeout,
+                EndToEndDelayMechanism::new(delay_cycle),
+                NoopPortLog,
+                PortProfile::default(),
+            )
+        }
+    }
 
     #[test]
     fn uncalibrated_port_produces_slave_recommendation_with_new_parent() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::low_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            UncalibratedPortTestSetup::new(DefaultDS::low_grade_test_clock(), StepsRemoved::new(0));
+
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
@@ -244,34 +305,7 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
-
-        let mut uncalibrated = UncalibratedPort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
-                ParentPortIdentity::new(parent_port),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut uncalibrated = setup.port_under_test(parent_port, &prior_records);
 
         // Receive two better announces from another parent port
         let new_parent = PortIdentity::new(
@@ -313,12 +347,9 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_becomes_slave_on_next_sync_from_parent() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let setup =
+            UncalibratedPortTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
+
         let parent_port = PortIdentity::fake();
         let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
         let prior_records = [ForeignClockRecord::qualified(
@@ -327,34 +358,7 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
-
-        let mut uncalibrated = UncalibratedPort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(&prior_records)),
-                ParentPortIdentity::new(parent_port),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let mut uncalibrated = setup.port_under_test(parent_port, &prior_records);
 
         // pre-feed the delay mechanism with delay req/resp messages so it can calibrate
         let decision = uncalibrated
@@ -382,86 +386,25 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_to_master_on_announce_receipt_timeout() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
+        let setup = UncalibratedPortTestSetup::new(
             DefaultDS::high_grade_test_clock(),
             StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
         );
 
-        let mut uncalibrated = PortState::Uncalibrated(UncalibratedPort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(PortIdentity::fake()),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-            PortProfile::default(),
-        ));
+        let uncalibrated = setup.port_under_test(PortIdentity::fake(), &[]);
 
-        let transition = uncalibrated.dispatch_system(SystemMessage::AnnounceReceiptTimeout);
+        let master = uncalibrated.announce_receipt_timeout_expired();
 
-        assert!(matches!(
-            transition,
-            Some(StateDecision::AnnounceReceiptTimeoutExpired)
-        ));
+        assert!(matches!(master, PortState::Master(_)));
     }
 
     #[test]
     fn uncalibrated_port_produces_m1_master_recommendation_when_local_better_than_foreign() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::gm_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let parent_port = PortIdentity::fake();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
+        let setup =
+            UncalibratedPortTestSetup::new(DefaultDS::gm_grade_test_clock(), StepsRemoved::new(0));
 
-        let mut uncalibrated = UncalibratedPort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(parent_port),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let parent_port = PortIdentity::fake();
+        let mut uncalibrated = setup.port_under_test(parent_port, &[]);
 
         let foreign_clock = ForeignClockDS::mid_grade_test_clock();
         let foreign_port = PortIdentity::new(
@@ -470,7 +413,7 @@ mod tests {
         );
 
         // First announce qualifies the foreign record but yields no decision yet.
-        let _ = uncalibrated.process_announce(
+        let decision = uncalibrated.process_announce(
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
@@ -480,6 +423,7 @@ mod tests {
             foreign_port,
             Instant::from_secs(0),
         );
+        assert!(decision.is_none());
 
         // Second announce from the same foreign clock drives BMCA to a Master(M1) decision.
         let decision = uncalibrated.process_announce(
@@ -504,41 +448,11 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_produces_m2_master_recommendation_when_non_gm_local_better_than_foreign() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let parent_port = PortIdentity::fake();
-        let domain_port = DomainPort::new(
-            &local_clock,
-            FakePort::new(),
-            FakeTimerHost::new(),
-            FakeTimestamping::new(),
-            DomainNumber::new(0),
-            PortNumber::new(1),
-        );
-        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
-            domain_port.timeout(SystemMessage::AnnounceReceiptTimeout),
-            Duration::from_secs(5),
-        );
+        let setup =
+            UncalibratedPortTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
 
-        let mut uncalibrated = UncalibratedPort::new(
-            domain_port,
-            ParentTrackingBmca::new(
-                IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                ParentPortIdentity::new(parent_port),
-            ),
-            announce_receipt_timeout,
-            EndToEndDelayMechanism::new(DelayCycle::new(
-                0.into(),
-                FakeTimeout::new(SystemMessage::DelayRequestTimeout),
-                LogInterval::new(0),
-            )),
-            NoopPortLog,
-            PortProfile::default(),
-        );
+        let parent_port = PortIdentity::fake();
+        let mut uncalibrated = setup.port_under_test(parent_port, &[]);
 
         let foreign_clock = ForeignClockDS::low_grade_test_clock();
         let foreign_port = PortIdentity::new(
@@ -546,7 +460,7 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let _ = uncalibrated.process_announce(
+        let decision = uncalibrated.process_announce(
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
@@ -556,6 +470,7 @@ mod tests {
             foreign_port,
             Instant::from_secs(0),
         );
+        assert!(decision.is_none());
 
         let decision = uncalibrated.process_announce(
             AnnounceMessage::new(
