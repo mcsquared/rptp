@@ -73,10 +73,10 @@ async fn main() -> std::io::Result<()> {
         let mut buf = [0; 1024];
         loop {
             let size = socket.recv(&mut buf).await.unwrap();
-            if let Ok(message) = std::str::from_utf8(&buf[..size]) {
-                if message == "accept" {
-                    break;
-                }
+            if let Ok(message) = std::str::from_utf8(&buf[..size])
+                && message == "accept"
+            {
+                break;
             }
         }
     };
