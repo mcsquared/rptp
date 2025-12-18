@@ -18,9 +18,11 @@
 use core::cell::Cell;
 use core::ops::Range;
 
-use crate::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
+use crate::clock::{
+    ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock, TimeScale,
+};
 use crate::log::PortLog;
-use crate::message::{AnnounceMessage, SequenceId, TimeScale};
+use crate::message::{AnnounceMessage, SequenceId};
 use crate::port::{ParentPortIdentity, Port, PortIdentity};
 use crate::portstate::PortState;
 use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
@@ -760,7 +762,6 @@ pub struct DefaultDS {
     priority1: Priority1,
     priority2: Priority2,
     quality: ClockQuality,
-    timescale: TimeScale,
 }
 
 impl DefaultDS {
@@ -770,14 +771,12 @@ impl DefaultDS {
         priority1: Priority1,
         priority2: Priority2,
         quality: ClockQuality,
-        timescale: TimeScale,
     ) -> Self {
         Self {
             identity,
             priority1,
             priority2,
             quality,
-            timescale,
         }
     }
 
@@ -815,6 +814,7 @@ impl DefaultDS {
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
         steps_removed: StepsRemoved,
+        timescale: TimeScale,
     ) -> AnnounceMessage {
         AnnounceMessage::new(
             sequence_id,
@@ -826,7 +826,7 @@ impl DefaultDS {
                 self.quality,
                 steps_removed,
             ),
-            self.timescale,
+            timescale,
         )
     }
 }
@@ -1117,7 +1117,6 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_HIGH,
-                TimeScale::Ptp,
             )
         }
 
@@ -1127,7 +1126,6 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_MID,
-                TimeScale::Ptp,
             )
         }
 
@@ -1137,7 +1135,6 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_LOW,
-                TimeScale::Ptp,
             )
         }
 
@@ -1147,7 +1144,6 @@ pub(crate) mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 CLK_QUALITY_GM,
-                TimeScale::Ptp,
             )
         }
     }

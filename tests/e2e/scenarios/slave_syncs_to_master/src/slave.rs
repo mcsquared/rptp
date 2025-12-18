@@ -6,9 +6,10 @@ use tokio::time::{Duration, timeout};
 
 use rptp::{
     bmca::{DefaultDS, Priority1, Priority2},
-    clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved},
+    clock::{
+        ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, TimeScale,
+    },
     log::NOOP_CLOCK_METRICS,
-    message::TimeScale,
     port::{DomainNumber, PortNumber, SingleDomainPortMap},
     servo::{Servo, SteppingServo},
     test_support::FakeClock,
@@ -25,7 +26,7 @@ async fn main() -> std::io::Result<()> {
 
     let domain = DomainNumber::new(0);
 
-    let fake_clock = FakeClock::new(TimeStamp::new(0, 0));
+    let fake_clock = FakeClock::new(TimeStamp::new(0, 0), TimeScale::Ptp);
     let local_clock = LocalClock::new(
         &fake_clock,
         DefaultDS::new(
@@ -33,7 +34,6 @@ async fn main() -> std::io::Result<()> {
             Priority1::new(250),
             Priority2::new(255),
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within10ms, 0xFFFF),
-            TimeScale::Ptp,
         ),
         StepsRemoved::new(0),
         Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -42,8 +42,7 @@ async fn main() -> std::io::Result<()> {
     let general_socket = Rc::new(MulticastSocket::general().await?);
 
     let (system_tx, system_rx) = mpsc::unbounded_channel();
-    let ordinary_clock =
-        OrdinaryTokioClock::new(&local_clock, domain, PortNumber::new(1));
+    let ordinary_clock = OrdinaryTokioClock::new(&local_clock, domain, PortNumber::new(1));
 
     let port = ordinary_clock.port(
         event_socket.clone(),

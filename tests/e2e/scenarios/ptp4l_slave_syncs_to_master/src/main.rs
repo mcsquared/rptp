@@ -6,9 +6,10 @@ use tokio::time::{Duration, timeout};
 
 use rptp::{
     bmca::{DefaultDS, Priority1, Priority2},
-    clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved},
+    clock::{
+        ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, TimeScale,
+    },
     log::NOOP_CLOCK_METRICS,
-    message::TimeScale,
     port::{DomainNumber, PortNumber, SingleDomainPortMap},
     servo::{Servo, SteppingServo},
     time::TimeStamp,
@@ -33,7 +34,7 @@ async fn main() -> std::io::Result<()> {
     let now_secs = now.as_secs() + TAI_MINUS_UTC_SECONDS;
     let now_nanos = now.subsec_nanos();
 
-    let virtual_clock = VirtualClock::new(TimeStamp::new(now_secs, now_nanos), 1.0);
+    let virtual_clock = VirtualClock::new(TimeStamp::new(now_secs, now_nanos), 1.0, TimeScale::Ptp);
     let local_clock = LocalClock::new(
         &virtual_clock,
         DefaultDS::new(
@@ -41,7 +42,6 @@ async fn main() -> std::io::Result<()> {
             Priority1::new(100),
             Priority2::new(127),
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within10ms, 0xFFFF),
-            TimeScale::Ptp,
         ),
         StepsRemoved::new(0),
         Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -50,8 +50,7 @@ async fn main() -> std::io::Result<()> {
     let general_socket = Rc::new(MulticastSocket::general().await?);
 
     let (system_tx, system_rx) = mpsc::unbounded_channel();
-    let ordinary_clock =
-        OrdinaryTokioClock::new(&local_clock, domain, PortNumber::new(1));
+    let ordinary_clock = OrdinaryTokioClock::new(&local_clock, domain, PortNumber::new(1));
 
     let port = ordinary_clock.port(
         event_socket.clone(),
@@ -76,7 +75,7 @@ async fn main() -> std::io::Result<()> {
 
     tracing::info!("Master ready");
 
-    let result = timeout(
+    timeout(
         Duration::from_secs(60),
         ports_loop.run_until(std::future::pending::<()>()),
     )
@@ -86,7 +85,5 @@ async fn main() -> std::io::Result<()> {
             std::io::ErrorKind::TimedOut,
             "Slave node timed out before clock sync",
         )
-    })?;
-
-    result
+    })?
 }

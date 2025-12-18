@@ -11,9 +11,10 @@ use tokio::sync::mpsc;
 
 use rptp::{
     bmca::{DefaultDS, Priority1, Priority2},
-    clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved},
+    clock::{
+        ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, TimeScale,
+    },
     log::NOOP_CLOCK_METRICS,
-    message::TimeScale,
     port::{DomainNumber, PortNumber, SingleDomainPortMap},
     servo::{Servo, SteppingServo},
     time::TimeStamp,
@@ -29,7 +30,7 @@ use crate::virtualclock::VirtualClock;
 async fn main() -> std::io::Result<()> {
     rptp_daemon::init_tracing();
 
-    let virtual_clock = VirtualClock::new(TimeStamp::new(0, 0), 1.0);
+    let virtual_clock = VirtualClock::new(TimeStamp::new(0, 0), 1.0, TimeScale::Ptp);
     let local_clock = LocalClock::new(
         &virtual_clock,
         DefaultDS::new(
@@ -37,7 +38,6 @@ async fn main() -> std::io::Result<()> {
             Priority1::new(127),
             Priority2::new(127),
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-            TimeScale::Ptp,
         ),
         StepsRemoved::new(0),
         Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),

@@ -492,9 +492,11 @@ mod tests {
     use super::*;
 
     use crate::bmca::{ForeignClockDS, Priority1, Priority2};
-    use crate::clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved};
+    use crate::clock::{
+        ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved, TimeScale,
+    };
     use crate::message::{
-        AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage, TimeScale,
+        AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
         TwoStepSyncMessage,
     };
     use crate::port::{PortIdentity, PortNumber};

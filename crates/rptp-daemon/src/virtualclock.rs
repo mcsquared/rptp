@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::time::Instant as StdInstant;
 
 use rptp::{
-    clock::{Clock, SynchronizableClock},
+    clock::{Clock, SynchronizableClock, TimeScale},
     time::{TimeInterval, TimeStamp},
 };
 
@@ -10,14 +10,16 @@ pub struct VirtualClock {
     start: RefCell<StdInstant>,
     ts: RefCell<TimeStamp>,
     rate: RefCell<f64>,
+    time_scale: TimeScale,
 }
 
 impl VirtualClock {
-    pub fn new(start_ts: TimeStamp, rate: f64) -> Self {
+    pub fn new(start_ts: TimeStamp, rate: f64, time_scale: TimeScale) -> Self {
         Self {
             start: RefCell::new(StdInstant::now()),
             ts: RefCell::new(start_ts),
             rate: RefCell::new(rate),
+            time_scale,
         }
     }
 }
@@ -33,11 +35,19 @@ impl Clock for VirtualClock {
         base.checked_add(TimeInterval::new(dt_secs, dt_rem_nanos))
             .unwrap_or(base)
     }
+
+    fn time_scale(&self) -> TimeScale {
+        self.time_scale
+    }
 }
 
 impl Clock for &VirtualClock {
     fn now(&self) -> TimeStamp {
         (*self).now()
+    }
+
+    fn time_scale(&self) -> TimeScale {
+        (*self).time_scale()
     }
 }
 
@@ -71,7 +81,7 @@ mod tests {
 
     #[test]
     fn virtual_clock_is_monotonic_for_fixed_rate() {
-        let clock = VirtualClock::new(TimeStamp::new(1, 0), 1.0);
+        let clock = VirtualClock::new(TimeStamp::new(1, 0), 1.0, TimeScale::Arb);
 
         let t1 = clock.now();
         let t2 = clock.now();
@@ -81,7 +91,7 @@ mod tests {
 
     #[test]
     fn virtual_clock_does_not_go_backwards_on_adjust() {
-        let clock = VirtualClock::new(TimeStamp::new(1, 0), 1.0);
+        let clock = VirtualClock::new(TimeStamp::new(1, 0), 1.0, TimeScale::Arb);
 
         let t1 = clock.now();
         clock.adjust(0.5);
@@ -92,7 +102,7 @@ mod tests {
 
     #[test]
     fn virtual_clock_step_sets_lower_bound() {
-        let clock = VirtualClock::new(TimeStamp::new(0, 0), 1.0);
+        let clock = VirtualClock::new(TimeStamp::new(0, 0), 1.0, TimeScale::Arb);
 
         clock.step(TimeStamp::new(5, 0));
         let t = clock.now();

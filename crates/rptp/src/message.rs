@@ -1,5 +1,6 @@
 use crate::{
     bmca::{Bmca, ForeignClockDS},
+    clock::TimeScale,
     port::{PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Instant, LogMessageInterval, TimeInterval, TimeStamp},
@@ -241,12 +242,6 @@ impl TryFrom<&[u8]> for SequenceId {
         );
         Ok(Self::new(id))
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TimeScale {
-    Ptp,
-    Arb,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn calibration_locks_after_spaced_samples() {
-        let clock = FakeClock::new(TimeStamp::new(0, 0));
+        let clock = FakeClock::default();
         let servo = PiServo::new(
             StepPolicy::new(
                 ServoThreshold::new(TimeInterval::new(10, 0)),
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn step_resets_drift_estimate() {
-        let clock = FakeClock::new(TimeStamp::new(0, 0));
+        let clock = FakeClock::default();
         let servo = PiServo::new(
             StepPolicy::new(
                 ServoThreshold::new(TimeInterval::new(1, 0)),
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn pi_servo_reaches_locked_and_runs_pi_loop() {
-        let clock = FakeClock::new(TimeStamp::new(0, 0));
+        let clock = FakeClock::default();
         let servo = PiServo::new(
             StepPolicy::new(
                 ServoThreshold::new(TimeInterval::new(10, 0)),
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn calibration_ignores_samples_without_minimum_delta() {
-        let clock = FakeClock::new(TimeStamp::new(0, 0));
+        let clock = FakeClock::default();
         let servo = PiServo::new(
             StepPolicy::new(
                 ServoThreshold::new(TimeInterval::new(10, 0)),
@@ -537,7 +537,7 @@ mod tests {
 
     #[test]
     fn drift_estimate_is_clamped_to_bounds() {
-        let clock = FakeClock::new(TimeStamp::new(0, 0));
+        let clock = FakeClock::default();
         let servo = PiServo::new(
             StepPolicy::new(
                 ServoThreshold::new(TimeInterval::new(100, 0)),
@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn pi_loop_integral_resets_after_step() {
-        let clock = FakeClock::new(TimeStamp::new(0, 0));
+        let clock = FakeClock::default();
         let servo = PiServo::new(
             StepPolicy::new(
                 ServoThreshold::new(TimeInterval::new(1, 0)),
@@ -633,7 +633,7 @@ mod tests {
 
     #[test]
     fn calibration_rejects_non_increasing_ingress() {
-        let clock = FakeClock::new(TimeStamp::new(0, 0));
+        let clock = FakeClock::default();
         let servo = PiServo::new(
             StepPolicy::new(
                 ServoThreshold::new(TimeInterval::new(100, 0)),
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn pi_loop_accumulates_over_multiple_locked_samples() {
-        let clock = FakeClock::new(TimeStamp::new(0, 0));
+        let clock = FakeClock::default();
         let servo = PiServo::new(
             StepPolicy::new(
                 ServoThreshold::new(TimeInterval::new(100, 0)),
@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn calibration_waits_until_min_interval_before_locking() {
-        let clock = FakeClock::new(TimeStamp::new(0, 0));
+        let clock = FakeClock::default();
         let servo = PiServo::new(
             StepPolicy::new(
                 ServoThreshold::new(TimeInterval::new(100, 0)),

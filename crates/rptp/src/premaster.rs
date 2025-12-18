@@ -80,10 +80,10 @@ mod tests {
     use super::*;
 
     use crate::bmca::{DefaultDS, ForeignClockRecord, IncrementalBmca};
-    use crate::clock::{LocalClock, StepsRemoved};
+    use crate::clock::{LocalClock, StepsRemoved, TimeScale};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
-    use crate::message::{SystemMessage, TimeScale};
+    use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
     use crate::portstate::StateDecision;

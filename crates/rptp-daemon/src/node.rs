@@ -320,12 +320,12 @@ mod tests {
         },
         clock::{
             ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
-            SynchronizableClock,
+            SynchronizableClock, TimeScale,
         },
         e2e::{DelayCycle, EndToEndDelayMechanism},
         infra::infra_support::SortedForeignClockRecordsVec,
         log::NOOP_CLOCK_METRICS,
-        message::{EventMessage, GeneralMessage, TimeScale},
+        message::{EventMessage, GeneralMessage},
         port::{DomainPort, ParentPortIdentity, PortIdentity, PortNumber, SingleDomainPortMap},
         portstate::{PortProfile, PortState},
         servo::{Servo, SteppingServo},
@@ -511,7 +511,7 @@ mod tests {
 
         let domain_number = DomainNumber::new(0);
 
-        let virtual_clock = VirtualClock::new(TimeStamp::new(0, 0), 1.0);
+        let virtual_clock = VirtualClock::new(TimeStamp::new(0, 0), 1.0, TimeScale::Arb);
         let local_clock = LocalClock::new(
             &virtual_clock,
             DefaultDS::new(
@@ -519,7 +519,6 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -610,7 +609,6 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -703,7 +701,6 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -739,7 +736,6 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -772,7 +768,6 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -806,7 +801,6 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
@@ -842,7 +836,6 @@ mod tests {
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                TimeScale::Ptp,
             ),
             StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),

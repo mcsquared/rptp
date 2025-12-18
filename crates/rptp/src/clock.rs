@@ -4,7 +4,7 @@ use core::ops::Range;
 
 use crate::{
     bmca::{DefaultDS, ForeignClockDS},
-    message::{AnnounceMessage, SequenceId, TimeScale},
+    message::{AnnounceMessage, SequenceId},
     servo::{Servo, ServoSample, ServoState},
     time::{LogMessageInterval, TimeStamp},
 };
@@ -307,6 +307,7 @@ impl PartialOrd for ClockQuality {
 
 pub trait Clock {
     fn now(&self) -> TimeStamp;
+    fn time_scale(&self) -> TimeScale;
 }
 
 pub trait SynchronizableClock: Clock {
@@ -353,8 +354,12 @@ impl<C: SynchronizableClock> LocalClock<C> {
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
     ) -> AnnounceMessage {
-        self.default_ds
-            .announce(sequence_id, log_message_interval, self.steps_removed.get())
+        self.default_ds.announce(
+            sequence_id,
+            log_message_interval,
+            self.steps_removed.get(),
+            self.clock.time_scale(),
+        )
     }
 
     pub(crate) fn is_grandmaster_capable(&self) -> bool {
@@ -368,12 +373,6 @@ impl<C: SynchronizableClock> LocalClock<C> {
 
     pub(crate) fn discipline(&self, sample: ServoSample) -> ServoState {
         self.servo.feed(&self.clock, sample)
-    }
-}
-
-impl<C: SynchronizableClock> Clock for LocalClock<C> {
-    fn now(&self) -> TimeStamp {
-        self.clock.now()
     }
 }
 
@@ -397,3 +396,10 @@ impl StepsRemoved {
         self.0.to_be_bytes()
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeScale {
+    Ptp,
+    Arb,
+}
+

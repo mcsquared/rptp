@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use crate::clock::{Clock, ClockIdentity, SynchronizableClock};
+use crate::clock::{Clock, ClockIdentity, SynchronizableClock, TimeScale};
 use crate::port::{
     PhysicalPort, PortIdentity, PortNumber, SendError, SendResult, Timeout, TimerHost,
 };
@@ -17,13 +17,15 @@ use crate::time::Duration;
 
 pub struct FakeClock {
     now: Cell<TimeStamp>,
+    time_scale: TimeScale,
     last_adjust: Cell<Option<f64>>,
 }
 
 impl FakeClock {
-    pub fn new(now: TimeStamp) -> Self {
+    pub fn new(now: TimeStamp, time_scale: TimeScale) -> Self {
         Self {
             now: Cell::new(now),
+            time_scale,
             last_adjust: Cell::new(None),
         }
     }
@@ -35,7 +37,7 @@ impl FakeClock {
 
 impl Default for FakeClock {
     fn default() -> Self {
-        Self::new(TimeStamp::new(0, 0))
+        Self::new(TimeStamp::new(0, 0), TimeScale::Ptp)
     }
 }
 
@@ -43,11 +45,19 @@ impl Clock for FakeClock {
     fn now(&self) -> TimeStamp {
         self.now.get()
     }
+
+    fn time_scale(&self) -> TimeScale {
+        self.time_scale
+    }
 }
 
 impl Clock for &FakeClock {
     fn now(&self) -> TimeStamp {
         (*self).now()
+    }
+
+    fn time_scale(&self) -> TimeScale {
+        (*self).time_scale()
     }
 }
 
@@ -74,6 +84,10 @@ impl SynchronizableClock for &FakeClock {
 impl Clock for Rc<FakeClock> {
     fn now(&self) -> TimeStamp {
         self.as_ref().now()
+    }
+
+    fn time_scale(&self) -> TimeScale {
+        self.as_ref().time_scale()
     }
 }
 

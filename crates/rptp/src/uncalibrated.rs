@@ -214,11 +214,11 @@ mod tests {
         BmcaMasterDecision, BmcaMasterDecisionPoint, DefaultDS, ForeignClockDS, ForeignClockRecord,
         IncrementalBmca,
     };
-    use crate::clock::{ClockIdentity, LocalClock, StepsRemoved};
+    use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::e2e::DelayCycle;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
-    use crate::message::{DelayRequestMessage, DelayResponseMessage, SystemMessage, TimeScale};
+    use crate::message::{DelayRequestMessage, DelayResponseMessage, SystemMessage};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};

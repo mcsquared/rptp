@@ -14,11 +14,11 @@ use rptp::{
     bmca::{DefaultDS, Priority1, Priority2},
     clock::{
         Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
-        SynchronizableClock,
+        SynchronizableClock, TimeScale,
     },
     heapless::HeaplessSortedForeignClockRecords,
     log::{NOOP_CLOCK_METRICS, PortEvent, PortLog},
-    message::{EventMessage, MessageIngress, SystemMessage, TimeScale, TimestampMessage},
+    message::{EventMessage, MessageIngress, SystemMessage, TimestampMessage},
     ordinary::OrdinaryClock,
     port::{
         DomainNumber, PhysicalPort, PortMap, PortNumber, SendResult, SingleDomainPortMap, Timeout,
@@ -231,11 +231,19 @@ impl Clock for CycleClock {
         );
         self.time.get()
     }
+
+    fn time_scale(&self) -> TimeScale {
+        TimeScale::Ptp
+    }
 }
 
 impl Clock for &CycleClock {
     fn now(&self) -> TimeStamp {
         (*self).now()
+    }
+
+    fn time_scale(&self) -> TimeScale {
+        (*self).time_scale()
     }
 }
 
@@ -430,7 +438,6 @@ fn demo_default_ds() -> DefaultDS {
         Priority1::new(100),
         Priority2::new(127),
         ClockQuality::new(ClockClass::Default, ClockAccuracy::Within10ms, 0xFFFF),
-        TimeScale::Ptp,
     )
 }
 

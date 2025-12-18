@@ -213,11 +213,11 @@ mod tests {
     use super::*;
 
     use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, IncrementalBmca};
-    use crate::clock::{ClockIdentity, LocalClock, StepsRemoved};
+    use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::e2e::DelayCycle;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
-    use crate::message::{SystemMessage, TimeScale};
+    use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
@@ -246,7 +246,7 @@ mod tests {
         fn new_with_ds(default_ds: DefaultDS) -> Self {
             Self {
                 local_clock: LocalClock::new(
-                    FakeClock::new(TimeStamp::new(0, 0)),
+                    FakeClock::default(),
                     default_ds,
                     StepsRemoved::new(0),
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
