@@ -319,7 +319,7 @@ mod tests {
             Priority2,
         },
         clock::{
-            ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
+            ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock,
             SynchronizableClock, TimeScale,
         },
         e2e::{DelayCycle, EndToEndDelayMechanism},
@@ -520,7 +520,6 @@ mod tests {
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             ),
-            StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -610,7 +609,6 @@ mod tests {
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             ),
-            StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -702,7 +700,6 @@ mod tests {
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             ),
-            StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -737,7 +734,6 @@ mod tests {
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             ),
-            StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -769,7 +765,6 @@ mod tests {
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             ),
-            StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -802,7 +797,6 @@ mod tests {
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             ),
-            StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -837,7 +831,6 @@ mod tests {
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             ),
-            StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 

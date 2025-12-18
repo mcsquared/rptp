@@ -88,7 +88,9 @@ mod tests {
     use crate::portstate::PortState;
     use crate::portstate::StateDecision;
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
+    use crate::test_support::{
+        FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockCatalog,
+    };
     use crate::time::{Instant, LogMessageInterval};
 
     type PreMasterTestDomainPort<'a> =
@@ -112,7 +114,6 @@ mod tests {
                 local_clock: LocalClock::new(
                     FakeClock::default(),
                     default_ds,
-                    StepsRemoved::new(0),
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
                 physical_port: FakePort::new(),
@@ -146,7 +147,7 @@ mod tests {
 
     #[test]
     fn pre_master_port_test_setup_is_side_effect_free() {
-        let setup = PreMasterPortTestSetup::new(DefaultDS::low_grade_test_clock());
+        let setup = PreMasterPortTestSetup::new(TestClockCatalog::default_low_grade().default_ds());
 
         let _pre_master = setup.port_under_test(&[]);
 
@@ -156,7 +157,8 @@ mod tests {
 
     #[test]
     fn pre_master_port_to_master_on_qualified() {
-        let setup = PreMasterPortTestSetup::new(DefaultDS::high_grade_test_clock());
+        let setup =
+            PreMasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
 
         let pre_master = setup.port_under_test(&[]);
 
@@ -167,15 +169,15 @@ mod tests {
 
     #[test]
     fn pre_master_port_produces_slave_recommendation_on_two_better_announces() {
-        use crate::bmca::{BmcaSlaveDecision, ForeignClockDS};
-        use crate::clock::ClockIdentity;
+        use crate::bmca::BmcaSlaveDecision;
         use crate::message::AnnounceMessage;
         use crate::port::{ParentPortIdentity, PortIdentity, PortNumber};
 
-        let setup = PreMasterPortTestSetup::new(DefaultDS::low_grade_test_clock());
+        let setup = PreMasterPortTestSetup::new(TestClockCatalog::default_low_grade().default_ds());
 
+        let foreign_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
         let better_port = PortIdentity::new(
-            ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            TestClockCatalog::default_high_grade().clock_identity(),
             PortNumber::new(1),
         );
         let mut pre_master = setup.port_under_test(&[]);
@@ -185,7 +187,7 @@ mod tests {
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
-                ForeignClockDS::high_grade_test_clock(),
+                foreign_clock,
                 TimeScale::Ptp,
             ),
             better_port,
@@ -198,7 +200,7 @@ mod tests {
             AnnounceMessage::new(
                 43.into(),
                 LogMessageInterval::new(0),
-                ForeignClockDS::high_grade_test_clock(),
+                foreign_clock,
                 TimeScale::Ptp,
             ),
             better_port,

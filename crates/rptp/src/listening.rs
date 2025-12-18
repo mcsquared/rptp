@@ -92,14 +92,16 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{BmcaMasterDecisionPoint, DefaultDS, ForeignClockDS, IncrementalBmca};
+    use crate::bmca::{BmcaMasterDecisionPoint, DefaultDS, IncrementalBmca};
     use crate::clock::{LocalClock, StepsRemoved, TimeScale};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
+    use crate::test_support::{
+        FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockCatalog,
+    };
     use crate::time::{Duration, Instant, LogMessageInterval};
 
     type ListeningTestDomainPort<'a> =
@@ -118,12 +120,11 @@ mod tests {
     }
 
     impl ListeningPortTestSetup {
-        fn new(default_ds: DefaultDS, steps_removed: StepsRemoved) -> Self {
+        fn new(default_ds: DefaultDS) -> Self {
             Self {
                 local_clock: LocalClock::new(
                     FakeClock::default(),
                     default_ds,
-                    steps_removed,
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
                 physical_port: FakePort::new(),
@@ -159,7 +160,7 @@ mod tests {
     #[test]
     fn listening_port_test_setup_is_side_effect_free() {
         let setup =
-            ListeningPortTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
+            ListeningPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
 
         let _listening = setup.port_under_test();
 
@@ -170,7 +171,7 @@ mod tests {
     #[test]
     fn listening_port_to_master_transition_on_announce_receipt_timeout() {
         let setup =
-            ListeningPortTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
+            ListeningPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
 
         let listening = setup.port_under_test();
 
@@ -181,12 +182,11 @@ mod tests {
 
     #[test]
     fn listening_port_stays_in_listening_on_single_announce() {
-        let setup =
-            ListeningPortTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
+        let setup = ListeningPortTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
 
         let mut listening = setup.port_under_test();
 
-        let foreign_clock = ForeignClockDS::mid_grade_test_clock();
+        let foreign_clock = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
 
         let decision = listening.process_announce(
             AnnounceMessage::new(
@@ -208,11 +208,11 @@ mod tests {
     #[test]
     fn listening_port_recommends_master_on_two_announces() {
         let setup =
-            ListeningPortTestSetup::new(DefaultDS::high_grade_test_clock(), StepsRemoved::new(0));
+            ListeningPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
 
         let mut listening = setup.port_under_test();
 
-        let foreign_clock = ForeignClockDS::mid_grade_test_clock();
+        let foreign_clock = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
 
         let decision = listening.process_announce(
             AnnounceMessage::new(
@@ -247,12 +247,11 @@ mod tests {
 
     #[test]
     fn listening_port_recommends_slave_on_two_announces() {
-        let setup =
-            ListeningPortTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(0));
+        let setup = ListeningPortTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
 
         let mut listening = setup.port_under_test();
 
-        let foreign_clock = ForeignClockDS::high_grade_test_clock();
+        let foreign_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
 
         let decision = listening.process_announce(
             AnnounceMessage::new(
@@ -285,12 +284,11 @@ mod tests {
 
     #[test]
     fn listening_port_updates_steps_removed_on_m1_master_recommendation() {
-        let setup =
-            ListeningPortTestSetup::new(DefaultDS::gm_grade_test_clock(), StepsRemoved::new(5));
+        let setup = ListeningPortTestSetup::new(TestClockCatalog::gps_grandmaster().default_ds());
 
         let mut listening = setup.port_under_test();
 
-        let foreign_clock = ForeignClockDS::mid_grade_test_clock();
+        let foreign_clock = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
 
         let _ = listening.process_announce(
             AnnounceMessage::new(
@@ -331,12 +329,12 @@ mod tests {
 
     #[test]
     fn listening_port_updates_steps_removed_on_m2_master_recommendation() {
-        let setup =
-            ListeningPortTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(5));
+        let setup = ListeningPortTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
 
         let mut listening = setup.port_under_test();
 
-        let foreign_clock = ForeignClockDS::low_grade_test_clock();
+        let foreign_clock =
+            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
 
         let _ = listening.process_announce(
             AnnounceMessage::new(
@@ -377,12 +375,11 @@ mod tests {
 
     #[test]
     fn listening_port_updates_steps_removed_on_s1_slave_recommendation() {
-        let setup =
-            ListeningPortTestSetup::new(DefaultDS::mid_grade_test_clock(), StepsRemoved::new(5));
+        let setup = ListeningPortTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
 
         let mut listening = setup.port_under_test();
 
-        let foreign_clock = ForeignClockDS::high_grade_test_clock();
+        let foreign_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
         let expected_steps_removed = foreign_clock.steps_removed().increment();
 
         setup.timer_host.take_system_messages();

@@ -356,7 +356,7 @@ mod tests {
     use std::rc::Rc;
 
     use crate::bmca::{DefaultDS, Priority1, Priority2};
-    use crate::clock::{ClockAccuracy, ClockClass, ClockQuality, StepsRemoved};
+    use crate::clock::{ClockAccuracy, ClockClass, ClockQuality};
     use crate::log::NOOP_CLOCK_METRICS;
     use crate::message::{DelayRequestMessage, FollowUpMessage};
     use crate::servo::{Servo, SteppingServo};
@@ -396,7 +396,6 @@ mod tests {
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within100us, 0xFFFF),
             ),
-            StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let (cap_port, sent) = CapturePort::new();
@@ -438,7 +437,6 @@ mod tests {
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within100us, 0xFFFF),
             ),
-            StepsRemoved::new(0),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let (cap_port, sent) = CapturePort::new();

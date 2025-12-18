@@ -11,9 +11,7 @@ use tokio::sync::mpsc;
 
 use rptp::{
     bmca::{DefaultDS, Priority1, Priority2},
-    clock::{
-        ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, TimeScale,
-    },
+    clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
     log::NOOP_CLOCK_METRICS,
     port::{DomainNumber, PortNumber, SingleDomainPortMap},
     servo::{Servo, SteppingServo},
@@ -39,7 +37,6 @@ async fn main() -> std::io::Result<()> {
             Priority2::new(127),
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
         ),
-        StepsRemoved::new(0),
         Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
     );
 

@@ -151,18 +151,21 @@ pub mod infra_support {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use crate::bmca::ForeignClockDS;
         use crate::clock::ClockIdentity;
+        use crate::clock::StepsRemoved;
         use crate::port::{PortIdentity, PortNumber};
+        use crate::test_support::TestClockCatalog;
         use crate::time::{Instant, LogInterval};
 
         #[test]
         fn sorted_foreign_vec_maintains_best_record_first() {
             let mut records = SortedForeignClockRecordsVec::new();
 
-            let high_clock = ForeignClockDS::high_grade_test_clock();
-            let mid_clock = ForeignClockDS::mid_grade_test_clock();
-            let low_clock = ForeignClockDS::low_grade_test_clock();
+            let high_clock =
+                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+            let mid_clock = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
+            let low_clock =
+                TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
 
             let high_port_id = PortIdentity::new(
                 ClockIdentity::new(&[0, 1, 2, 3, 4, 5, 6, 1]),
@@ -212,7 +215,8 @@ pub mod infra_support {
 
         #[test]
         fn sorted_foreign_vec_prune_stale_returns_true_when_records_removed() {
-            let high_clock = ForeignClockDS::high_grade_test_clock();
+            let high_clock =
+                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
             let high_port_id = PortIdentity::new(
                 ClockIdentity::new(&[0, 1, 2, 3, 4, 5, 6, 9]),
                 PortNumber::new(1),
@@ -235,7 +239,8 @@ pub mod infra_support {
 
         #[test]
         fn sorted_foreign_vec_prune_stale_returns_false_when_no_records_are_stale() {
-            let high_clock = ForeignClockDS::high_grade_test_clock();
+            let high_clock =
+                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
             let high_port_id = PortIdentity::new(
                 ClockIdentity::new(&[0, 1, 2, 3, 4, 5, 6, 10]),
                 PortNumber::new(1),

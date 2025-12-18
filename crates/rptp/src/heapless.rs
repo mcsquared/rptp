@@ -119,9 +119,10 @@ impl RemovalPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bmca::ForeignClockDS;
     use crate::clock::ClockIdentity;
+    use crate::clock::StepsRemoved;
     use crate::port::{PortIdentity, PortNumber};
+    use crate::test_support::TestClockCatalog;
     use crate::time::{Instant, LogInterval};
 
     fn new_port_identity(last_octet: u8) -> PortIdentity {
@@ -133,9 +134,10 @@ mod tests {
 
     #[test]
     fn heapless_maintains_best_record_first() {
-        let high_clock = ForeignClockDS::high_grade_test_clock();
-        let mid_clock = ForeignClockDS::mid_grade_test_clock();
-        let low_clock = ForeignClockDS::low_grade_test_clock();
+        let high_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let mid_clock = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
+        let low_clock =
+            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
 
         let high_port_id = new_port_identity(1);
         let mid_port_id = new_port_identity(2);
@@ -172,9 +174,10 @@ mod tests {
 
     #[test]
     fn heapless_replacement_keeps_best_records_on_overflow() {
-        let high_clock = ForeignClockDS::high_grade_test_clock();
-        let mid_clock = ForeignClockDS::mid_grade_test_clock();
-        let low_clock = ForeignClockDS::low_grade_test_clock();
+        let high_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let mid_clock = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
+        let low_clock =
+            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
 
         let high_port_id = new_port_identity(1);
         let mid_port_id = new_port_identity(2);
@@ -245,9 +248,10 @@ mod tests {
 
     #[test]
     fn heapless_replacement_does_not_replace_when_candidate_is_worse() {
-        let high_clock = ForeignClockDS::high_grade_test_clock();
-        let mid_clock = ForeignClockDS::mid_grade_test_clock();
-        let low_clock = ForeignClockDS::low_grade_test_clock();
+        let high_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let mid_clock = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
+        let low_clock =
+            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
 
         let high_port_id = new_port_identity(1);
         let mid_port_id = new_port_identity(2);
@@ -318,7 +322,7 @@ mod tests {
 
     #[test]
     fn heapless_prune_stale_returns_true_when_records_removed() {
-        let high_clock = ForeignClockDS::high_grade_test_clock();
+        let high_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
         let high_port_id = new_port_identity(1);
 
         let mut records = HeaplessSortedForeignClockRecords::<4>::new();
@@ -342,7 +346,7 @@ mod tests {
 
     #[test]
     fn heapless_prune_stale_returns_false_when_no_records_are_stale() {
-        let high_clock = ForeignClockDS::high_grade_test_clock();
+        let high_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
         let high_port_id = new_port_identity(1);
 
         let mut records = HeaplessSortedForeignClockRecords::<4>::new();

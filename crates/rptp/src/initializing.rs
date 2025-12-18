@@ -32,21 +32,22 @@ impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{DefaultDS, IncrementalBmca};
-    use crate::clock::{LocalClock, StepsRemoved};
+    use crate::bmca::IncrementalBmca;
+    use crate::clock::LocalClock;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping};
+    use crate::test_support::{
+        FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockCatalog,
+    };
 
     #[test]
     fn initializing_port_to_listening_transition() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let initializing = InitializingPort::new(

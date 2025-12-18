@@ -212,7 +212,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{DefaultDS, ForeignClockDS, ForeignClockRecord, IncrementalBmca};
+    use crate::bmca::{BmcaMasterDecisionPoint, DefaultDS, ForeignClockRecord, IncrementalBmca};
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::e2e::DelayCycle;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
@@ -220,7 +220,9 @@ mod tests {
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping};
+    use crate::test_support::{
+        FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping, TestClockCatalog,
+    };
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     type SlaveTestDomainPort<'a> =
@@ -240,7 +242,7 @@ mod tests {
 
     impl SlavePortTestSetup {
         fn new() -> Self {
-            Self::new_with_ds(DefaultDS::mid_grade_test_clock())
+            Self::new_with_ds(TestClockCatalog::default_mid_grade().default_ds())
         }
 
         fn new_with_ds(default_ds: DefaultDS) -> Self {
@@ -248,7 +250,6 @@ mod tests {
                 local_clock: LocalClock::new(
                     FakeClock::default(),
                     default_ds,
-                    StepsRemoved::new(0),
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
                 physical_port: FakePort::new(),
@@ -547,13 +548,15 @@ mod tests {
 
     #[test]
     fn slave_port_produces_no_decision_on_updated_same_parent() {
-        let setup = SlavePortTestSetup::new_with_ds(DefaultDS::low_grade_test_clock());
+        let setup =
+            SlavePortTestSetup::new_with_ds(TestClockCatalog::default_low_grade().default_ds());
 
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
         );
-        let foreign_clock_ds = ForeignClockDS::mid_grade_test_clock();
+        let foreign_clock_ds =
+            TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
         let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
@@ -568,7 +571,7 @@ mod tests {
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
-                ForeignClockDS::high_grade_test_clock(),
+                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
                 TimeScale::Ptp,
             ),
             parent_port,
@@ -581,15 +584,17 @@ mod tests {
 
     #[test]
     fn slave_port_produces_slave_recommendation_with_new_parent() {
-        use crate::bmca::{ForeignClockDS, ForeignClockRecord};
+        use crate::bmca::ForeignClockRecord;
 
-        let setup = SlavePortTestSetup::new_with_ds(DefaultDS::low_grade_test_clock());
+        let setup =
+            SlavePortTestSetup::new_with_ds(TestClockCatalog::default_low_grade().default_ds());
 
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
         );
-        let foreign_clock_ds = ForeignClockDS::mid_grade_test_clock();
+        let foreign_clock_ds =
+            TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
         let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
@@ -608,7 +613,7 @@ mod tests {
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
-                ForeignClockDS::high_grade_test_clock(),
+                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
                 TimeScale::Ptp,
             ),
             new_parent,
@@ -620,7 +625,7 @@ mod tests {
             AnnounceMessage::new(
                 43.into(),
                 LogMessageInterval::new(0),
-                ForeignClockDS::high_grade_test_clock(),
+                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
                 TimeScale::Ptp,
             ),
             new_parent,
@@ -639,13 +644,15 @@ mod tests {
 
     #[test]
     fn slave_port_produces_master_recommendation_on_worse_announces() {
-        let setup = SlavePortTestSetup::new_with_ds(DefaultDS::mid_grade_test_clock());
+        let setup =
+            SlavePortTestSetup::new_with_ds(TestClockCatalog::default_mid_grade().default_ds());
 
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
         );
-        let foreign_clock_ds = ForeignClockDS::high_grade_test_clock();
+        let foreign_clock_ds =
+            TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
         let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
@@ -660,17 +667,20 @@ mod tests {
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
-                ForeignClockDS::low_grade_test_clock(),
+                TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0)),
                 TimeScale::Ptp,
             ),
             parent_port,
             Instant::from_secs(0),
         );
 
-        // expect a master recommendation since local clock is better
-        assert!(matches!(
+        // expect a master M2 recommendation since non-gm local clock is better
+        assert_eq!(
             decision,
-            Some(StateDecision::RecommendedMaster(_))
-        ));
+            Some(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+                BmcaMasterDecisionPoint::M2,
+                StepsRemoved::new(0),
+            )))
+        );
     }
 }

@@ -13,7 +13,7 @@ use panic_halt as _;
 use rptp::{
     bmca::{DefaultDS, Priority1, Priority2},
     clock::{
-        Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
+        Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock,
         SynchronizableClock, TimeScale,
     },
     heapless::HeaplessSortedForeignClockRecords,
@@ -486,7 +486,6 @@ fn main() -> ! {
     let local_clock = LocalClock::new(
         &demo_clock,
         demo_default_ds(),
-        StepsRemoved::new(0),
         Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
     );
 

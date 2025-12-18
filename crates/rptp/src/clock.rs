@@ -323,11 +323,11 @@ pub struct LocalClock<C: SynchronizableClock> {
 }
 
 impl<C: SynchronizableClock> LocalClock<C> {
-    pub fn new(clock: C, default_ds: DefaultDS, steps_removed: StepsRemoved, servo: Servo) -> Self {
+    pub fn new(clock: C, default_ds: DefaultDS, servo: Servo) -> Self {
         Self {
             clock,
             default_ds,
-            steps_removed: Cell::new(steps_removed),
+            steps_removed: Cell::new(StepsRemoved::new(0)),
             servo,
         }
     }
@@ -403,3 +403,32 @@ pub enum TimeScale {
     Arb,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::log::NOOP_CLOCK_METRICS;
+    use crate::servo::SteppingServo;
+    use crate::test_support::{FakeClock, TestClockCatalog};
+
+    #[test]
+    fn local_clock_announces() {
+        let local_clock = LocalClock::new(
+            FakeClock::new(TimeStamp::new(0, 0), TimeScale::Ptp),
+            TestClockCatalog::default_high_grade().default_ds(),
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+        );
+
+        let announce = local_clock.announce(SequenceId::new(1), LogMessageInterval::new(1));
+
+        assert_eq!(
+            announce,
+            AnnounceMessage::new(
+                SequenceId::new(1),
+                LogMessageInterval::new(1),
+                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
+                TimeScale::Ptp,
+            )
+        )
+    }
+}

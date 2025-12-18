@@ -1039,121 +1039,21 @@ impl BmcaRank<'_> {
 pub(crate) mod tests {
     use super::*;
 
-    use crate::clock::{ClockAccuracy, ClockClass};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::NOOP_CLOCK_METRICS;
     use crate::port::PortNumber;
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::FakeClock;
+    use crate::test_support::{FakeClock, TestClockCatalog};
     use crate::time::{Duration, Instant};
-
-    const CLK_ID_HIGH: ClockIdentity =
-        ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]);
-    const CLK_ID_MID: ClockIdentity =
-        ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]);
-    const CLK_ID_LOW: ClockIdentity =
-        ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x03]);
-    const CLK_ID_GM: ClockIdentity =
-        ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x04]);
-
-    const CLK_QUALITY_HIGH: ClockQuality =
-        ClockQuality::new(ClockClass::Default, ClockAccuracy::Within250ns, 0xFFFF);
-    const CLK_QUALITY_MID: ClockQuality =
-        ClockQuality::new(ClockClass::Default, ClockAccuracy::Within100us, 0xFFFF);
-    const CLK_QUALITY_LOW: ClockQuality =
-        ClockQuality::new(ClockClass::SlaveOnly, ClockAccuracy::Within1ms, 0xFFFF);
-    const CLK_QUALITY_GM: ClockQuality = ClockQuality::new(
-        ClockClass::PrimaryReference,
-        ClockAccuracy::Within100ns,
-        0xFFFF,
-    );
-
-    impl ForeignClockDS {
-        pub(crate) fn gm_grade_test_clock() -> ForeignClockDS {
-            ForeignClockDS::new(
-                CLK_ID_GM,
-                Priority1::new(127),
-                Priority2::new(127),
-                CLK_QUALITY_GM,
-                StepsRemoved::new(0),
-            )
-        }
-
-        pub(crate) fn high_grade_test_clock() -> ForeignClockDS {
-            ForeignClockDS::new(
-                CLK_ID_HIGH,
-                Priority1::new(127),
-                Priority2::new(127),
-                CLK_QUALITY_HIGH,
-                StepsRemoved::new(0),
-            )
-        }
-
-        pub(crate) fn mid_grade_test_clock() -> ForeignClockDS {
-            ForeignClockDS::new(
-                CLK_ID_MID,
-                Priority1::new(127),
-                Priority2::new(127),
-                CLK_QUALITY_MID,
-                StepsRemoved::new(0),
-            )
-        }
-
-        pub(crate) fn low_grade_test_clock() -> ForeignClockDS {
-            ForeignClockDS::new(
-                CLK_ID_LOW,
-                Priority1::new(127),
-                Priority2::new(127),
-                CLK_QUALITY_LOW,
-                StepsRemoved::new(0),
-            )
-        }
-    }
-
-    impl DefaultDS {
-        pub(crate) fn high_grade_test_clock() -> DefaultDS {
-            DefaultDS::new(
-                CLK_ID_HIGH,
-                Priority1::new(127),
-                Priority2::new(127),
-                CLK_QUALITY_HIGH,
-            )
-        }
-
-        pub(crate) fn mid_grade_test_clock() -> DefaultDS {
-            DefaultDS::new(
-                CLK_ID_MID,
-                Priority1::new(127),
-                Priority2::new(127),
-                CLK_QUALITY_MID,
-            )
-        }
-
-        pub(crate) fn low_grade_test_clock() -> DefaultDS {
-            DefaultDS::new(
-                CLK_ID_LOW,
-                Priority1::new(127),
-                Priority2::new(127),
-                CLK_QUALITY_LOW,
-            )
-        }
-
-        pub(crate) fn gm_grade_test_clock() -> DefaultDS {
-            DefaultDS::new(
-                CLK_ID_GM,
-                Priority1::new(127),
-                Priority2::new(127),
-                CLK_QUALITY_GM,
-            )
-        }
-    }
 
     #[test]
     fn sliding_window_qualification_requires_two_fast_announces() {
         let t0 = Instant::from_secs(0);
+        let high = TestClockCatalog::default_high_grade();
+        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
         let mut record = ForeignClockRecord::new(
-            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
-            ForeignClockDS::high_grade_test_clock(),
+            PortIdentity::new(high.clock_identity(), PortNumber::new(1)),
+            foreign_high,
             LogInterval::new(0),
             t0,
         );
@@ -1162,130 +1062,99 @@ pub(crate) mod tests {
         assert!(record.dataset().is_none());
 
         // Second Announce within the window makes it qualified.
-        record.consider(
-            ForeignClockDS::high_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(1),
-        );
+        record.consider(foreign_high, LogInterval::new(0), Instant::from_secs(1));
         assert!(record.dataset().is_some());
     }
 
     #[test]
     fn sliding_window_qualification_drops_on_slow_announces() {
         let t0 = Instant::from_secs(0);
+        let high = TestClockCatalog::default_high_grade();
+        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
         let mut record = ForeignClockRecord::new(
-            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
-            ForeignClockDS::high_grade_test_clock(),
+            PortIdentity::new(high.clock_identity(), PortNumber::new(1)),
+            foreign_high,
             LogInterval::new(0),
             t0,
         );
 
         // A second fast announce to qualify.
-        record.consider(
-            ForeignClockDS::high_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(1),
-        );
+        record.consider(foreign_high, LogInterval::new(0), Instant::from_secs(1));
         assert!(record.dataset().is_some());
 
         // After a long gap, a single announce is not enough to stay qualified.
-        record.consider(
-            ForeignClockDS::high_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(10),
-        );
+        record.consider(foreign_high, LogInterval::new(0), Instant::from_secs(10));
         assert!(record.dataset().is_none());
     }
 
     #[test]
     fn sliding_window_never_qualifies_with_one_annonce_per_window() {
         let t0 = Instant::from_secs(0);
+        let high = TestClockCatalog::default_high_grade();
+        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
         let mut record = ForeignClockRecord::new(
-            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
-            ForeignClockDS::high_grade_test_clock(),
+            PortIdentity::new(high.clock_identity(), PortNumber::new(1)),
+            foreign_high,
             LogInterval::new(0),
             t0,
         );
 
         // Announce just slower than foreignMasterTimeWindow; density never reaches 2
         // within any sliding window.
-        record.consider(
-            ForeignClockDS::high_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(5),
-        );
+        record.consider(foreign_high, LogInterval::new(0), Instant::from_secs(5));
         assert!(record.dataset().is_none());
 
-        record.consider(
-            ForeignClockDS::high_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(10),
-        );
+        record.consider(foreign_high, LogInterval::new(0), Instant::from_secs(10));
         assert!(record.dataset().is_none());
 
-        record.consider(
-            ForeignClockDS::high_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(15),
-        );
+        record.consider(foreign_high, LogInterval::new(0), Instant::from_secs(15));
         assert!(record.dataset().is_none());
     }
 
     #[test]
     fn qualified_dataset_change_reports_updated() {
         let t0 = Instant::from_secs(0);
+        let high = TestClockCatalog::default_high_grade();
+        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
+        let foreign_low =
+            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
         let mut record = ForeignClockRecord::new(
-            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
-            ForeignClockDS::high_grade_test_clock(),
+            PortIdentity::new(high.clock_identity(), PortNumber::new(1)),
+            foreign_high,
             LogInterval::new(0),
             t0,
         );
 
         // First fast Announce qualifies the record (two samples: t0 and t1).
-        record.consider(
-            ForeignClockDS::high_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(1),
-        );
+        record.consider(foreign_high, LogInterval::new(0), Instant::from_secs(1));
         assert!(record.dataset().is_some());
 
         // Change dataset while still qualified.
-        let status = record.consider(
-            ForeignClockDS::low_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(2),
-        );
+        let status = record.consider(foreign_low, LogInterval::new(0), Instant::from_secs(2));
         assert_eq!(status, ForeignClockStatus::Updated);
-        assert_eq!(
-            record.dataset(),
-            Some(&ForeignClockDS::low_grade_test_clock())
-        );
+        assert_eq!(record.dataset(), Some(&foreign_low));
     }
 
     #[test]
     fn unqualified_dataset_change_does_not_report_updated() {
         let t0 = Instant::from_secs(0);
+        let high = TestClockCatalog::default_high_grade();
+        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
+        let foreign_low =
+            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
         let mut record = ForeignClockRecord::new(
-            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
-            ForeignClockDS::high_grade_test_clock(),
+            PortIdentity::new(high.clock_identity(), PortNumber::new(1)),
+            foreign_high,
             LogInterval::new(0),
             t0,
         );
 
         // First slow Announce: still unqualified (spacing >= window).
-        let _ = record.consider(
-            ForeignClockDS::high_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(10),
-        );
+        let _ = record.consider(foreign_high, LogInterval::new(0), Instant::from_secs(10));
         assert!(record.dataset().is_none());
 
         // Second slow Announce with changed dataset: still unqualified and should report Unchanged.
-        let status = record.consider(
-            ForeignClockDS::low_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(20),
-        );
+        let status = record.consider(foreign_low, LogInterval::new(0), Instant::from_secs(20));
         assert_eq!(status, ForeignClockStatus::Unchanged);
         assert!(record.dataset().is_none());
     }
@@ -1293,38 +1162,32 @@ pub(crate) mod tests {
     #[test]
     fn sliding_window_edge_drops_qualification_but_not_stale() {
         let t0 = Instant::from_secs(0);
+        let high = TestClockCatalog::default_high_grade();
+        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
         let mut record = ForeignClockRecord::new(
-            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
-            ForeignClockDS::high_grade_test_clock(),
+            PortIdentity::new(high.clock_identity(), PortNumber::new(1)),
+            foreign_high,
             LogInterval::new(0),
             t0,
         );
 
         // Qualify with a fast Announce.
-        record.consider(
-            ForeignClockDS::high_grade_test_clock(),
-            LogInterval::new(0),
-            Instant::from_secs(1),
-        );
+        record.consider(foreign_high, LogInterval::new(0), Instant::from_secs(1));
         assert!(record.dataset().is_some());
 
         // Next Announce spaced just beyond the window drops qualification
         // but the record is not stale yet.
         let now = Instant::from_nanos(5_000_000_001);
-        let _ = record.consider(
-            ForeignClockDS::high_grade_test_clock(),
-            LogInterval::new(0),
-            now,
-        );
+        let _ = record.consider(foreign_high, LogInterval::new(0), now);
         assert!(record.dataset().is_none());
         assert!(!record.is_stale(now));
     }
 
     #[test]
     fn test_foreign_clock_ordering() {
-        let high = ForeignClockDS::high_grade_test_clock();
-        let mid = ForeignClockDS::mid_grade_test_clock();
-        let low = ForeignClockDS::low_grade_test_clock();
+        let high = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let mid = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
+        let low = TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
 
         assert!(high.better_than(&mid));
         assert!(!mid.better_than(&high));
@@ -1338,8 +1201,8 @@ pub(crate) mod tests {
 
     #[test]
     fn test_foreign_clock_equality() {
-        let c1 = ForeignClockDS::high_grade_test_clock();
-        let c2 = ForeignClockDS::high_grade_test_clock();
+        let c1 = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let c2 = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
 
         assert!(!c1.better_than(&c2));
         assert!(!c2.better_than(&c1));
@@ -1348,86 +1211,52 @@ pub(crate) mod tests {
 
     #[test]
     fn foreign_clock_ds_compares_priority1_before_quality() {
-        // a has lower priority1 but worse quality; still better than b.
-        let a = ForeignClockDS::new(
-            CLK_ID_LOW,
-            Priority1::new(10),
-            Priority2::new(127),
-            CLK_QUALITY_LOW,
-            StepsRemoved::new(0),
-        );
-        let b = ForeignClockDS::new(
-            CLK_ID_HIGH,
-            Priority1::new(100),
-            Priority2::new(127),
-            CLK_QUALITY_HIGH,
-            StepsRemoved::new(0),
-        );
+        let a = TestClockCatalog::default_high_grade()
+            .with_priority1(Priority1::new(10))
+            .foreign_ds(StepsRemoved::new(0));
+        let b = TestClockCatalog::atomic_grandmaster()
+            .with_priority1(Priority1::new(20))
+            .foreign_ds(StepsRemoved::new(0));
 
+        // Atomic grandmaster looses againt default high grade because of lower priority1.
         assert!(a.better_than(&b));
         assert!(!b.better_than(&a));
     }
 
     #[test]
     fn foreign_clock_ds_compares_priority2_after_quality() {
-        // Same p1 and quality; lower p2 wins.
-        let a = ForeignClockDS::new(
-            CLK_ID_LOW,
-            Priority1::new(127),
-            Priority2::new(10),
-            CLK_QUALITY_HIGH,
-            StepsRemoved::new(0),
-        );
-        let b = ForeignClockDS::new(
-            CLK_ID_HIGH,
-            Priority1::new(127),
-            Priority2::new(20),
-            CLK_QUALITY_HIGH,
-            StepsRemoved::new(0),
-        );
+        let a = TestClockCatalog::default_high_grade()
+            .with_clock_identity(ClockIdentity::new(&[0x00; 8]))
+            .with_priority2(Priority2::new(10))
+            .foreign_ds(StepsRemoved::new(0));
+        let b = TestClockCatalog::default_high_grade()
+            .with_clock_identity(ClockIdentity::new(&[0x01; 8]))
+            .with_priority2(Priority2::new(20))
+            .foreign_ds(StepsRemoved::new(0));
 
+        // Same p1 and quality; lower p2 wins.
         assert!(a.better_than(&b));
         assert!(!b.better_than(&a));
     }
 
     #[test]
     fn foreign_clock_ds_tiebreaks_on_identity_last() {
-        // All fields equal except identity; lower identity better than higher.
-        let a = ForeignClockDS::new(
-            CLK_ID_HIGH,
-            Priority1::new(127),
-            Priority2::new(127),
-            CLK_QUALITY_HIGH,
-            StepsRemoved::new(0),
-        );
-        let b = ForeignClockDS::new(
-            CLK_ID_MID,
-            Priority1::new(127),
-            Priority2::new(127),
-            CLK_QUALITY_HIGH,
-            StepsRemoved::new(0),
-        );
+        let a = TestClockCatalog::default_high_grade()
+            .with_clock_identity(ClockIdentity::new(&[0x00; 8]))
+            .foreign_ds(StepsRemoved::new(0));
+        let b = TestClockCatalog::default_high_grade()
+            .with_clock_identity(ClockIdentity::new(&[0x01; 8]))
+            .foreign_ds(StepsRemoved::new(0));
 
+        // All fields equal except identity; lower identity better than higher.
         assert!(a.better_than(&b));
         assert!(!b.better_than(&a));
     }
 
     #[test]
     fn foreign_clock_ds_prefers_lower_steps_removed_when_identity_equal() {
-        let a = ForeignClockDS::new(
-            CLK_ID_HIGH,
-            Priority1::new(127),
-            Priority2::new(127),
-            CLK_QUALITY_HIGH,
-            StepsRemoved::new(1),
-        );
-        let b = ForeignClockDS::new(
-            CLK_ID_HIGH,
-            Priority1::new(127),
-            Priority2::new(127),
-            CLK_QUALITY_HIGH,
-            StepsRemoved::new(3),
-        );
+        let a = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(1));
+        let b = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(3));
 
         assert!(a.better_than(&b));
         assert!(!b.better_than(&a));
@@ -1435,22 +1264,27 @@ pub(crate) mod tests {
 
     #[test]
     fn bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
+        let high = TestClockCatalog::default_high_grade();
+        let mid = TestClockCatalog::default_mid_grade();
+        let low = TestClockCatalog::default_low_grade_slave_only();
+        let gm = TestClockCatalog::gps_grandmaster();
+
         let stale_records = vec![
             ForeignClockRecord::qualified(
-                PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1)),
-                ForeignClockDS::high_grade_test_clock(),
+                PortIdentity::new(high.clock_identity(), PortNumber::new(1)),
+                high.foreign_ds(StepsRemoved::new(0)),
                 LogInterval::new(0),
                 Instant::from_secs(0),
             ),
             ForeignClockRecord::qualified(
-                PortIdentity::new(CLK_ID_MID, PortNumber::new(1)),
-                ForeignClockDS::mid_grade_test_clock(),
+                PortIdentity::new(mid.clock_identity(), PortNumber::new(1)),
+                mid.foreign_ds(StepsRemoved::new(0)),
                 LogInterval::new(0),
                 Instant::from_secs(1),
             ),
             ForeignClockRecord::qualified(
-                PortIdentity::new(CLK_ID_MID, PortNumber::new(1)),
-                ForeignClockDS::low_grade_test_clock(),
+                PortIdentity::new(mid.clock_identity(), PortNumber::new(1)),
+                low.foreign_ds(StepsRemoved::new(0)),
                 LogInterval::new(0),
                 Instant::from_secs(2),
             ),
@@ -1459,10 +1293,13 @@ pub(crate) mod tests {
 
         let mut bmca = BestMasterClockAlgorithm::new(&mut sorted_records);
 
+        let gm_port_id = PortIdentity::new(gm.clock_identity(), PortNumber::new(1));
+        let gm_foreign = gm.foreign_ds(StepsRemoved::new(0));
+
         // Consider a new announce from a different foreign clock.
         let status = bmca.consider(
-            PortIdentity::new(CLK_ID_GM, PortNumber::new(1)),
-            ForeignClockDS::gm_grade_test_clock(),
+            gm_port_id,
+            gm_foreign,
             LogInterval::new(0),
             Instant::from_secs(10),
         );
@@ -1476,8 +1313,8 @@ pub(crate) mod tests {
         assert_eq!(
             sorted_records.first(),
             Some(&ForeignClockRecord::new(
-                PortIdentity::new(CLK_ID_GM, PortNumber::new(1)),
-                ForeignClockDS::gm_grade_test_clock(),
+                gm_port_id,
+                gm_foreign,
                 LogInterval::new(0),
                 Instant::from_secs(10),
             ))
@@ -1488,8 +1325,7 @@ pub(crate) mod tests {
     fn bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::gm_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::gps_grandmaster().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
@@ -1501,21 +1337,16 @@ pub(crate) mod tests {
     fn bmca_gm_capable_local_loses_tuple_returns_passive() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::gm_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::gps_grandmaster().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         // Foreign uses lower priority1 so it is better, even though clock class is worse.
-        let foreign_strong = ForeignClockDS::new(
-            CLK_ID_HIGH,
-            Priority1::new(1),
-            Priority2::new(127),
-            CLK_QUALITY_HIGH,
-            StepsRemoved::new(0),
-        );
-        let port_id = PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1));
+        let foreign =
+            TestClockCatalog::default_low_grade_slave_only().with_priority1(Priority1::new(1));
+        let port_id = PortIdentity::new(foreign.clock_identity(), PortNumber::new(1));
+        let foreign_strong = foreign.foreign_ds(StepsRemoved::new(0));
 
         bmca.consider(
             port_id,
@@ -1537,15 +1368,17 @@ pub(crate) mod tests {
     fn bmca_gm_capable_local_better_than_foreign_returns_master_m1() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::gm_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::gps_grandmaster().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         // Foreign is worse (higher priority1), so local GM-capable should become Master(M1).
-        let foreign = ForeignClockDS::mid_grade_test_clock();
-        let port_id = PortIdentity::new(CLK_ID_MID, PortNumber::new(1));
+        let foreign = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let port_id = PortIdentity::new(
+            TestClockCatalog::default_high_grade().clock_identity(),
+            PortNumber::new(1),
+        );
 
         bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
         bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
@@ -1563,15 +1396,18 @@ pub(crate) mod tests {
     fn bmca_non_gm_local_better_than_foreign_returns_master_m2() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
         // Foreign is slightly worse quality; local should be better and take M2.
-        let foreign = ForeignClockDS::low_grade_test_clock();
-        let port_id = PortIdentity::new(CLK_ID_LOW, PortNumber::new(1));
+        let foreign =
+            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
+        let port_id = PortIdentity::new(
+            TestClockCatalog::default_low_grade_slave_only().clock_identity(),
+            PortNumber::new(1),
+        );
 
         bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
         bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
@@ -1589,14 +1425,16 @@ pub(crate) mod tests {
     fn bmca_non_gm_local_loses_tuple_returns_slave() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
-        let foreign = ForeignClockDS::high_grade_test_clock();
-        let port_id = PortIdentity::new(CLK_ID_HIGH, PortNumber::new(1));
+        let foreign = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let port_id = PortIdentity::new(
+            TestClockCatalog::default_high_grade().clock_identity(),
+            PortNumber::new(1),
+        );
 
         bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
         bmca.consider(port_id, foreign, LogInterval::new(0), Instant::from_secs(0));
@@ -1614,23 +1452,18 @@ pub(crate) mod tests {
     fn bmca_recommends_slave_from_interleaved_announce_sequence() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::low_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::default_low_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
-        let foreign_high = ForeignClockDS::high_grade_test_clock();
-        let foreign_mid = ForeignClockDS::mid_grade_test_clock();
+        let high = TestClockCatalog::default_high_grade();
+        let mid = TestClockCatalog::default_mid_grade();
+        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
+        let foreign_mid = mid.foreign_ds(StepsRemoved::new(0));
 
-        let port_id_high = PortIdentity::new(
-            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
-            PortNumber::new(1),
-        );
-        let port_id_mid = PortIdentity::new(
-            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
-            PortNumber::new(1),
-        );
+        let port_id_high = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
+        let port_id_mid = PortIdentity::new(mid.clock_identity(), PortNumber::new(1));
 
         bmca.consider(
             port_id_high,
@@ -1672,23 +1505,18 @@ pub(crate) mod tests {
     fn bmca_recommends_slave_from_non_interleaved_announce_sequence() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::low_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::default_low_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
-        let foreign_high = ForeignClockDS::high_grade_test_clock();
-        let foreign_mid = ForeignClockDS::mid_grade_test_clock();
+        let high = TestClockCatalog::default_high_grade();
+        let mid = TestClockCatalog::default_mid_grade();
+        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
+        let foreign_mid = mid.foreign_ds(StepsRemoved::new(0));
 
-        let port_id_high = PortIdentity::new(
-            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
-            PortNumber::new(1),
-        );
-        let port_id_mid = PortIdentity::new(
-            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
-            PortNumber::new(1),
-        );
+        let port_id_high = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
+        let port_id_mid = PortIdentity::new(mid.clock_identity(), PortNumber::new(1));
 
         bmca.consider(
             port_id_high,
@@ -1730,8 +1558,7 @@ pub(crate) mod tests {
     fn bmca_undecided_when_no_announces_yet() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
@@ -1743,13 +1570,12 @@ pub(crate) mod tests {
     fn bmca_undecided_when_no_qualified_clock_records_yet() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
-        let foreign_high = ForeignClockDS::high_grade_test_clock();
+        let foreign_high = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
 
         bmca.consider(
             PortIdentity::fake(),
@@ -1765,30 +1591,32 @@ pub(crate) mod tests {
     fn bmca_undecided_when_only_single_announces_each() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::mid_grade_test_clock(),
-            StepsRemoved::new(0),
+            TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
 
-        let foreign_high = ForeignClockDS::high_grade_test_clock();
-        let foreign_mid = ForeignClockDS::mid_grade_test_clock();
-        let foreign_low = ForeignClockDS::low_grade_test_clock();
+        let high = TestClockCatalog::default_high_grade();
+        let mid = TestClockCatalog::default_mid_grade();
+        let low = TestClockCatalog::default_low_grade_slave_only();
+        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
+        let foreign_mid = mid.foreign_ds(StepsRemoved::new(0));
+        let foreign_low = low.foreign_ds(StepsRemoved::new(0));
 
         bmca.consider(
-            PortIdentity::new(CLK_ID_HIGH, PortNumber::new(0)),
+            PortIdentity::new(high.clock_identity(), PortNumber::new(0)),
             foreign_high,
             LogInterval::new(0),
             Instant::from_secs(0),
         );
         bmca.consider(
-            PortIdentity::new(CLK_ID_MID, PortNumber::new(0)),
+            PortIdentity::new(mid.clock_identity(), PortNumber::new(0)),
             foreign_mid,
             LogInterval::new(0),
             Instant::from_secs(0),
         );
         bmca.consider(
-            PortIdentity::new(CLK_ID_LOW, PortNumber::new(0)),
+            PortIdentity::new(low.clock_identity(), PortNumber::new(0)),
             foreign_low,
             LogInterval::new(0),
             Instant::from_secs(0),

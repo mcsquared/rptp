@@ -1,6 +1,10 @@
 use std::cell::Cell;
 
-use crate::clock::{Clock, ClockIdentity, SynchronizableClock, TimeScale};
+use crate::bmca::{DefaultDS, ForeignClockDS, Priority1, Priority2};
+use crate::clock::{
+    Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved,
+    SynchronizableClock, TimeScale,
+};
 use crate::port::{
     PhysicalPort, PortIdentity, PortNumber, SendError, SendResult, Timeout, TimerHost,
 };
@@ -14,6 +18,149 @@ use std::rc::Rc;
 
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::time::Duration;
+
+pub struct TestClockCatalog {
+    clock_identity: ClockIdentity,
+    clock_class: ClockClass,
+    clock_accuracy: ClockAccuracy,
+    priority1: Priority1,
+    priority2: Priority2,
+}
+
+impl TestClockCatalog {
+    pub fn atomic_grandmaster() -> Self {
+        Self {
+            clock_identity: ClockIdentity::new(&[0x00, 0x1A, 0xC2, 0xFF, 0xFE, 0x12, 0x34, 0x56]),
+            clock_class: ClockClass::PrimaryReference,
+            clock_accuracy: ClockAccuracy::Within25ns,
+            priority1: Priority1::new(128),
+            priority2: Priority2::new(128),
+        }
+    }
+
+    pub fn gps_grandmaster() -> Self {
+        Self {
+            clock_identity: ClockIdentity::new(&[0x00, 0x1B, 0xC3, 0xFF, 0xFE, 0x65, 0x43, 0x21]),
+            clock_class: ClockClass::PrimaryReference,
+            clock_accuracy: ClockAccuracy::Within100ns,
+            priority1: Priority1::new(128),
+            priority2: Priority2::new(128),
+        }
+    }
+
+    pub fn ntp_grandmaster() -> Self {
+        Self {
+            clock_identity: ClockIdentity::new(&[0x00, 0x1C, 0xC4, 0xFF, 0xFE, 0x78, 0x56, 0x34]),
+            clock_class: ClockClass::PrimaryReference,
+            clock_accuracy: ClockAccuracy::Within1us,
+            priority1: Priority1::new(128),
+            priority2: Priority2::new(128),
+        }
+    }
+
+    pub fn application_specific_grandmaster() -> Self {
+        Self {
+            clock_identity: ClockIdentity::new(&[0x00, 0x1D, 0xC5, 0xFF, 0xFE, 0x89, 0x67, 0x45]),
+            clock_class: ClockClass::ApplicationSpecific,
+            clock_accuracy: ClockAccuracy::Unknown,
+            priority1: Priority1::new(128),
+            priority2: Priority2::new(128),
+        }
+    }
+
+    pub fn default_high_grade() -> Self {
+        Self {
+            clock_identity: ClockIdentity::new(&[0x00, 0x1E, 0xC6, 0xFF, 0xFE, 0x90, 0x78, 0x56]),
+            clock_class: ClockClass::Default,
+            clock_accuracy: ClockAccuracy::Within100ns,
+            priority1: Priority1::new(128),
+            priority2: Priority2::new(128),
+        }
+    }
+
+    pub fn default_mid_grade() -> Self {
+        Self {
+            clock_identity: ClockIdentity::new(&[0x00, 0x1F, 0xC7, 0xFF, 0xFE, 0x91, 0x89, 0x67]),
+            clock_class: ClockClass::Default,
+            clock_accuracy: ClockAccuracy::Within10us,
+            priority1: Priority1::new(128),
+            priority2: Priority2::new(128),
+        }
+    }
+
+    pub fn default_low_grade() -> Self {
+        Self {
+            clock_identity: ClockIdentity::new(&[0x00, 0x20, 0xC8, 0xFF, 0xFE, 0x92, 0x90, 0x78]),
+            clock_class: ClockClass::Default,
+            clock_accuracy: ClockAccuracy::Within1ms,
+            priority1: Priority1::new(128),
+            priority2: Priority2::new(128),
+        }
+    }
+
+    pub fn default_low_grade_slave_only() -> Self {
+        Self {
+            clock_identity: ClockIdentity::new(&[0x00, 0x21, 0xC9, 0xFF, 0xFE, 0x93, 0x91, 0x89]),
+            clock_class: ClockClass::SlaveOnly,
+            clock_accuracy: ClockAccuracy::Within10ms,
+            priority1: Priority1::new(128),
+            priority2: Priority2::new(128),
+        }
+    }
+
+    pub fn clock_identity(&self) -> ClockIdentity {
+        self.clock_identity
+    }
+
+    pub fn clock_quality(&self) -> ClockQuality {
+        ClockQuality::new(
+            self.clock_class,
+            self.clock_accuracy,
+            0xFFFF, // offset_scaled_log_variance
+        )
+    }
+
+    pub fn default_ds(&self) -> DefaultDS {
+        DefaultDS::new(
+            self.clock_identity,
+            self.priority1,
+            self.priority2,
+            self.clock_quality(),
+        )
+    }
+
+    pub fn foreign_ds(&self, steps_removed: StepsRemoved) -> ForeignClockDS {
+        ForeignClockDS::new(
+            self.clock_identity,
+            self.priority1,
+            self.priority2,
+            self.clock_quality(),
+            steps_removed,
+        )
+    }
+
+    pub fn with_clock_identity(self, clock_identity: ClockIdentity) -> Self {
+        Self {
+            clock_identity,
+            ..self
+        }
+    }
+
+    pub fn with_accuracy(self, accuracy: ClockAccuracy) -> Self {
+        Self {
+            clock_accuracy: accuracy,
+            ..self
+        }
+    }
+
+    pub fn with_priority1(self, priority1: Priority1) -> Self {
+        Self { priority1, ..self }
+    }
+
+    pub fn with_priority2(self, priority2: Priority2) -> Self {
+        Self { priority2, ..self }
+    }
+}
 
 pub struct FakeClock {
     now: Cell<TimeStamp>,
