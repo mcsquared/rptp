@@ -6,6 +6,7 @@ pub mod infra_support {
         ForeignClockRecord, ForeignClockResult, ForeignClockStatus, SortedForeignClockRecords,
     };
     use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
+    use crate::log::PortEvent;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
     use crate::port::{Port, PortIdentity, SendResult};
     use crate::time::TimeStamp;
@@ -38,6 +39,10 @@ pub mod infra_support {
 
         fn timeout(&self, msg: SystemMessage) -> Self::Timeout {
             self.as_ref().timeout(msg)
+        }
+
+        fn log(&self, event: PortEvent) {
+            self.as_ref().log(event)
         }
     }
 

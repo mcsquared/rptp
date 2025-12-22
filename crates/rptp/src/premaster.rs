@@ -1,35 +1,32 @@
 use crate::bmca::{
     Bmca, BmcaDecision, BmcaSlaveDecision, LocalMasterTrackingBmca, ParentTrackingBmca,
 };
-use crate::log::{PortEvent, PortLog};
+use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{Port, PortIdentity};
 use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::time::Instant;
 
-pub struct PreMasterPort<P: Port, B: Bmca, L: PortLog> {
+pub struct PreMasterPort<P: Port, B: Bmca> {
     port: P,
     bmca: LocalMasterTrackingBmca<B>,
     _qualification_timeout: P::Timeout,
-    log: L,
     profile: PortProfile,
 }
 
-impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
+impl<P: Port, B: Bmca> PreMasterPort<P, B> {
     pub(crate) fn new(
         port: P,
         bmca: LocalMasterTrackingBmca<B>,
         _qualification_timeout: P::Timeout,
-        log: L,
         profile: PortProfile,
     ) -> Self {
-        log.port_event(PortEvent::Static("Become PreMasterPort"));
+        port.log(PortEvent::Static("Become PreMasterPort"));
 
         Self {
             port,
             bmca,
             _qualification_timeout,
-            log,
             profile,
         }
     }
@@ -40,7 +37,7 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
         source_port_identity: PortIdentity,
         now: Instant,
     ) -> Option<StateDecision> {
-        self.log.message_received("Announce");
+        self.port.log(PortEvent::MessageReceived("Announce"));
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
@@ -52,14 +49,14 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
         }
     }
 
-    pub(crate) fn qualified(self) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::QualifiedMaster);
-        self.profile.master(self.port, self.bmca, self.log)
+    pub(crate) fn qualified(self) -> PortState<P, B> {
+        self.port.log(PortEvent::QualifiedMaster);
+        self.profile.master(self.port, self.bmca)
     }
 
-    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B> {
         decision.apply(|parent_port_identity, steps_removed| {
-            self.log.port_event(PortEvent::RecommendedSlave {
+            self.port.log(PortEvent::RecommendedSlave {
                 parent: parent_port_identity,
             });
 
@@ -69,8 +66,7 @@ impl<P: Port, B: Bmca, L: PortLog> PreMasterPort<P, B, L> {
             // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
             self.port.update_steps_removed(steps_removed);
 
-            self.profile
-                .uncalibrated(self.port, parent_tracking_bmca, self.log)
+            self.profile.uncalibrated(self.port, parent_tracking_bmca)
         })
     }
 }
@@ -94,13 +90,10 @@ mod tests {
     use crate::time::{Instant, LogMessageInterval};
 
     type PreMasterTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping>;
+        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type PreMasterTestPort<'a> = PreMasterPort<
-        PreMasterTestDomainPort<'a>,
-        IncrementalBmca<SortedForeignClockRecordsVec>,
-        NoopPortLog,
-    >;
+    type PreMasterTestPort<'a> =
+        PreMasterPort<PreMasterTestDomainPort<'a>, IncrementalBmca<SortedForeignClockRecordsVec>>;
 
     struct PreMasterPortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -127,6 +120,7 @@ mod tests {
                 &self.physical_port,
                 &self.timer_host,
                 FakeTimestamping::new(),
+                NoopPortLog,
                 DomainNumber::new(0),
                 PortNumber::new(1),
             );
@@ -139,7 +133,6 @@ mod tests {
                     SortedForeignClockRecordsVec::from_records(records),
                 )),
                 qualification_timeout,
-                NoopPortLog,
                 PortProfile::default(),
             )
         }

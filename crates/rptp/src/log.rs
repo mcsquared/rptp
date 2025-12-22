@@ -2,8 +2,6 @@ use crate::port::ParentPortIdentity;
 use crate::time::TimeInterval;
 
 pub trait PortLog {
-    fn message_sent(&self, msg: &str);
-    fn message_received(&self, msg: &str);
     fn port_event(&self, event: PortEvent);
 }
 
@@ -11,8 +9,6 @@ pub trait PortLog {
 pub(crate) struct NoopPortLog;
 
 impl PortLog for NoopPortLog {
-    fn message_sent(&self, _msg: &str) {}
-    fn message_received(&self, _msg: &str) {}
     fn port_event(&self, _event: PortEvent) {}
 }
 
@@ -24,6 +20,8 @@ pub enum PortEvent {
     AnnounceReceiptTimeout,
     QualifiedMaster,
     SynchronizationFault,
+    MessageReceived(&'static str),
+    MessageSent(&'static str),
     Static(&'static str), // optional catch-all
 }
 

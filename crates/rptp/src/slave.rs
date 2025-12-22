@@ -3,7 +3,7 @@ use crate::bmca::{
     ParentTrackingBmca,
 };
 use crate::e2e::EndToEndDelayMechanism;
-use crate::log::{PortEvent, PortLog};
+use crate::log::PortEvent;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
     OneStepSyncMessage, TwoStepSyncMessage,
@@ -14,32 +14,29 @@ use crate::servo::ServoState;
 use crate::time::{Instant, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 
-pub struct SlavePort<P: Port, B: Bmca, L: PortLog> {
+pub struct SlavePort<P: Port, B: Bmca> {
     port: P,
     bmca: ParentTrackingBmca<B>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
-    log: L,
     profile: PortProfile,
 }
 
-impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
+impl<P: Port, B: Bmca> SlavePort<P, B> {
     pub(crate) fn new(
         port: P,
         bmca: ParentTrackingBmca<B>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
-        log: L,
         profile: PortProfile,
     ) -> Self {
-        log.port_event(PortEvent::Static("Become SlavePort"));
+        port.log(PortEvent::Static("Become SlavePort"));
 
         Self {
             port,
             bmca,
             announce_receipt_timeout,
             delay_mechanism,
-            log,
             profile,
         }
     }
@@ -50,7 +47,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         source_port_identity: PortIdentity,
         now: Instant,
     ) -> Option<StateDecision> {
-        self.log.message_received("Announce");
+        self.port.log(PortEvent::MessageReceived("Announce"));
         self.announce_receipt_timeout.restart();
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
@@ -69,7 +66,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         source_port_identity: PortIdentity,
         ingress_timestamp: TimeStamp,
     ) -> Option<StateDecision> {
-        self.log.message_received("One-Step Sync");
+        self.port.log(PortEvent::MessageReceived("One-Step Sync"));
         if !self.bmca.matches_parent(&source_port_identity) {
             return None;
         }
@@ -93,7 +90,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         source_port_identity: PortIdentity,
         ingress_timestamp: TimeStamp,
     ) -> Option<StateDecision> {
-        self.log.message_received("Two-Step Sync");
+        self.port.log(PortEvent::MessageReceived("Two-Step Sync"));
         if !self.bmca.matches_parent(&source_port_identity) {
             return None;
         }
@@ -109,7 +106,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         follow_up: FollowUpMessage,
         source_port_identity: PortIdentity,
     ) -> Option<StateDecision> {
-        self.log.message_received("FollowUp");
+        self.port.log(PortEvent::MessageReceived("FollowUp"));
         if !self.bmca.matches_parent(&source_port_identity) {
             return None;
         }
@@ -131,7 +128,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         req: DelayRequestMessage,
         egress_timestamp: TimeStamp,
     ) -> Option<StateDecision> {
-        self.log.message_received("DelayReq");
+        self.port.log(PortEvent::MessageReceived("DelayReq"));
         self.delay_mechanism
             .record_delay_request(req, egress_timestamp);
 
@@ -143,7 +140,7 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         resp: DelayResponseMessage,
         source_port_identity: PortIdentity,
     ) -> Option<StateDecision> {
-        self.log.message_received("DelayResp");
+        self.port.log(PortEvent::MessageReceived("DelayResp"));
         if !self.bmca.matches_parent(&source_port_identity) {
             return None;
         }
@@ -157,19 +154,19 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
         let delay_request = self.delay_mechanism.delay_request();
         self.port
             .send_event(EventMessage::DelayReq(delay_request))?;
-        self.log.message_sent("DelayReq");
+        self.port.log(PortEvent::MessageSent("DelayReq"));
         Ok(())
     }
 
-    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::AnnounceReceiptTimeout);
+    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, B> {
+        self.port.log(PortEvent::AnnounceReceiptTimeout);
         let bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
-        self.profile.master(self.port, bmca, self.log)
+        self.profile.master(self.port, bmca)
     }
 
-    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B> {
         decision.apply(|parent_port_identity, steps_removed| {
-            self.log.port_event(PortEvent::RecommendedSlave {
+            self.port.log(PortEvent::RecommendedSlave {
                 parent: parent_port_identity,
             });
 
@@ -180,29 +177,28 @@ impl<P: Port, B: Bmca, L: PortLog> SlavePort<P, B, L> {
             self.port.update_steps_removed(steps_removed);
 
             self.profile
-                .uncalibrated(self.port, new_parent_tracking_bmca, self.log)
+                .uncalibrated(self.port, new_parent_tracking_bmca)
         })
     }
 
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::RecommendedMaster);
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B> {
+        self.port.log(PortEvent::RecommendedMaster);
         let bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
 
         decision.apply(|qualification_timeout_policy, steps_removed| {
             self.port.update_steps_removed(steps_removed);
             self.profile
-                .pre_master(self.port, bmca, self.log, qualification_timeout_policy)
+                .pre_master(self.port, bmca, qualification_timeout_policy)
         })
     }
 
-    pub(crate) fn synchronization_fault(self) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::SynchronizationFault);
+    pub(crate) fn synchronization_fault(self) -> PortState<P, B> {
+        self.port.log(PortEvent::SynchronizationFault);
         PortState::Uncalibrated(UncalibratedPort::new(
             self.port,
             self.bmca,
             self.announce_receipt_timeout,
             self.delay_mechanism,
-            self.log,
             self.profile,
         ))
     }
@@ -225,13 +221,11 @@ mod tests {
     };
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
-    type SlaveTestDomainPort<'a> = DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping>;
+    type SlaveTestDomainPort<'a> =
+        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type SlaveTestPort<'a> = SlavePort<
-        SlaveTestDomainPort<'a>,
-        IncrementalBmca<SortedForeignClockRecordsVec>,
-        NoopPortLog,
-    >;
+    type SlaveTestPort<'a> =
+        SlavePort<SlaveTestDomainPort<'a>, IncrementalBmca<SortedForeignClockRecordsVec>>;
 
     struct SlavePortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -266,6 +260,7 @@ mod tests {
                 &self.physical_port,
                 &self.timer_host,
                 FakeTimestamping::new(),
+                NoopPortLog,
                 DomainNumber::new(0),
                 PortNumber::new(1),
             );
@@ -287,7 +282,6 @@ mod tests {
                     delay_request_timeout,
                     LogInterval::new(0),
                 )),
-                NoopPortLog,
                 PortProfile::default(),
             )
         }

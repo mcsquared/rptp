@@ -3,7 +3,7 @@ use core::ops::Range;
 
 use crate::bmca::Bmca;
 use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, SynchronizableClock};
-use crate::log::PortLog;
+use crate::log::{PortEvent, PortLog};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::PortState;
 use crate::result::{ProtocolError, Result};
@@ -45,6 +45,7 @@ pub trait Port {
     ///
     /// Creating a timeout must not schedule it; scheduling happens when the handle is restarted.
     fn timeout(&self, msg: SystemMessage) -> Self::Timeout;
+    fn log(&self, event: PortEvent);
 
     fn update_steps_removed(&self, steps_removed: StepsRemoved) {
         self.local_clock().set_steps_removed(steps_removed);
@@ -178,21 +179,25 @@ impl Display for ParentPortIdentity {
     }
 }
 
-pub struct DomainPort<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping> {
+pub struct DomainPort<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> {
     local_clock: &'a LocalClock<C>,
     physical_port: &'a dyn PhysicalPort,
     timer_host: T,
     timestamping: TS,
+    log: L,
     domain_number: DomainNumber,
     port_number: PortNumber,
 }
 
-impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping> DomainPort<'a, C, T, TS> {
+impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog>
+    DomainPort<'a, C, T, TS, L>
+{
     pub fn new(
         local_clock: &'a LocalClock<C>,
         physical_port: &'a dyn PhysicalPort,
         timer_host: T,
         timestamping: TS,
+        log: L,
         domain_number: DomainNumber,
         port_number: PortNumber,
     ) -> Self {
@@ -201,14 +206,15 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping> DomainPort<'a
             physical_port,
             timer_host,
             timestamping,
+            log,
             domain_number,
             port_number,
         }
     }
 }
 
-impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping> Port
-    for DomainPort<'a, C, T, TS>
+impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> Port
+    for DomainPort<'a, C, T, TS, L>
 {
     type Clock = C;
     type Timeout = T::Timeout;
@@ -246,19 +252,23 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping> Port
     fn timeout(&self, msg: SystemMessage) -> Self::Timeout {
         self.timer_host.timeout(msg)
     }
+
+    fn log(&self, event: PortEvent) {
+        self.log.port_event(event);
+    }
 }
 
 pub trait PortMap {
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress>;
 }
 
-pub struct SingleDomainPortMap<P: Port, B: Bmca, L: PortLog> {
+pub struct SingleDomainPortMap<P: Port, B: Bmca> {
     domain_number: DomainNumber,
-    port_state: Option<PortState<P, B, L>>,
+    port_state: Option<PortState<P, B>>,
 }
 
-impl<P: Port, B: Bmca, L: PortLog> SingleDomainPortMap<P, B, L> {
-    pub fn new(domain_number: DomainNumber, port_state: PortState<P, B, L>) -> Self {
+impl<P: Port, B: Bmca> SingleDomainPortMap<P, B> {
+    pub fn new(domain_number: DomainNumber, port_state: PortState<P, B>) -> Self {
         Self {
             domain_number,
             port_state: Some(port_state),
@@ -266,7 +276,7 @@ impl<P: Port, B: Bmca, L: PortLog> SingleDomainPortMap<P, B, L> {
     }
 }
 
-impl<P: Port, B: Bmca, L: PortLog> PortMap for SingleDomainPortMap<P, B, L> {
+impl<P: Port, B: Bmca> PortMap for SingleDomainPortMap<P, B> {
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress> {
         if self.domain_number == domain_number {
             Ok(&mut self.port_state)
@@ -292,7 +302,7 @@ pub trait PortIngress {
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
-impl<P: Port, B: Bmca, L: PortLog> PortIngress for Option<PortState<P, B, L>> {
+impl<P: Port, B: Bmca> PortIngress for Option<PortState<P, B>> {
     fn process_event_message(
         &mut self,
         source_port_identity: PortIdentity,
@@ -352,7 +362,7 @@ mod tests {
 
     use crate::bmca::{DefaultDS, Priority1, Priority2};
     use crate::clock::{ClockAccuracy, ClockClass, ClockQuality};
-    use crate::log::NOOP_CLOCK_METRICS;
+    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, FollowUpMessage};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakeTimerHost, FakeTimestamping};
@@ -403,6 +413,7 @@ mod tests {
             &cap_port,
             &timer_host,
             FakeTimestamping::new(),
+            NoopPortLog,
             domain_number,
             port_number,
         );
@@ -444,6 +455,7 @@ mod tests {
             &cap_port,
             &timer_host,
             FakeTimestamping::new(),
+            NoopPortLog,
             domain_number,
             port_number,
         );

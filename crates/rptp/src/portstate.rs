@@ -8,7 +8,6 @@ use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::faulty::FaultyPort;
 use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
-use crate::log::PortLog;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity, Timeout};
@@ -33,17 +32,17 @@ pub(crate) enum StateDecision {
 
 // Port states as defined in IEEE 1588 Section 9.2.5, figure 24
 #[allow(clippy::large_enum_variant)]
-pub enum PortState<P: Port, B: Bmca, L: PortLog> {
-    Initializing(InitializingPort<P, B, L>),
-    Listening(ListeningPort<P, B, L>),
-    Slave(SlavePort<P, B, L>),
-    Master(MasterPort<P, B, L>),
-    PreMaster(PreMasterPort<P, B, L>),
-    Uncalibrated(UncalibratedPort<P, B, L>),
-    Faulty(FaultyPort<P, B, L>),
+pub enum PortState<P: Port, B: Bmca> {
+    Initializing(InitializingPort<P, B>),
+    Listening(ListeningPort<P, B>),
+    Slave(SlavePort<P, B>),
+    Master(MasterPort<P, B>),
+    PreMaster(PreMasterPort<P, B>),
+    Uncalibrated(UncalibratedPort<P, B>),
+    Faulty(FaultyPort<P, B>),
 }
 
-impl<P: Port, B: Bmca, L: PortLog> PortState<P, B, L> {
+impl<P: Port, B: Bmca> PortState<P, B> {
     pub(crate) fn apply(self, decision: StateDecision) -> Self {
         match decision {
             StateDecision::AnnounceReceiptTimeoutExpired => match self {
@@ -253,21 +252,11 @@ impl PortProfile {
         self.log_min_delay_request_interval
     }
 
-    pub fn initializing<P: Port, B: Bmca, L: PortLog>(
-        self,
-        port: P,
-        bmca: B,
-        log: L,
-    ) -> PortState<P, B, L> {
-        PortState::Initializing(InitializingPort::new(port, bmca, log, self))
+    pub fn initializing<P: Port, B: Bmca>(self, port: P, bmca: B) -> PortState<P, B> {
+        PortState::Initializing(InitializingPort::new(port, bmca, self))
     }
 
-    pub(crate) fn listening<P: Port, B: Bmca, L: PortLog>(
-        self,
-        port: P,
-        bmca: B,
-        log: L,
-    ) -> PortState<P, B, L> {
+    pub(crate) fn listening<P: Port, B: Bmca>(self, port: P, bmca: B) -> PortState<P, B> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
             port.timeout(SystemMessage::AnnounceReceiptTimeout),
             self.announce_receipt_timeout_interval,
@@ -278,17 +267,15 @@ impl PortProfile {
             port,
             bmca,
             announce_receipt_timeout,
-            log,
             self,
         ))
     }
 
-    pub fn master<P: Port, B: Bmca, L: PortLog>(
+    pub fn master<P: Port, B: Bmca>(
         self,
         port: P,
         bmca: LocalMasterTrackingBmca<B>,
-        log: L,
-    ) -> PortState<P, B, L> {
+    ) -> PortState<P, B> {
         let announce_send_timeout = port.timeout(SystemMessage::AnnounceSendTimeout);
         announce_send_timeout.restart(Duration::from_secs(0));
         let announce_cycle =
@@ -302,18 +289,16 @@ impl PortProfile {
             bmca,
             announce_cycle,
             sync_cycle,
-            log,
             self,
         ))
     }
 
-    pub fn slave<P: Port, B: Bmca, L: PortLog>(
+    pub fn slave<P: Port, B: Bmca>(
         self,
         port: P,
         bmca: ParentTrackingBmca<B>,
         delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
-        log: L,
-    ) -> PortState<P, B, L> {
+    ) -> PortState<P, B> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
             port.timeout(SystemMessage::AnnounceReceiptTimeout),
             self.announce_receipt_timeout_interval,
@@ -325,37 +310,28 @@ impl PortProfile {
             bmca,
             announce_receipt_timeout,
             delay_mechanism,
-            log,
             self,
         ))
     }
 
-    pub(crate) fn pre_master<P: Port, B: Bmca, L: PortLog>(
+    pub(crate) fn pre_master<P: Port, B: Bmca>(
         self,
         port: P,
         bmca: LocalMasterTrackingBmca<B>,
-        log: L,
         qualification_timeout_policy: QualificationTimeoutPolicy,
-    ) -> PortState<P, B, L> {
+    ) -> PortState<P, B> {
         let qualification_timeout = port.timeout(SystemMessage::QualificationTimeout);
         qualification_timeout
             .restart(qualification_timeout_policy.duration(self.log_announce_interval));
 
-        PortState::PreMaster(PreMasterPort::new(
-            port,
-            bmca,
-            qualification_timeout,
-            log,
-            self,
-        ))
+        PortState::PreMaster(PreMasterPort::new(port, bmca, qualification_timeout, self))
     }
 
-    pub(crate) fn uncalibrated<P: Port, B: Bmca, L: PortLog>(
+    pub(crate) fn uncalibrated<P: Port, B: Bmca>(
         self,
         port: P,
         bmca: ParentTrackingBmca<B>,
-        log: L,
-    ) -> PortState<P, B, L> {
+    ) -> PortState<P, B> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
             port.timeout(SystemMessage::AnnounceReceiptTimeout),
             self.announce_receipt_timeout_interval,
@@ -373,7 +349,6 @@ impl PortProfile {
             bmca,
             announce_receipt_timeout,
             EndToEndDelayMechanism::new(delay_cycle),
-            log,
             self,
         ))
     }
@@ -396,7 +371,8 @@ mod tests {
     };
     use crate::time::{LogMessageInterval, TimeStamp};
 
-    type PortStateTestDomainPort<'a> = DomainPort<'a, FakeClock, FakeTimerHost, FakeTimestamping>;
+    type PortStateTestDomainPort<'a> =
+        DomainPort<'a, FakeClock, FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     struct PortStateTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -421,6 +397,7 @@ mod tests {
                 &self.physical_port,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
+                NoopPortLog,
                 DomainNumber::new(0),
                 PortNumber::new(1),
             )
@@ -428,39 +405,28 @@ mod tests {
 
         fn initializing_port(
             &self,
-        ) -> PortState<
-            PortStateTestDomainPort<'_>,
-            IncrementalBmca<SortedForeignClockRecordsVec>,
-            NoopPortLog,
-        > {
+        ) -> PortState<PortStateTestDomainPort<'_>, IncrementalBmca<SortedForeignClockRecordsVec>>
+        {
             PortProfile::default().initializing(
                 self.domain_port(),
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                NoopPortLog,
             )
         }
 
         fn listening_port(
             &self,
-        ) -> PortState<
-            PortStateTestDomainPort<'_>,
-            IncrementalBmca<SortedForeignClockRecordsVec>,
-            NoopPortLog,
-        > {
+        ) -> PortState<PortStateTestDomainPort<'_>, IncrementalBmca<SortedForeignClockRecordsVec>>
+        {
             PortProfile::default().listening(
                 self.domain_port(),
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-                NoopPortLog,
             )
         }
 
         fn slave_port(
             &self,
-        ) -> PortState<
-            PortStateTestDomainPort<'_>,
-            IncrementalBmca<SortedForeignClockRecordsVec>,
-            NoopPortLog,
-        > {
+        ) -> PortState<PortStateTestDomainPort<'_>, IncrementalBmca<SortedForeignClockRecordsVec>>
+        {
             PortProfile::default().slave(
                 self.domain_port(),
                 ParentTrackingBmca::new(
@@ -472,57 +438,44 @@ mod tests {
                     FakeTimeout::new(SystemMessage::DelayRequestTimeout),
                     LogInterval::new(0),
                 )),
-                NoopPortLog,
             )
         }
 
         fn master_port(
             &self,
-        ) -> PortState<
-            PortStateTestDomainPort<'_>,
-            IncrementalBmca<SortedForeignClockRecordsVec>,
-            NoopPortLog,
-        > {
+        ) -> PortState<PortStateTestDomainPort<'_>, IncrementalBmca<SortedForeignClockRecordsVec>>
+        {
             PortProfile::default().master(
                 self.domain_port(),
                 LocalMasterTrackingBmca::new(IncrementalBmca::new(
                     SortedForeignClockRecordsVec::new(),
                 )),
-                NoopPortLog,
             )
         }
 
         fn pre_master_port(
             &self,
-        ) -> PortState<
-            PortStateTestDomainPort<'_>,
-            IncrementalBmca<SortedForeignClockRecordsVec>,
-            NoopPortLog,
-        > {
+        ) -> PortState<PortStateTestDomainPort<'_>, IncrementalBmca<SortedForeignClockRecordsVec>>
+        {
             PortProfile::default().pre_master(
                 self.domain_port(),
                 LocalMasterTrackingBmca::new(IncrementalBmca::new(
                     SortedForeignClockRecordsVec::new(),
                 )),
-                NoopPortLog,
                 QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
             )
         }
 
         fn uncalibrated_port(
             &self,
-        ) -> PortState<
-            PortStateTestDomainPort<'_>,
-            IncrementalBmca<SortedForeignClockRecordsVec>,
-            NoopPortLog,
-        > {
+        ) -> PortState<PortStateTestDomainPort<'_>, IncrementalBmca<SortedForeignClockRecordsVec>>
+        {
             PortProfile::default().uncalibrated(
                 self.domain_port(),
                 ParentTrackingBmca::new(
                     IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                     ParentPortIdentity::new(PortIdentity::fake()),
                 ),
-                NoopPortLog,
             )
         }
     }
@@ -935,11 +888,11 @@ mod tests {
                 &FailingPort, // <-- Failing port to simulate send failure <--
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
+                NoopPortLog,
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             LocalMasterTrackingBmca::new(NoopBmca),
-            NoopPortLog,
         );
 
         let transition = master.dispatch_system(SystemMessage::AnnounceSendTimeout);
@@ -961,11 +914,11 @@ mod tests {
                 &FailingPort,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
+                NoopPortLog,
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             LocalMasterTrackingBmca::new(NoopBmca),
-            NoopPortLog,
         );
 
         let transition = master.dispatch_event(
@@ -991,11 +944,11 @@ mod tests {
                 &FailingPort, // <-- failing port to simulate send failure <--
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
+                NoopPortLog,
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             LocalMasterTrackingBmca::new(NoopBmca),
-            NoopPortLog,
         );
 
         let sync_msg = TwoStepSyncMessage::new(0.into(), LogMessageInterval::new(0));
@@ -1021,11 +974,11 @@ mod tests {
                 &FailingPort,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
+                NoopPortLog,
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             LocalMasterTrackingBmca::new(NoopBmca),
-            NoopPortLog,
         );
 
         let transition = master.dispatch_system(SystemMessage::SyncTimeout);
@@ -1046,6 +999,7 @@ mod tests {
             &FailingPort,
             FakeTimerHost::new(),
             FakeTimestamping::new(),
+            NoopPortLog,
             DomainNumber::new(0),
             PortNumber::new(1),
         );
@@ -1068,7 +1022,6 @@ mod tests {
             bmca,
             announce_receipt_timeout,
             EndToEndDelayMechanism::new(delay_cycle),
-            NoopPortLog,
             PortProfile::default(),
         ));
 
@@ -1102,9 +1055,8 @@ mod tests {
     #[test]
     fn portstate_faulty_to_faulty_transition() {
         let faulty: PortState<
-            DomainPort<FakeClock, FakeTimerHost, FakeTimestamping>,
+            DomainPort<FakeClock, FakeTimerHost, FakeTimestamping, NoopPortLog>,
             IncrementalBmca<SortedForeignClockRecordsVec>,
-            NoopPortLog,
         > = PortState::Faulty(FaultyPort::default());
 
         let result = faulty.apply(StateDecision::FaultDetected);

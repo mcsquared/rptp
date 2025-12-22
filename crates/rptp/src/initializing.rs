@@ -1,30 +1,28 @@
 use crate::bmca::Bmca;
-use crate::log::{PortEvent, PortLog};
+use crate::log::PortEvent;
 use crate::port::Port;
 use crate::portstate::{PortProfile, PortState};
 
-pub struct InitializingPort<P: Port, B: Bmca, L: PortLog> {
+pub struct InitializingPort<P: Port, B: Bmca> {
     port: P,
     bmca: B,
-    log: L,
     profile: PortProfile,
 }
 
-impl<P: Port, B: Bmca, L: PortLog> InitializingPort<P, B, L> {
-    pub(crate) fn new(port: P, bmca: B, log: L, profile: PortProfile) -> Self {
-        log.port_event(PortEvent::Static("Become InitializingPort"));
+impl<P: Port, B: Bmca> InitializingPort<P, B> {
+    pub(crate) fn new(port: P, bmca: B, profile: PortProfile) -> Self {
+        port.log(PortEvent::Static("Become InitializingPort"));
 
         Self {
             port,
             bmca,
-            log,
             profile,
         }
     }
 
-    pub(crate) fn initialized(self) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::Initialized);
-        self.profile.listening(self.port, self.bmca, self.log)
+    pub(crate) fn initialized(self) -> PortState<P, B> {
+        self.port.log(PortEvent::Initialized);
+        self.profile.listening(self.port, self.bmca)
     }
 }
 
@@ -57,11 +55,11 @@ mod tests {
                 &physical_port,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
+                NoopPortLog,
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
             IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
-            NoopPortLog,
             PortProfile::default(),
         );
 

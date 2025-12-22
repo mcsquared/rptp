@@ -1,7 +1,6 @@
 use core::marker::PhantomData;
 
 use crate::bmca::Bmca;
-use crate::log::PortLog;
 use crate::port::Port;
 
 // FaultyPort stub implementation. At the moment it does nothing and is a dead end. For the current
@@ -9,18 +8,16 @@ use crate::port::Port;
 // TODO: implement proper transistions into and out of the faulty state, passing actual port, bmca
 // and log like a baton like the other port states do.
 // TODO: implement BMCA reset and other faulty port behavior.
-pub struct FaultyPort<P: Port, B: Bmca, L: PortLog> {
+pub struct FaultyPort<P: Port, B: Bmca> {
     _port: PhantomData<P>,
     _bmca: PhantomData<B>,
-    _log: PhantomData<L>,
 }
 
-impl<P: Port, B: Bmca, L: PortLog> Default for FaultyPort<P, B, L> {
+impl<P: Port, B: Bmca> Default for FaultyPort<P, B> {
     fn default() -> Self {
         Self {
             _port: PhantomData,
             _bmca: PhantomData,
-            _log: PhantomData,
         }
     }
 }

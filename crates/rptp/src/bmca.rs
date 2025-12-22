@@ -21,7 +21,6 @@ use core::ops::Range;
 use crate::clock::{
     ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock, TimeScale,
 };
-use crate::log::PortLog;
 use crate::message::{AnnounceMessage, SequenceId};
 use crate::port::{ParentPortIdentity, Port, PortIdentity};
 use crate::portstate::PortState;
@@ -447,12 +446,11 @@ impl BmcaMasterDecision {
 
     /// Apply this master decision to a [`Port`], producing a new
     /// [`PortState`] in the pre‑master state.
-    pub(crate) fn apply<F, P, B, L>(&self, new_port_state: F) -> PortState<P, B, L>
+    pub(crate) fn apply<F, P, B>(&self, new_port_state: F) -> PortState<P, B>
     where
         P: Port,
         B: Bmca,
-        L: PortLog,
-        F: FnOnce(QualificationTimeoutPolicy, StepsRemoved) -> PortState<P, B, L>,
+        F: FnOnce(QualificationTimeoutPolicy, StepsRemoved) -> PortState<P, B>,
     {
         let qualification_timeout_policy =
             QualificationTimeoutPolicy::new(self.decision_point, self.steps_removed);
@@ -521,12 +519,11 @@ impl BmcaSlaveDecision {
 
     /// Apply this slave decision to a [`Port`], producing a new [`PortState`]
     /// in the uncalibrated state.
-    pub(crate) fn apply<F, P, B, L>(self, next_port_state: F) -> PortState<P, B, L>
+    pub(crate) fn apply<F, P, B>(self, next_port_state: F) -> PortState<P, B>
     where
         P: Port,
         B: Bmca,
-        L: PortLog,
-        F: FnOnce(ParentPortIdentity, StepsRemoved) -> PortState<P, B, L>,
+        F: FnOnce(ParentPortIdentity, StepsRemoved) -> PortState<P, B>,
     {
         next_port_state(self.parent_port_identity, self.steps_removed)
     }

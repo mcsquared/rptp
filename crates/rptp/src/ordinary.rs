@@ -41,9 +41,9 @@ impl<C: SynchronizableClock> OrdinaryClock<C> {
         physical_port: &'a dyn PhysicalPort,
         timer_host: T,
         timestamping: TS,
-        sorted_foreign_clock_records: S,
         log: L,
-    ) -> PortState<DomainPort<'a, C, T, TS>, IncrementalBmca<S>, L>
+        sorted_foreign_clock_records: S,
+    ) -> PortState<DomainPort<'a, C, T, TS, L>, IncrementalBmca<S>>
     where
         T: TimerHost,
         TS: TxTimestamping,
@@ -55,12 +55,13 @@ impl<C: SynchronizableClock> OrdinaryClock<C> {
             physical_port,
             timer_host,
             timestamping,
+            log,
             self.domain_number,
             self.port_number,
         );
 
         let bmca = IncrementalBmca::new(sorted_foreign_clock_records);
 
-        PortProfile::default().initializing(domain_port, bmca, log)
+        PortProfile::default().initializing(domain_port, bmca)
     }
 }

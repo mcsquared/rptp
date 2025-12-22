@@ -16,9 +16,8 @@ use crate::net::NetworkSocket;
 use crate::node::{TokioPhysicalPort, TokioTimerHost};
 
 pub type TokioPort<'a, C, TS> = PortState<
-    DomainPort<'a, C, TokioTimerHost, TS>,
+    DomainPort<'a, C, TokioTimerHost, TS, TracingPortLog>,
     IncrementalBmca<SortedForeignClockRecordsVec>,
-    TracingPortLog,
 >;
 
 pub struct OrdinaryTokioClock<C: SynchronizableClock> {
@@ -58,11 +57,11 @@ impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
             physical_port,
             TokioTimerHost::new(self.ordinary_clock.domain_number(), system_tx.clone()),
             timestamping,
-            SortedForeignClockRecordsVec::new(),
             TracingPortLog::new(PortIdentity::new(
                 *self.ordinary_clock.local_clock().identity(),
                 self.ordinary_clock.port_number(),
             )),
+            SortedForeignClockRecordsVec::new(),
         )
     }
 }

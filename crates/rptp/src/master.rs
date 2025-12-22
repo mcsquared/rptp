@@ -3,7 +3,7 @@ use crate::bmca::{
     ParentTrackingBmca,
 };
 use crate::clock::{LocalClock, SynchronizableClock};
-use crate::log::{PortEvent, PortLog};
+use crate::log::PortEvent;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId,
     TwoStepSyncMessage,
@@ -12,32 +12,29 @@ use crate::port::{Port, PortIdentity, SendResult, Timeout};
 use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::time::{Instant, LogInterval, TimeStamp};
 
-pub struct MasterPort<P: Port, B: Bmca, L: PortLog> {
+pub struct MasterPort<P: Port, B: Bmca> {
     port: P,
     bmca: LocalMasterTrackingBmca<B>,
     announce_cycle: AnnounceCycle<P::Timeout>,
     sync_cycle: SyncCycle<P::Timeout>,
-    log: L,
     profile: PortProfile,
 }
 
-impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
+impl<P: Port, B: Bmca> MasterPort<P, B> {
     pub(crate) fn new(
         port: P,
         bmca: LocalMasterTrackingBmca<B>,
         announce_cycle: AnnounceCycle<P::Timeout>,
         sync_cycle: SyncCycle<P::Timeout>,
-        log: L,
         profile: PortProfile,
     ) -> Self {
-        log.port_event(PortEvent::Static("Become MasterPort"));
+        port.log(PortEvent::Static("Become MasterPort"));
 
         Self {
             port,
             bmca,
             announce_cycle,
             sync_cycle,
-            log,
             profile,
         }
     }
@@ -47,7 +44,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         self.port
             .send_general(GeneralMessage::Announce(announce_message))?;
         self.announce_cycle.next();
-        self.log.message_sent("Announce");
+        self.port.log(PortEvent::MessageSent("Announce"));
         Ok(())
     }
 
@@ -57,7 +54,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         source_port_identity: PortIdentity,
         now: Instant,
     ) -> Option<StateDecision> {
-        self.log.message_received("Announce");
+        self.port.log(PortEvent::MessageReceived("Announce"));
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
@@ -75,7 +72,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         ingress_timestamp: TimeStamp,
         requesting_port_identity: PortIdentity,
     ) -> SendResult {
-        self.log.message_received("DelayReq");
+        self.port.log(PortEvent::MessageReceived("DelayReq"));
 
         let response = req.response(
             self.profile
@@ -87,7 +84,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
 
         let result = self.port.send_general(GeneralMessage::DelayResp(response));
         if result.is_ok() {
-            self.log.message_sent("DelayResp");
+            self.port.log(PortEvent::MessageSent("DelayResp"));
         }
         result
     }
@@ -97,7 +94,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
         self.port
             .send_event(EventMessage::TwoStepSync(sync_message))?;
         self.sync_cycle.next();
-        self.log.message_sent("TwoStepSync");
+        self.port.log(PortEvent::MessageSent("TwoStepSync"));
         Ok(())
     }
 
@@ -108,12 +105,12 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
     ) -> SendResult {
         self.port
             .send_general(GeneralMessage::FollowUp(sync.follow_up(egress_timestamp)))?;
-        self.log.message_sent("FollowUp");
+        self.port.log(PortEvent::MessageSent("FollowUp"));
         Ok(())
     }
 
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::RecommendedMaster);
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B> {
+        self.port.log(PortEvent::RecommendedMaster);
 
         let new_master_tracking_bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
 
@@ -122,15 +119,14 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
             self.profile.pre_master(
                 self.port,
                 new_master_tracking_bmca,
-                self.log,
                 qualification_timeout_policy,
             )
         })
     }
 
-    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B> {
         decision.apply(|parent_port_identity, steps_removed| {
-            self.log.port_event(PortEvent::RecommendedSlave {
+            self.port.log(PortEvent::RecommendedSlave {
                 parent: parent_port_identity,
             });
 
@@ -140,8 +136,7 @@ impl<P: Port, B: Bmca, L: PortLog> MasterPort<P, B, L> {
             // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
             self.port.update_steps_removed(steps_removed);
 
-            self.profile
-                .uncalibrated(self.port, parent_tracking_bmca, self.log)
+            self.profile.uncalibrated(self.port, parent_tracking_bmca)
         })
     }
 }
@@ -217,13 +212,11 @@ mod tests {
     };
     use crate::time::{Instant, LogInterval, LogMessageInterval};
 
-    type MasterTestDomainPort<'a> = DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping>;
+    type MasterTestDomainPort<'a> =
+        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type MasterTestPort<'a> = MasterPort<
-        MasterTestDomainPort<'a>,
-        IncrementalBmca<SortedForeignClockRecordsVec>,
-        NoopPortLog,
-    >;
+    type MasterTestPort<'a> =
+        MasterPort<MasterTestDomainPort<'a>, IncrementalBmca<SortedForeignClockRecordsVec>>;
 
     struct MasterPortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -254,6 +247,7 @@ mod tests {
                 &self.physical_port,
                 &self.timer_host,
                 FakeTimestamping::new(),
+                NoopPortLog,
                 DomainNumber::new(0),
                 PortNumber::new(1),
             );
@@ -275,7 +269,6 @@ mod tests {
                 )),
                 announce_cycle,
                 sync_cycle,
-                NoopPortLog,
                 PortProfile::default(),
             )
         }

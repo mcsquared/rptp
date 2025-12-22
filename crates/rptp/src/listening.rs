@@ -2,42 +2,39 @@ use crate::bmca::{
     Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
     ParentTrackingBmca,
 };
-use crate::log::{PortEvent, PortLog};
+use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity};
 use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::time::Instant;
 
-pub struct ListeningPort<P: Port, B: Bmca, L: PortLog> {
+pub struct ListeningPort<P: Port, B: Bmca> {
     port: P,
     bmca: B,
-    log: L,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     profile: PortProfile,
 }
 
-impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
+impl<P: Port, B: Bmca> ListeningPort<P, B> {
     pub(crate) fn new(
         port: P,
         bmca: B,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
-        log: L,
         profile: PortProfile,
     ) -> Self {
-        log.port_event(PortEvent::Static("Become ListeningPort"));
+        port.log(PortEvent::Static("Become ListeningPort"));
 
         Self {
             port,
             bmca,
             announce_receipt_timeout,
-            log,
             profile,
         }
     }
 
-    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B, L> {
+    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B> {
         decision.apply(|parent_port_identity, steps_removed| {
-            self.log.port_event(PortEvent::RecommendedSlave {
+            self.port.log(PortEvent::RecommendedSlave {
                 parent: parent_port_identity,
             });
 
@@ -46,26 +43,25 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
             // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
             self.port.update_steps_removed(steps_removed);
 
-            self.profile
-                .uncalibrated(self.port, parent_tracking_bmca, self.log)
+            self.profile.uncalibrated(self.port, parent_tracking_bmca)
         })
     }
 
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::RecommendedMaster);
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B> {
+        self.port.log(PortEvent::RecommendedMaster);
         let bmca = LocalMasterTrackingBmca::new(self.bmca);
 
         decision.apply(|qualification_timeout_policy, steps_removed| {
             self.port.update_steps_removed(steps_removed);
             self.profile
-                .pre_master(self.port, bmca, self.log, qualification_timeout_policy)
+                .pre_master(self.port, bmca, qualification_timeout_policy)
         })
     }
 
-    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, B, L> {
-        self.log.port_event(PortEvent::AnnounceReceiptTimeout);
+    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, B> {
+        self.port.log(PortEvent::AnnounceReceiptTimeout);
         let bmca = LocalMasterTrackingBmca::new(self.bmca);
-        self.profile.master(self.port, bmca, self.log)
+        self.profile.master(self.port, bmca)
     }
 
     pub(crate) fn process_announce(
@@ -74,7 +70,7 @@ impl<P: Port, B: Bmca, L: PortLog> ListeningPort<P, B, L> {
         source_port_identity: PortIdentity,
         now: Instant,
     ) -> Option<StateDecision> {
-        self.log.message_received("Announce");
+        self.port.log(PortEvent::MessageReceived("Announce"));
         self.announce_receipt_timeout.restart();
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
@@ -105,13 +101,10 @@ mod tests {
     use crate::time::{Duration, Instant, LogMessageInterval};
 
     type ListeningTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping>;
+        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type ListeningTestPort<'a> = ListeningPort<
-        ListeningTestDomainPort<'a>,
-        IncrementalBmca<SortedForeignClockRecordsVec>,
-        NoopPortLog,
-    >;
+    type ListeningTestPort<'a> =
+        ListeningPort<ListeningTestDomainPort<'a>, IncrementalBmca<SortedForeignClockRecordsVec>>;
 
     struct ListeningPortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -138,6 +131,7 @@ mod tests {
                 &self.physical_port,
                 &self.timer_host,
                 FakeTimestamping::new(),
+                NoopPortLog,
                 DomainNumber::new(0),
                 PortNumber::new(1),
             );
@@ -151,7 +145,6 @@ mod tests {
                 domain_port,
                 IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
                 announce_receipt_timeout,
-                NoopPortLog,
                 PortProfile::default(),
             )
         }

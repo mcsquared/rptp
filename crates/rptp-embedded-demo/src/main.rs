@@ -393,14 +393,6 @@ impl<'a> TxTimestamping for DemoTimestamping<'a> {
 struct DemoPortLog;
 
 impl PortLog for DemoPortLog {
-    fn message_sent(&self, msg: &str) {
-        hprintln!("[sent] {}", msg);
-    }
-
-    fn message_received(&self, msg: &str) {
-        hprintln!("[recv] {}", msg);
-    }
-
     fn port_event(&self, event: PortEvent) {
         match event {
             PortEvent::Initialized => {
@@ -423,6 +415,12 @@ impl PortLog for DemoPortLog {
             }
             PortEvent::SynchronizationFault => {
                 hprintln!("[event] SynchronizationFault");
+            }
+            PortEvent::MessageReceived(msg) => {
+                hprintln!("[event] MessageReceived {}", msg);
+            }
+            PortEvent::MessageSent(msg) => {
+                hprintln!("[event] MessageSent {}", msg);
             }
             PortEvent::Static(msg) => {
                 hprintln!("[event] {}", msg);
@@ -498,8 +496,8 @@ fn main() -> ! {
         &physical_port,
         DemoTimerHost::new(&instant_clock),
         DemoTimestamping::new(&demo_clock),
-        HeaplessSortedForeignClockRecords::<4>::new(),
         DemoPortLog,
+        HeaplessSortedForeignClockRecords::<4>::new(),
     );
     let mut port_map = SingleDomainPortMap::new(ordinary_clock.domain_number(), port);
     port_map

@@ -12,14 +12,6 @@ impl TracingPortLog {
 }
 
 impl PortLog for TracingPortLog {
-    fn message_sent(&self, msg: &str) {
-        tracing::debug!("{}: Sent {}", self.port_identity, msg);
-    }
-
-    fn message_received(&self, msg: &str) {
-        tracing::debug!("{}: Received {}", self.port_identity, msg);
-    }
-
     fn port_event(&self, event: PortEvent) {
         match event {
             PortEvent::Initialized => {
@@ -50,6 +42,12 @@ impl PortLog for TracingPortLog {
             }
             PortEvent::SynchronizationFault => {
                 tracing::warn!("{}: Synchronization Fault", self.port_identity);
+            }
+            PortEvent::MessageReceived(msg) => {
+                tracing::debug!("{}: Message Received: {}", self.port_identity, msg);
+            }
+            PortEvent::MessageSent(msg) => {
+                tracing::debug!("{}: Message Sent: {}", self.port_identity, msg);
             }
             PortEvent::Static(desc) => {
                 tracing::info!("{}: {}", self.port_identity, desc);
