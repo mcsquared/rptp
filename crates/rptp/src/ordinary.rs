@@ -5,15 +5,15 @@ use crate::port::{DomainNumber, DomainPort, PhysicalPort, PortNumber, TimerHost}
 use crate::portstate::{PortProfile, PortState};
 use crate::timestamping::TxTimestamping;
 
-pub struct OrdinaryClock<'a, C: SynchronizableClock> {
-    local_clock: &'a LocalClock<C>,
+pub struct OrdinaryClock<C: SynchronizableClock> {
+    local_clock: LocalClock<C>,
     domain_number: DomainNumber,
     port_number: PortNumber,
 }
 
-impl<'a, C: SynchronizableClock> OrdinaryClock<'a, C> {
+impl<C: SynchronizableClock> OrdinaryClock<C> {
     pub fn new(
-        local_clock: &'a LocalClock<C>,
+        local_clock: LocalClock<C>,
         domain_number: DomainNumber,
         port_number: PortNumber,
     ) -> Self {
@@ -24,8 +24,8 @@ impl<'a, C: SynchronizableClock> OrdinaryClock<'a, C> {
         }
     }
 
-    pub fn local_clock(&self) -> &'a LocalClock<C> {
-        self.local_clock
+    pub fn local_clock(&self) -> &LocalClock<C> {
+        &self.local_clock
     }
 
     pub fn domain_number(&self) -> DomainNumber {
@@ -36,8 +36,8 @@ impl<'a, C: SynchronizableClock> OrdinaryClock<'a, C> {
         self.port_number
     }
 
-    pub fn port<T, TS, S, L>(
-        &self,
+    pub fn port<'a, T, TS, S, L>(
+        &'a self,
         physical_port: &'a dyn PhysicalPort,
         timer_host: T,
         timestamping: TS,
@@ -51,7 +51,7 @@ impl<'a, C: SynchronizableClock> OrdinaryClock<'a, C> {
         L: PortLog,
     {
         let domain_port = DomainPort::new(
-            self.local_clock,
+            &self.local_clock,
             physical_port,
             timer_host,
             timestamping,

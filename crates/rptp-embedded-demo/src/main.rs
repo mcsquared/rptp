@@ -489,7 +489,7 @@ fn main() -> ! {
         Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
     );
 
-    let ordinary_clock = OrdinaryClock::new(&local_clock, DomainNumber::new(0), PortNumber::new(1));
+    let ordinary_clock = OrdinaryClock::new(local_clock, DomainNumber::new(0), PortNumber::new(1));
 
     let physical_port = DemoPhysicalPort {
         inner: network.physical_port(),

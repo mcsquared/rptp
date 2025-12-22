@@ -47,7 +47,7 @@ async fn main() -> std::io::Result<()> {
     let general_socket = Rc::new(MulticastSocket::general().await?);
 
     let (system_tx, system_rx) = mpsc::unbounded_channel();
-    let ordinary_clock = OrdinaryTokioClock::new(&local_clock, domain, PortNumber::new(1));
+    let ordinary_clock = OrdinaryTokioClock::new(local_clock, domain, PortNumber::new(1));
 
     let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
     let port = ordinary_clock.port(

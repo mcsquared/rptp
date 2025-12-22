@@ -45,7 +45,7 @@ async fn main() -> std::io::Result<()> {
     let (system_tx, system_rx) = mpsc::unbounded_channel();
 
     let ordinary_clock =
-        OrdinaryTokioClock::new(&local_clock, DomainNumber::new(0), PortNumber::new(1));
+        OrdinaryTokioClock::new(local_clock, DomainNumber::new(0), PortNumber::new(1));
 
     let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 

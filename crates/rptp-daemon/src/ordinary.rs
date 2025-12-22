@@ -5,6 +5,7 @@ use rptp::{
     clock::{LocalClock, SynchronizableClock},
     infra::infra_support::SortedForeignClockRecordsVec,
     message::SystemMessage,
+    ordinary::OrdinaryClock,
     port::{DomainNumber, DomainPort, PortIdentity, PortNumber},
     portstate::PortState,
     timestamping::TxTimestamping,
@@ -20,22 +21,18 @@ pub type TokioPort<'a, C, TS> = PortState<
     TracingPortLog,
 >;
 
-pub struct OrdinaryTokioClock<'a, C: SynchronizableClock> {
-    ordinary_clock: rptp::ordinary::OrdinaryClock<'a, C>,
+pub struct OrdinaryTokioClock<C: SynchronizableClock> {
+    ordinary_clock: OrdinaryClock<C>,
 }
 
-impl<'a, C: SynchronizableClock> OrdinaryTokioClock<'a, C> {
+impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
     pub fn new(
-        local_clock: &'a LocalClock<C>,
+        local_clock: LocalClock<C>,
         domain_number: DomainNumber,
         port_number: PortNumber,
     ) -> Self {
         OrdinaryTokioClock {
-            ordinary_clock: rptp::ordinary::OrdinaryClock::new(
-                local_clock,
-                domain_number,
-                port_number,
-            ),
+            ordinary_clock: OrdinaryClock::new(local_clock, domain_number, port_number),
         }
     }
 
@@ -47,8 +44,8 @@ impl<'a, C: SynchronizableClock> OrdinaryTokioClock<'a, C> {
         self.ordinary_clock.port_number()
     }
 
-    pub fn port<N, T>(
-        &self,
+    pub fn port<'a, N, T>(
+        &'a self,
         physical_port: &'a TokioPhysicalPort<N>,
         system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
         timestamping: T,

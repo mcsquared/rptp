@@ -6,7 +6,7 @@ use tokio::time::{Duration, timeout};
 
 use rptp::{
     bmca::{DefaultDS, Priority1, Priority2},
-    clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
+    clock::{Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
     log::NOOP_CLOCK_METRICS,
     port::{DomainNumber, PortNumber, SingleDomainPortMap},
     servo::{Servo, SteppingServo},
@@ -39,7 +39,7 @@ async fn main() -> std::io::Result<()> {
     let general_socket = Rc::new(MulticastSocket::general().await?);
 
     let (system_tx, system_rx) = mpsc::unbounded_channel();
-    let ordinary_clock = OrdinaryTokioClock::new(&local_clock, domain, PortNumber::new(1));
+    let ordinary_clock = OrdinaryTokioClock::new(local_clock, domain, PortNumber::new(1));
 
     let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
     let port = ordinary_clock.port(
@@ -72,7 +72,7 @@ async fn main() -> std::io::Result<()> {
             // better to improve it in the future, to determine the ptp4l master's time through
             // some side channel. However, it indicates at least the successful message exchange
             // and clock update against ptp4l, which is already a good start.
-            if local_clock.now() != TimeStamp::new(0, 0) {
+            if fake_clock.now() != TimeStamp::new(0, 0) {
                 break;
             }
         }

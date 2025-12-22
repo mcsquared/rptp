@@ -6,7 +6,7 @@ use tokio::time::{Duration, timeout};
 
 use rptp::{
     bmca::{DefaultDS, Priority1, Priority2},
-    clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
+    clock::{Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
     log::NOOP_CLOCK_METRICS,
     port::{DomainNumber, PortNumber, SingleDomainPortMap},
     servo::{Servo, SteppingServo},
@@ -39,7 +39,7 @@ async fn main() -> std::io::Result<()> {
     let general_socket = Rc::new(MulticastSocket::general().await?);
 
     let (system_tx, system_rx) = mpsc::unbounded_channel();
-    let ordinary_clock = OrdinaryTokioClock::new(&local_clock, domain, PortNumber::new(1));
+    let ordinary_clock = OrdinaryTokioClock::new(local_clock, domain, PortNumber::new(1));
 
     let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
     let port = ordinary_clock.port(
@@ -67,7 +67,7 @@ async fn main() -> std::io::Result<()> {
     let clock_sync = async {
         loop {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            if local_clock.now() == TimeStamp::new(10, 500_000_000) {
+            if fake_clock.now() == TimeStamp::new(10, 500_000_000) {
                 break;
             }
         }
