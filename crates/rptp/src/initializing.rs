@@ -50,10 +50,11 @@ mod tests {
             TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
+        let physical_port = FakePort::new();
         let initializing = InitializingPort::new(
             DomainPort::new(
                 &local_clock,
-                FakePort::new(),
+                &physical_port,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 DomainNumber::new(0),

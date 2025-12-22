@@ -36,7 +36,6 @@ pub trait TimerHost {
 
 pub trait Port {
     type Clock: SynchronizableClock;
-    type PhysicalPort: PhysicalPort;
     type Timeout: Timeout;
 
     fn local_clock(&self) -> &LocalClock<Self::Clock>;
@@ -179,22 +178,19 @@ impl Display for ParentPortIdentity {
     }
 }
 
-pub struct DomainPort<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestamping>
-{
+pub struct DomainPort<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping> {
     local_clock: &'a LocalClock<C>,
-    physical_port: P,
+    physical_port: &'a dyn PhysicalPort,
     timer_host: T,
     timestamping: TS,
     domain_number: DomainNumber,
     port_number: PortNumber,
 }
 
-impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestamping>
-    DomainPort<'a, C, P, T, TS>
-{
+impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping> DomainPort<'a, C, T, TS> {
     pub fn new(
         local_clock: &'a LocalClock<C>,
-        physical_port: P,
+        physical_port: &'a dyn PhysicalPort,
         timer_host: T,
         timestamping: TS,
         domain_number: DomainNumber,
@@ -211,11 +207,10 @@ impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestampi
     }
 }
 
-impl<'a, C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestamping> Port
-    for DomainPort<'a, C, P, T, TS>
+impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping> Port
+    for DomainPort<'a, C, T, TS>
 {
     type Clock = C;
-    type PhysicalPort = P;
     type Timeout = T::Timeout;
 
     fn local_clock(&self) -> &LocalClock<Self::Clock> {
@@ -405,7 +400,7 @@ mod tests {
 
         let port = DomainPort::new(
             &local_clock,
-            cap_port,
+            &cap_port,
             &timer_host,
             FakeTimestamping::new(),
             domain_number,
@@ -446,7 +441,7 @@ mod tests {
 
         let port = DomainPort::new(
             &local_clock,
-            cap_port,
+            &cap_port,
             &timer_host,
             FakeTimestamping::new(),
             domain_number,

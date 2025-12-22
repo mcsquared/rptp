@@ -226,7 +226,7 @@ mod tests {
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     type UncalibratedTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping>;
+        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping>;
 
     type UncalibratedTestPort<'a> = UncalibratedPort<
         UncalibratedTestDomainPort<'a>,

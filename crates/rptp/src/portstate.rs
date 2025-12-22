@@ -396,11 +396,11 @@ mod tests {
     };
     use crate::time::{LogMessageInterval, TimeStamp};
 
-    type PortStateTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, FakePort, FakeTimerHost, FakeTimestamping>;
+    type PortStateTestDomainPort<'a> = DomainPort<'a, FakeClock, FakeTimerHost, FakeTimestamping>;
 
     struct PortStateTestSetup {
         local_clock: LocalClock<FakeClock>,
+        physical_port: FakePort,
     }
 
     impl PortStateTestSetup {
@@ -411,13 +411,14 @@ mod tests {
                     default_ds,
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
+                physical_port: FakePort::new(),
             }
         }
 
-        fn domain_port(&self) -> PortStateTestDomainPort<'_> {
+        fn domain_port<'a>(&'a self) -> PortStateTestDomainPort<'a> {
             DomainPort::new(
                 &self.local_clock,
-                FakePort::new(),
+                &self.physical_port,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 DomainNumber::new(0),
@@ -931,7 +932,7 @@ mod tests {
         let mut master = PortProfile::default().master(
             DomainPort::new(
                 &local_clock,
-                FailingPort, // <-- Failing port to simulate send failure <--
+                &FailingPort, // <-- Failing port to simulate send failure <--
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 DomainNumber::new(0),
@@ -957,7 +958,7 @@ mod tests {
         let mut master = PortProfile::default().master(
             DomainPort::new(
                 &local_clock,
-                FailingPort,
+                &FailingPort,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 DomainNumber::new(0),
@@ -987,7 +988,7 @@ mod tests {
         let mut master = PortProfile::default().master(
             DomainPort::new(
                 &local_clock,
-                FailingPort, // <-- failing port to simulate send failure <--
+                &FailingPort, // <-- failing port to simulate send failure <--
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 DomainNumber::new(0),
@@ -1017,7 +1018,7 @@ mod tests {
         let mut master = PortProfile::default().master(
             DomainPort::new(
                 &local_clock,
-                FailingPort,
+                &FailingPort,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 DomainNumber::new(0),
@@ -1042,7 +1043,7 @@ mod tests {
 
         let domain_port = DomainPort::new(
             &local_clock,
-            FailingPort,
+            &FailingPort,
             FakeTimerHost::new(),
             FakeTimestamping::new(),
             DomainNumber::new(0),
@@ -1101,7 +1102,7 @@ mod tests {
     #[test]
     fn portstate_faulty_to_faulty_transition() {
         let faulty: PortState<
-            DomainPort<FakeClock, FakePort, FakeTimerHost, FakeTimestamping>,
+            DomainPort<FakeClock, FakeTimerHost, FakeTimestamping>,
             IncrementalBmca<SortedForeignClockRecordsVec>,
             NoopPortLog,
         > = PortState::Faulty(FaultyPort::default());

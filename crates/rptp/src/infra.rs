@@ -22,7 +22,6 @@ pub mod infra_support {
 
     impl<P: Port> Port for Box<P> {
         type Clock = P::Clock;
-        type PhysicalPort = P::PhysicalPort;
         type Timeout = P::Timeout;
 
         fn local_clock(&self) -> &LocalClock<Self::Clock> {

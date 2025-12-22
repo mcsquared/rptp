@@ -105,7 +105,7 @@ mod tests {
     use crate::time::{Duration, Instant, LogMessageInterval};
 
     type ListeningTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping>;
+        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping>;
 
     type ListeningTestPort<'a> = ListeningPort<
         ListeningTestDomainPort<'a>,

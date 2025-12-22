@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use tokio::sync::mpsc;
 
 use rptp::{
@@ -16,8 +14,8 @@ use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
 use crate::node::{TokioPhysicalPort, TokioTimerHost};
 
-pub type TokioPort<'a, C, NS, TS> = PortState<
-    DomainPort<'a, C, TokioPhysicalPort<NS>, TokioTimerHost, TS>,
+pub type TokioPort<'a, C, TS> = PortState<
+    DomainPort<'a, C, TokioTimerHost, TS>,
     IncrementalBmca<SortedForeignClockRecordsVec>,
     TracingPortLog,
 >;
@@ -51,17 +49,16 @@ impl<'a, C: SynchronizableClock> OrdinaryTokioClock<'a, C> {
 
     pub fn port<N, T>(
         &self,
-        event_socket: Rc<N>,
-        general_socket: Rc<N>,
+        physical_port: &'a TokioPhysicalPort<N>,
         system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
         timestamping: T,
-    ) -> TokioPort<'a, C, N, T>
+    ) -> TokioPort<'a, C, T>
     where
         N: NetworkSocket,
         T: TxTimestamping,
     {
         self.ordinary_clock.port(
-            TokioPhysicalPort::new(event_socket.clone(), general_socket.clone()),
+            physical_port,
             TokioTimerHost::new(self.ordinary_clock.domain_number(), system_tx.clone()),
             timestamping,
             SortedForeignClockRecordsVec::new(),

@@ -14,7 +14,7 @@ use rptp::{
     time::TimeStamp,
 };
 use rptp_daemon::net::MulticastSocket;
-use rptp_daemon::node::TokioPortsLoop;
+use rptp_daemon::node::{TokioPhysicalPort, TokioPortsLoop};
 use rptp_daemon::ordinary::OrdinaryTokioClock;
 use rptp_daemon::timestamping::{ClockRxTimestamping, ClockTxTimestamping};
 
@@ -41,9 +41,9 @@ async fn main() -> std::io::Result<()> {
     let (system_tx, system_rx) = mpsc::unbounded_channel();
     let ordinary_clock = OrdinaryTokioClock::new(&local_clock, domain, PortNumber::new(1));
 
+    let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
     let port = ordinary_clock.port(
-        event_socket.clone(),
-        general_socket.clone(),
+        &physical_port,
         system_tx.clone(),
         ClockTxTimestamping::new(
             &fake_clock,

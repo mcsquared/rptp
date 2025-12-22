@@ -36,17 +36,16 @@ impl<'a, C: SynchronizableClock> OrdinaryClock<'a, C> {
         self.port_number
     }
 
-    pub fn port<P, TH, TS, S, L>(
+    pub fn port<T, TS, S, L>(
         &self,
-        physical_port: P,
-        timer_host: TH,
+        physical_port: &'a dyn PhysicalPort,
+        timer_host: T,
         timestamping: TS,
         sorted_foreign_clock_records: S,
         log: L,
-    ) -> PortState<DomainPort<'a, C, P, TH, TS>, IncrementalBmca<S>, L>
+    ) -> PortState<DomainPort<'a, C, T, TS>, IncrementalBmca<S>, L>
     where
-        P: PhysicalPort,
-        TH: TimerHost,
+        T: TimerHost,
         TS: TxTimestamping,
         S: SortedForeignClockRecords,
         L: PortLog,

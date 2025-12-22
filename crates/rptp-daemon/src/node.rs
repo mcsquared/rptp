@@ -334,7 +334,7 @@ mod tests {
     };
 
     use crate::log::TracingPortLog;
-    use crate::net::{FakeNetworkSocket, MulticastSocket, NetworkSocket};
+    use crate::net::{FakeNetworkSocket, NetworkSocket};
     use crate::timestamping::ClockTxTimestamping;
     use crate::virtualclock::VirtualClock;
 
@@ -342,13 +342,13 @@ mod tests {
     use std::net::SocketAddr;
     use std::time::Duration as StdDuration;
 
-    type TestPortMap<'a, C, N> = SingleDomainPortMap<
-        Box<DomainPort<'a, C, TokioPhysicalPort<N>, TokioTimerHost, FakeTimestamping>>,
+    type TestPortMap<'a, C> = SingleDomainPortMap<
+        Box<DomainPort<'a, C, TokioTimerHost, FakeTimestamping>>,
         IncrementalBmca<SortedForeignClockRecordsVec>,
         TracingPortLog,
     >;
 
-    type TestPortsLoop<'a, C, N> = TokioPortsLoop<TestPortMap<'a, C, N>, N, FakeTimestamping>;
+    type TestPortsLoop<'a, C, N> = TokioPortsLoop<TestPortMap<'a, C>, N, FakeTimestamping>;
 
     // Prebuilt PTPv2 Sync frames used by error-handling tests.
     const DOMAIN_SEVEN_SYNC: [u8; 44] = [
@@ -387,13 +387,12 @@ mod tests {
             local_clock: &'a LocalClock<C>,
             event_socket: Rc<N>,
             general_socket: Rc<N>,
+            physical_port: &'a TokioPhysicalPort<N>,
         ) -> std::io::Result<Self> {
             let domain_number = DomainNumber::new(0);
 
             let (system_tx, system_rx) = mpsc::unbounded_channel();
             let tx_timestamping = FakeTimestamping::new();
-            let physical_port =
-                TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
             let port_number = PortNumber::new(1);
             let domain_port = Box::new(DomainPort::new(
                 local_clock,
@@ -438,15 +437,7 @@ mod tests {
         use std::mem::size_of;
         let s = size_of::<
             PortState<
-                Box<
-                    DomainPort<
-                        'static,
-                        FakeClock,
-                        TokioPhysicalPort<MulticastSocket>,
-                        TokioTimerHost,
-                        ClockTxTimestamping<FakeClock>,
-                    >,
-                >,
+                Box<DomainPort<'static, FakeClock, TokioTimerHost, ClockTxTimestamping<FakeClock>>>,
                 IncrementalBmca<SortedForeignClockRecordsVec>,
                 TracingPortLog,
             >,
@@ -530,7 +521,7 @@ mod tests {
         let port_number = PortNumber::new(1);
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
-            physical_port,
+            &physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             &timestamping,
             domain_number,
@@ -620,7 +611,7 @@ mod tests {
         delay_timeout.restart(Duration::from_secs(0));
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
-            physical_port,
+            &physical_port,
             timer_host,
             FakeTimestamping::new(),
             domain_number,
@@ -703,15 +694,16 @@ mod tests {
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
-        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
-        let (general_socket_impl, _) = InjectingNetworkSocket::new();
+        let (event_socket, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket, _) = InjectingNetworkSocket::new();
 
-        let node = MasterTestNode::new(
-            &local_clock,
-            Rc::new(event_socket_impl),
-            Rc::new(general_socket_impl),
-        )
-        .await?;
+        let event_socket = Rc::new(event_socket);
+        let general_socket = Rc::new(general_socket);
+
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+
+        let node =
+            MasterTestNode::new(&local_clock, event_socket, general_socket, &physical_port).await?;
 
         event_queue
             .lock()
@@ -737,15 +729,16 @@ mod tests {
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
-        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
-        let (general_socket_impl, _) = InjectingNetworkSocket::new();
+        let (event_socket, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket, _) = InjectingNetworkSocket::new();
 
-        let node = MasterTestNode::new(
-            &local_clock,
-            Rc::new(event_socket_impl),
-            Rc::new(general_socket_impl),
-        )
-        .await?;
+        let event_socket = Rc::new(event_socket);
+        let general_socket = Rc::new(general_socket);
+
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+
+        let node =
+            MasterTestNode::new(&local_clock, event_socket, general_socket, &physical_port).await?;
 
         event_queue.lock().unwrap().push_back(PTP_V1_SYNC.to_vec());
 
@@ -768,15 +761,16 @@ mod tests {
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
-        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
-        let (general_socket_impl, _) = InjectingNetworkSocket::new();
+        let (event_socket, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket, _) = InjectingNetworkSocket::new();
 
-        let node = MasterTestNode::new(
-            &local_clock,
-            Rc::new(event_socket_impl),
-            Rc::new(general_socket_impl),
-        )
-        .await?;
+        let event_socket = Rc::new(event_socket);
+        let general_socket = Rc::new(general_socket);
+
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+
+        let node =
+            MasterTestNode::new(&local_clock, event_socket, general_socket, &physical_port).await?;
 
         // Inject a buffer that is shorter than the PTP header (34 bytes).
         event_queue.lock().unwrap().push_back(vec![0u8; 10]);
@@ -800,15 +794,16 @@ mod tests {
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
-        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
-        let (general_socket_impl, _) = InjectingNetworkSocket::new();
+        let (event_socket, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket, _) = InjectingNetworkSocket::new();
 
-        let node = MasterTestNode::new(
-            &local_clock,
-            Rc::new(event_socket_impl),
-            Rc::new(general_socket_impl),
-        )
-        .await?;
+        let event_socket = Rc::new(event_socket);
+        let general_socket = Rc::new(general_socket);
+
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+
+        let node =
+            MasterTestNode::new(&local_clock, event_socket, general_socket, &physical_port).await?;
 
         event_queue
             .lock()
@@ -834,15 +829,16 @@ mod tests {
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
-        let (event_socket_impl, event_queue) = InjectingNetworkSocket::new();
-        let (general_socket_impl, _) = InjectingNetworkSocket::new();
+        let (event_socket, event_queue) = InjectingNetworkSocket::new();
+        let (general_socket, _) = InjectingNetworkSocket::new();
 
-        let node = MasterTestNode::new(
-            &local_clock,
-            Rc::new(event_socket_impl),
-            Rc::new(general_socket_impl),
-        )
-        .await?;
+        let event_socket = Rc::new(event_socket);
+        let general_socket = Rc::new(general_socket);
+
+        let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+
+        let node =
+            MasterTestNode::new(&local_clock, event_socket, general_socket, &physical_port).await?;
 
         event_queue
             .lock()

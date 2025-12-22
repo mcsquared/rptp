@@ -491,10 +491,11 @@ fn main() -> ! {
 
     let ordinary_clock = OrdinaryClock::new(&local_clock, DomainNumber::new(0), PortNumber::new(1));
 
+    let physical_port = DemoPhysicalPort {
+        inner: network.physical_port(),
+    };
     let port = ordinary_clock.port(
-        DemoPhysicalPort {
-            inner: network.physical_port(),
-        },
+        &physical_port,
         DemoTimerHost::new(&instant_clock),
         DemoTimestamping::new(&demo_clock),
         HeaplessSortedForeignClockRecords::<4>::new(),

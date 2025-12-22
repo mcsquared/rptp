@@ -225,8 +225,7 @@ mod tests {
     };
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
-    type SlaveTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping>;
+    type SlaveTestDomainPort<'a> = DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping>;
 
     type SlaveTestPort<'a> = SlavePort<
         SlaveTestDomainPort<'a>,

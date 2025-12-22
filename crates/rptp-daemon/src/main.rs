@@ -19,7 +19,7 @@ use rptp::{
 };
 
 use crate::net::MulticastSocket;
-use crate::node::TokioPortsLoop;
+use crate::node::{TokioPhysicalPort, TokioPortsLoop};
 use crate::ordinary::OrdinaryTokioClock;
 use crate::timestamping::{ClockRxTimestamping, ClockTxTimestamping};
 use crate::virtualclock::VirtualClock;
@@ -47,9 +47,10 @@ async fn main() -> std::io::Result<()> {
     let ordinary_clock =
         OrdinaryTokioClock::new(&local_clock, DomainNumber::new(0), PortNumber::new(1));
 
+    let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+
     let port = ordinary_clock.port(
-        event_socket.clone(),
-        general_socket.clone(),
+        &physical_port,
         system_tx.clone(),
         ClockTxTimestamping::new(
             &virtual_clock,
