@@ -91,7 +91,8 @@ pub trait SortedForeignClockRecords {
 /// in the BMCA state, and is used as a building block for more complex BMCA roles
 /// such as local master or parent tracking.
 pub struct IncrementalBmca<S: SortedForeignClockRecords> {
-    inner: BestMasterClockAlgorithm<S>,
+    inner: BestMasterClockAlgorithm,
+    sorted_clock_records: S,
     dirty: Cell<bool>,
 }
 
@@ -99,7 +100,8 @@ impl<S: SortedForeignClockRecords> IncrementalBmca<S> {
     /// Create a new incremental BMCA around the given sorted record store.
     pub fn new(sorted_clock_records: S) -> Self {
         Self {
-            inner: BestMasterClockAlgorithm::new(sorted_clock_records),
+            inner: BestMasterClockAlgorithm,
+            sorted_clock_records,
             dirty: Cell::new(false),
         }
     }
@@ -113,13 +115,30 @@ impl<S: SortedForeignClockRecords> Bmca for IncrementalBmca<S> {
         log_announce_interval: LogInterval,
         now: Instant,
     ) {
-        let status = self.inner.consider(
-            source_port_identity,
-            foreign_clock_ds,
-            log_announce_interval,
-            now,
-        );
-        if status == ForeignClockStatus::Updated {
+        let pruned = self.sorted_clock_records.prune_stale(now);
+
+        let result = self
+            .sorted_clock_records
+            .update_record(&source_port_identity, |record| {
+                record.consider(foreign_clock_ds, log_announce_interval, now)
+            });
+
+        match result {
+            ForeignClockResult::NotFound => {
+                self.sorted_clock_records.insert(ForeignClockRecord::new(
+                    source_port_identity,
+                    foreign_clock_ds,
+                    log_announce_interval,
+                    now,
+                ));
+            }
+            ForeignClockResult::Status(ForeignClockStatus::Updated) => {
+                self.dirty.set(true);
+            }
+            ForeignClockResult::Status(ForeignClockStatus::Unchanged) => {}
+        };
+
+        if pruned {
             self.dirty.set(true);
         }
     }
@@ -127,7 +146,8 @@ impl<S: SortedForeignClockRecords> Bmca for IncrementalBmca<S> {
     fn decision<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> BmcaDecision {
         if self.dirty.get() {
             self.dirty.set(false);
-            self.inner.decision(local_clock)
+            self.inner
+                .decision(local_clock, self.sorted_clock_records.first())
         } else {
             BmcaDecision::Undecided
         }
@@ -263,59 +283,18 @@ impl<B: Bmca> Bmca for ParentTrackingBmca<B> {
 /// into different roles depending on the port state (e.g., local master tracking in pre-master,
 /// parent tracking in slave, etc.), and those roles are implemented as decorators around this
 /// core BMCA.
-struct BestMasterClockAlgorithm<S: SortedForeignClockRecords> {
-    sorted_clock_records: S,
-}
+struct BestMasterClockAlgorithm;
 
-impl<S: SortedForeignClockRecords> BestMasterClockAlgorithm<S> {
-    /// Create a new full BMCA.
-    fn new(sorted_clock_records: S) -> Self {
-        Self {
-            sorted_clock_records,
-        }
-    }
-
-    /// Let the BMCA consider a foreign clock data set.
-    fn consider(
-        &mut self,
-        source_port_identity: PortIdentity,
-        foreign_clock_ds: ForeignClockDS,
-        log_announce_interval: LogInterval,
-        now: Instant,
-    ) -> ForeignClockStatus {
-        let pruned = self.sorted_clock_records.prune_stale(now);
-
-        let result = self
-            .sorted_clock_records
-            .update_record(&source_port_identity, |record| {
-                record.consider(foreign_clock_ds, log_announce_interval, now)
-            });
-
-        let status = match result {
-            ForeignClockResult::NotFound => {
-                self.sorted_clock_records.insert(ForeignClockRecord::new(
-                    source_port_identity,
-                    foreign_clock_ds,
-                    log_announce_interval,
-                    now,
-                ));
-                ForeignClockStatus::Unchanged
-            }
-            ForeignClockResult::Status(status) => status,
-        };
-
-        if pruned {
-            ForeignClockStatus::Updated
-        } else {
-            status
-        }
-    }
-
+impl BestMasterClockAlgorithm {
     // IEEE 1588-2019 Section 9.3.3 - BMCA State Decision Algorithm
     // Note: variable names correspond to those in the spec for easier reference.
-    fn decision<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> BmcaDecision {
+    fn decision<C: SynchronizableClock>(
+        &self,
+        local_clock: &LocalClock<C>,
+        e_rbest_record: Option<&ForeignClockRecord>,
+    ) -> BmcaDecision {
         let d_0 = local_clock;
-        let Some(e_rbest_record) = self.sorted_clock_records.first() else {
+        let Some(e_rbest_record) = e_rbest_record else {
             return BmcaDecision::Undecided;
         };
         let Some(e_rbest) = e_rbest_record.dataset() else {
@@ -1260,7 +1239,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
+    fn incremental_bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
         let high = TestClockCatalog::default_high_grade();
         let mid = TestClockCatalog::default_mid_grade();
         let low = TestClockCatalog::default_low_grade_slave_only();
@@ -1288,19 +1267,17 @@ pub(crate) mod tests {
         ];
         let mut sorted_records = SortedForeignClockRecordsVec::from_records(&stale_records);
 
-        let mut bmca = BestMasterClockAlgorithm::new(&mut sorted_records);
-
         let gm_port_id = PortIdentity::new(gm.clock_identity(), PortNumber::new(1));
         let gm_foreign = gm.foreign_ds(StepsRemoved::new(0));
 
         // Consider a new announce from a different foreign clock.
-        let status = bmca.consider(
+        let mut bmca = IncrementalBmca::new(&mut sorted_records);
+        bmca.consider(
             gm_port_id,
             gm_foreign,
             LogInterval::new(0),
             Instant::from_secs(10),
         );
-        assert_eq!(status, ForeignClockStatus::Updated);
 
         assert_eq!(
             sorted_records.len(),
@@ -1319,25 +1296,25 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
+    fn incremental_bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             TestClockCatalog::gps_grandmaster().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
+        let bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
         assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
 
     #[test]
-    fn bmca_gm_capable_local_loses_tuple_returns_passive() {
+    fn incremental_bmca_gm_capable_local_loses_tuple_returns_passive() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             TestClockCatalog::gps_grandmaster().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
         // Foreign uses lower priority1 so it is better, even though clock class is worse.
         let foreign =
@@ -1362,13 +1339,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_gm_capable_local_better_than_foreign_returns_master_m1() {
+    fn incremental_bmca_gm_capable_local_better_than_foreign_returns_master_m1() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             TestClockCatalog::gps_grandmaster().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
         // Foreign is worse (higher priority1), so local GM-capable should become Master(M1).
         let foreign = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
@@ -1390,13 +1367,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_non_gm_local_better_than_foreign_returns_master_m2() {
+    fn incremental_bmca_non_gm_local_better_than_foreign_returns_master_m2() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
         // Foreign is slightly worse quality; local should be better and take M2.
         let foreign =
@@ -1419,13 +1396,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_non_gm_local_loses_tuple_returns_slave() {
+    fn incremental_bmca_non_gm_local_loses_tuple_returns_slave() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
         let port_id = PortIdentity::new(
@@ -1446,13 +1423,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_recommends_slave_from_interleaved_announce_sequence() {
+    fn incremental_bmca_recommends_slave_from_interleaved_announce_sequence() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             TestClockCatalog::default_low_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
         let high = TestClockCatalog::default_high_grade();
         let mid = TestClockCatalog::default_mid_grade();
@@ -1499,13 +1476,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_recommends_slave_from_non_interleaved_announce_sequence() {
+    fn incremental_bmca_recommends_slave_from_non_interleaved_announce_sequence() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             TestClockCatalog::default_low_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
         let high = TestClockCatalog::default_high_grade();
         let mid = TestClockCatalog::default_mid_grade();
@@ -1552,25 +1529,25 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_undecided_when_no_announces_yet() {
+    fn incremental_bmca_undecided_when_no_announces_yet() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
+        let bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
         assert_eq!(bmca.decision(&local_clock), BmcaDecision::Undecided);
     }
 
     #[test]
-    fn bmca_undecided_when_no_qualified_clock_records_yet() {
+    fn incremental_bmca_undecided_when_no_qualified_clock_records_yet() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
         let foreign_high = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
 
@@ -1585,13 +1562,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bmca_undecided_when_only_single_announces_each() {
+    fn incremental_bmca_undecided_when_only_single_announces_each() {
         let local_clock = LocalClock::new(
             FakeClock::default(),
             TestClockCatalog::default_mid_grade().default_ds(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let mut bmca = BestMasterClockAlgorithm::new(SortedForeignClockRecordsVec::new());
+        let mut bmca = IncrementalBmca::new(SortedForeignClockRecordsVec::new());
 
         let high = TestClockCatalog::default_high_grade();
         let mid = TestClockCatalog::default_mid_grade();
