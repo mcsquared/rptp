@@ -1,9 +1,9 @@
-use core::cell::Cell;
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
+use crate::bmca::BestForeignDataset;
 use crate::{
-    bmca::{DefaultDS, ForeignClockDS},
+    bmca::ClockDS,
     message::{AnnounceMessage, SequenceId},
     servo::{Servo, ServoSample, ServoState},
     time::{LogMessageInterval, TimeStamp},
@@ -317,36 +317,21 @@ pub trait SynchronizableClock: Clock {
 
 pub struct LocalClock<C: SynchronizableClock> {
     clock: C,
-    default_ds: DefaultDS,
-    steps_removed: Cell<StepsRemoved>,
+    ds: ClockDS,
     servo: Servo,
 }
 
 impl<C: SynchronizableClock> LocalClock<C> {
-    pub fn new(clock: C, default_ds: DefaultDS, servo: Servo) -> Self {
-        Self {
-            clock,
-            default_ds,
-            steps_removed: Cell::new(StepsRemoved::new(0)),
-            servo,
-        }
+    pub fn new(clock: C, ds: ClockDS, servo: Servo) -> Self {
+        Self { clock, ds, servo }
     }
 
     pub fn identity(&self) -> &ClockIdentity {
-        self.default_ds.identity()
+        self.ds.identity()
     }
 
     pub fn now(&self) -> TimeStamp {
         self.clock.now()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn steps_removed(&self) -> StepsRemoved {
-        self.steps_removed.get()
-    }
-
-    pub(crate) fn set_steps_removed(&self, steps_removed: StepsRemoved) {
-        self.steps_removed.set(steps_removed);
     }
 
     pub(crate) fn announce(
@@ -354,21 +339,23 @@ impl<C: SynchronizableClock> LocalClock<C> {
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
     ) -> AnnounceMessage {
-        self.default_ds.announce(
+        AnnounceMessage::new(
             sequence_id,
             log_message_interval,
-            self.steps_removed.get(),
+            self.ds,
             self.clock.time_scale(),
         )
     }
 
     pub(crate) fn is_grandmaster_capable(&self) -> bool {
-        self.default_ds.is_grandmaster_capable()
+        self.ds.is_grandmaster_capable()
     }
 
-    pub(crate) fn better_than(&self, other: &ForeignClockDS) -> bool {
-        self.default_ds
-            .better_than(other, &self.steps_removed.get())
+    pub(crate) fn better_than(&self, other: BestForeignDataset) -> bool {
+        match other {
+            BestForeignDataset::Qualified { ds: other_ds, .. } => self.ds.better_than(other_ds),
+            BestForeignDataset::Empty => true,
+        }
     }
 
     pub(crate) fn discipline(&self, sample: ServoSample) -> ServoState {
@@ -382,10 +369,6 @@ pub struct StepsRemoved(u16);
 impl StepsRemoved {
     pub fn new(steps_removed: u16) -> Self {
         Self(steps_removed)
-    }
-
-    pub(crate) fn increment(self) -> Self {
-        Self(self.0.saturating_add(1))
     }
 
     pub(crate) fn as_u16(&self) -> u16 {

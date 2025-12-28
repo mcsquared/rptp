@@ -164,7 +164,7 @@ mod tests {
             ),
         ]);
 
-        let best_clock = records.first().and_then(|record| record.dataset());
+        let best_clock = records.first().and_then(|record| record.qualified_ds());
         assert_eq!(best_clock, Some(&high_clock));
     }
 

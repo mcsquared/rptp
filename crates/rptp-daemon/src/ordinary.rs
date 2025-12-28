@@ -1,7 +1,6 @@
 use tokio::sync::mpsc;
 
 use rptp::{
-    bmca::IncrementalBmca,
     clock::{LocalClock, SynchronizableClock},
     infra::infra_support::SortedForeignClockRecordsVec,
     message::SystemMessage,
@@ -15,10 +14,8 @@ use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
 use crate::node::{TokioPhysicalPort, TokioTimerHost};
 
-pub type TokioPort<'a, C, TS> = PortState<
-    DomainPort<'a, C, TokioTimerHost, TS, TracingPortLog>,
-    IncrementalBmca<SortedForeignClockRecordsVec>,
->;
+pub type TokioPort<'a, C, TS> =
+    PortState<DomainPort<'a, C, TokioTimerHost, TS, TracingPortLog>, SortedForeignClockRecordsVec>;
 
 pub struct OrdinaryTokioClock<C: SynchronizableClock> {
     ordinary_clock: OrdinaryClock<C>,

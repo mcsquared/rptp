@@ -1,5 +1,5 @@
 use crate::{
-    bmca::{Bmca, ForeignClockDS},
+    bmca::{Bmca, ClockDS},
     clock::TimeScale,
     port::{PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
@@ -248,7 +248,7 @@ impl TryFrom<&[u8]> for SequenceId {
 pub struct AnnounceMessage {
     sequence_id: SequenceId,
     log_message_interval: LogMessageInterval,
-    foreign_clock_ds: ForeignClockDS,
+    foreign_clock_ds: ClockDS,
     ptp_timescale: TimeScale,
 }
 
@@ -256,7 +256,7 @@ impl AnnounceMessage {
     pub(crate) fn new(
         sequence_id: SequenceId,
         log_message_interval: LogMessageInterval,
-        foreign_clock_ds: ForeignClockDS,
+        foreign_clock_ds: ClockDS,
         ptp_timescale: TimeScale,
     ) -> Self {
         Self {
@@ -606,7 +606,7 @@ mod tests {
         let announce = AnnounceMessage::new(
             42.into(),
             LogMessageInterval::new(0x7F),
-            ForeignClockDS::new(
+            ClockDS::new(
                 ClockIdentity::new(&[0; 8]),
                 Priority1::new(127),
                 Priority2::new(127),

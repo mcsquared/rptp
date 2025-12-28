@@ -1,8 +1,8 @@
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
-use crate::bmca::Bmca;
-use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, SynchronizableClock};
+use crate::bmca::SortedForeignClockRecords;
+use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
 use crate::log::{PortEvent, PortLog};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::PortState;
@@ -46,10 +46,6 @@ pub trait Port {
     /// Creating a timeout must not schedule it; scheduling happens when the handle is restarted.
     fn timeout(&self, msg: SystemMessage) -> Self::Timeout;
     fn log(&self, event: PortEvent);
-
-    fn update_steps_removed(&self, steps_removed: StepsRemoved) {
-        self.local_clock().set_steps_removed(steps_removed);
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -262,13 +258,13 @@ pub trait PortMap {
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress>;
 }
 
-pub struct SingleDomainPortMap<P: Port, B: Bmca> {
+pub struct SingleDomainPortMap<P: Port, S: SortedForeignClockRecords> {
     domain_number: DomainNumber,
-    port_state: Option<PortState<P, B>>,
+    port_state: Option<PortState<P, S>>,
 }
 
-impl<P: Port, B: Bmca> SingleDomainPortMap<P, B> {
-    pub fn new(domain_number: DomainNumber, port_state: PortState<P, B>) -> Self {
+impl<P: Port, S: SortedForeignClockRecords> SingleDomainPortMap<P, S> {
+    pub fn new(domain_number: DomainNumber, port_state: PortState<P, S>) -> Self {
         Self {
             domain_number,
             port_state: Some(port_state),
@@ -276,7 +272,7 @@ impl<P: Port, B: Bmca> SingleDomainPortMap<P, B> {
     }
 }
 
-impl<P: Port, B: Bmca> PortMap for SingleDomainPortMap<P, B> {
+impl<P: Port, S: SortedForeignClockRecords> PortMap for SingleDomainPortMap<P, S> {
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress> {
         if self.domain_number == domain_number {
             Ok(&mut self.port_state)
@@ -302,7 +298,7 @@ pub trait PortIngress {
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
-impl<P: Port, B: Bmca> PortIngress for Option<PortState<P, B>> {
+impl<P: Port, S: SortedForeignClockRecords> PortIngress for Option<PortState<P, S>> {
     fn process_event_message(
         &mut self,
         source_port_identity: PortIdentity,
@@ -360,8 +356,8 @@ mod tests {
     use core::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::bmca::{DefaultDS, Priority1, Priority2};
-    use crate::clock::{ClockAccuracy, ClockClass, ClockQuality};
+    use crate::bmca::{ClockDS, Priority1, Priority2};
+    use crate::clock::{ClockAccuracy, ClockClass, ClockQuality, StepsRemoved};
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, FollowUpMessage};
     use crate::servo::{Servo, SteppingServo};
@@ -395,11 +391,12 @@ mod tests {
         let identity = ClockIdentity::new(&[1, 2, 3, 4, 5, 6, 7, 8]);
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::new(
+            ClockDS::new(
                 identity,
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within100us, 0xFFFF),
+                StepsRemoved::new(0),
             ),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
@@ -437,11 +434,12 @@ mod tests {
         let identity = ClockIdentity::new(&[8, 7, 6, 5, 4, 3, 2, 1]);
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::new(
+            ClockDS::new(
                 identity,
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within100us, 0xFFFF),
+                StepsRemoved::new(0),
             ),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );

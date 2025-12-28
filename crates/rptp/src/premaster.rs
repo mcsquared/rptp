@@ -1,23 +1,24 @@
 use crate::bmca::{
-    Bmca, BmcaDecision, BmcaSlaveDecision, LocalMasterTrackingBmca, ParentTrackingBmca,
+    Bmca, BmcaDecision, GrandMasterTrackingBmca, QualificationTimeoutPolicy,
+    SortedForeignClockRecords,
 };
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
-use crate::port::{Port, PortIdentity};
+use crate::port::{ParentPortIdentity, Port, PortIdentity};
 use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::time::Instant;
 
-pub struct PreMasterPort<P: Port, B: Bmca> {
+pub struct PreMasterPort<P: Port, S: SortedForeignClockRecords> {
     port: P,
-    bmca: LocalMasterTrackingBmca<B>,
+    bmca: GrandMasterTrackingBmca<S>,
     _qualification_timeout: P::Timeout,
     profile: PortProfile,
 }
 
-impl<P: Port, B: Bmca> PreMasterPort<P, B> {
+impl<P: Port, S: SortedForeignClockRecords> PreMasterPort<P, S> {
     pub(crate) fn new(
         port: P,
-        bmca: LocalMasterTrackingBmca<B>,
+        bmca: GrandMasterTrackingBmca<S>,
         _qualification_timeout: P::Timeout,
         profile: PortProfile,
     ) -> Self {
@@ -42,32 +43,36 @@ impl<P: Port, B: Bmca> PreMasterPort<P, B> {
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision(self.port.local_clock()) {
-            BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
-            BmcaDecision::Slave(decision) => Some(StateDecision::RecommendedSlave(decision)),
-            BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
-            BmcaDecision::Undecided => None,
+            Some(BmcaDecision::Master(qualification_timeout_policy)) => Some(
+                StateDecision::RecommendedMaster(qualification_timeout_policy),
+            ),
+            Some(BmcaDecision::Slave(parent)) => Some(StateDecision::RecommendedSlave(parent)),
+            Some(BmcaDecision::Passive) => None, // TODO: Handle Passive transition --- IGNORE ---
+            None => None,
         }
     }
 
-    pub(crate) fn qualified(self) -> PortState<P, B> {
+    pub(crate) fn qualified(self) -> PortState<P, S> {
         self.port.log(PortEvent::QualifiedMaster);
         self.profile.master(self.port, self.bmca)
     }
 
-    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B> {
-        decision.apply(|parent_port_identity, steps_removed| {
-            self.port.log(PortEvent::RecommendedSlave {
-                parent: parent_port_identity,
-            });
+    pub(crate) fn recommended_master(
+        self,
+        qualification_timeout_policy: QualificationTimeoutPolicy,
+    ) -> PortState<P, S> {
+        self.port.log(PortEvent::RecommendedMaster);
 
-            let parent_tracking_bmca =
-                ParentTrackingBmca::new(self.bmca.into_inner(), parent_port_identity);
+        self.profile
+            .pre_master(self.port, self.bmca, qualification_timeout_policy)
+    }
 
-            // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
-            self.port.update_steps_removed(steps_removed);
+    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, S> {
+        self.port.log(PortEvent::RecommendedSlave { parent });
 
-            self.profile.uncalibrated(self.port, parent_tracking_bmca)
-        })
+        let bmca = self.bmca.into_parent_tracking(parent);
+
+        self.profile.uncalibrated(self.port, bmca)
     }
 }
 
@@ -75,7 +80,7 @@ impl<P: Port, B: Bmca> PreMasterPort<P, B> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{DefaultDS, ForeignClockRecord, IncrementalBmca};
+    use crate::bmca::{BestForeignRecord, ClockDS, ForeignClockRecord, GrandMasterTrackingBmca};
     use crate::clock::{LocalClock, StepsRemoved, TimeScale};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
@@ -93,7 +98,7 @@ mod tests {
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type PreMasterTestPort<'a> =
-        PreMasterPort<PreMasterTestDomainPort<'a>, IncrementalBmca<SortedForeignClockRecordsVec>>;
+        PreMasterPort<PreMasterTestDomainPort<'a>, SortedForeignClockRecordsVec>;
 
     struct PreMasterPortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -102,11 +107,11 @@ mod tests {
     }
 
     impl PreMasterPortTestSetup {
-        fn new(default_ds: DefaultDS) -> Self {
+        fn new(ds: ClockDS) -> Self {
             Self {
                 local_clock: LocalClock::new(
                     FakeClock::default(),
-                    default_ds,
+                    ds,
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
                 physical_port: FakePort::new(),
@@ -129,7 +134,7 @@ mod tests {
 
             PreMasterPort::new(
                 domain_port,
-                LocalMasterTrackingBmca::new(IncrementalBmca::new(
+                GrandMasterTrackingBmca::new(BestForeignRecord::new(
                     SortedForeignClockRecordsVec::from_records(records),
                 )),
                 qualification_timeout,
@@ -162,7 +167,6 @@ mod tests {
 
     #[test]
     fn pre_master_port_produces_slave_recommendation_on_two_better_announces() {
-        use crate::bmca::BmcaSlaveDecision;
         use crate::message::AnnounceMessage;
         use crate::port::{ParentPortIdentity, PortIdentity, PortNumber};
 
@@ -186,7 +190,10 @@ mod tests {
             better_port,
             Instant::from_secs(0),
         );
-        assert!(decision.is_none()); // first announce is not yet qualified
+        assert!(matches!(
+            decision,
+            Some(StateDecision::RecommendedMaster(_))
+        ));
 
         // Receive second better announce
         let decision = pre_master.process_announce(
@@ -203,9 +210,8 @@ mod tests {
         // expect a slave recommendation
         assert_eq!(
             decision,
-            Some(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
-                ParentPortIdentity::new(better_port),
-                StepsRemoved::new(1)
+            Some(StateDecision::RecommendedSlave(ParentPortIdentity::new(
+                better_port
             )))
         );
     }

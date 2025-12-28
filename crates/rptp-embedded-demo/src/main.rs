@@ -11,9 +11,9 @@ use cortex_m_semihosting::hprintln;
 use heapless::{Deque, Vec};
 use panic_halt as _;
 use rptp::{
-    bmca::{DefaultDS, Priority1, Priority2},
+    bmca::{ClockDS, Priority1, Priority2},
     clock::{
-        Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock,
+        Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
         SynchronizableClock, TimeScale,
     },
     heapless::HeaplessSortedForeignClockRecords,
@@ -429,13 +429,14 @@ impl PortLog for DemoPortLog {
     }
 }
 
-fn demo_default_ds() -> DefaultDS {
+fn demo_default_ds() -> ClockDS {
     // Use a deterministic, but arbitrary, local clock identity and quality.
-    DefaultDS::new(
+    ClockDS::new(
         ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
         Priority1::new(100),
         Priority2::new(127),
         ClockQuality::new(ClockClass::Default, ClockAccuracy::Within10ms, 0xFFFF),
+        StepsRemoved::new(0),
     )
 }
 

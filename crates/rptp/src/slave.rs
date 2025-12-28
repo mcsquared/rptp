@@ -1,6 +1,5 @@
 use crate::bmca::{
-    Bmca, BmcaDecision, BmcaMasterDecision, BmcaSlaveDecision, LocalMasterTrackingBmca,
-    ParentTrackingBmca,
+    Bmca, BmcaDecision, ParentTrackingBmca, QualificationTimeoutPolicy, SortedForeignClockRecords,
 };
 use crate::e2e::EndToEndDelayMechanism;
 use crate::log::PortEvent;
@@ -8,24 +7,24 @@ use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
     OneStepSyncMessage, TwoStepSyncMessage,
 };
-use crate::port::{AnnounceReceiptTimeout, Port, PortIdentity, SendResult};
+use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity, SendResult};
 use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::servo::ServoState;
 use crate::time::{Instant, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 
-pub struct SlavePort<P: Port, B: Bmca> {
+pub struct SlavePort<P: Port, S: SortedForeignClockRecords> {
     port: P,
-    bmca: ParentTrackingBmca<B>,
+    bmca: ParentTrackingBmca<S>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
     profile: PortProfile,
 }
 
-impl<P: Port, B: Bmca> SlavePort<P, B> {
+impl<P: Port, S: SortedForeignClockRecords> SlavePort<P, S> {
     pub(crate) fn new(
         port: P,
-        bmca: ParentTrackingBmca<B>,
+        bmca: ParentTrackingBmca<S>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
         profile: PortProfile,
@@ -53,10 +52,12 @@ impl<P: Port, B: Bmca> SlavePort<P, B> {
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision(self.port.local_clock()) {
-            BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
-            BmcaDecision::Slave(decision) => Some(StateDecision::RecommendedSlave(decision)),
-            BmcaDecision::Passive => None, // TODO: Handle Passive transition --- IGNORE ---
-            BmcaDecision::Undecided => None,
+            Some(BmcaDecision::Master(qualification_timeout_policy)) => Some(
+                StateDecision::RecommendedMaster(qualification_timeout_policy),
+            ),
+            Some(BmcaDecision::Slave(parent)) => Some(StateDecision::RecommendedSlave(parent)),
+            Some(BmcaDecision::Passive) => None, // TODO: Handle Passive transition --- IGNORE ---
+            None => None,
         }
     }
 
@@ -158,41 +159,33 @@ impl<P: Port, B: Bmca> SlavePort<P, B> {
         Ok(())
     }
 
-    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, B> {
+    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
-        let bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
+        let bmca = self.bmca.into_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
 
-    pub(crate) fn recommended_slave(self, decision: BmcaSlaveDecision) -> PortState<P, B> {
-        decision.apply(|parent_port_identity, steps_removed| {
-            self.port.log(PortEvent::RecommendedSlave {
-                parent: parent_port_identity,
-            });
+    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, S> {
+        self.port.log(PortEvent::RecommendedSlave { parent });
 
-            let new_parent_tracking_bmca =
-                ParentTrackingBmca::new(self.bmca.into_inner(), parent_port_identity);
+        let bmca = self.bmca.with_parent(parent);
 
-            // Update steps removed as per IEEE 1588-2019 Section 9.3.5, Table 16
-            self.port.update_steps_removed(steps_removed);
-
-            self.profile
-                .uncalibrated(self.port, new_parent_tracking_bmca)
-        })
+        self.profile.uncalibrated(self.port, bmca)
     }
 
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, B> {
+    pub(crate) fn recommended_master(
+        self,
+        qualification_timeout_policy: QualificationTimeoutPolicy,
+    ) -> PortState<P, S> {
         self.port.log(PortEvent::RecommendedMaster);
-        let bmca = LocalMasterTrackingBmca::new(self.bmca.into_inner());
 
-        decision.apply(|qualification_timeout_policy, steps_removed| {
-            self.port.update_steps_removed(steps_removed);
-            self.profile
-                .pre_master(self.port, bmca, qualification_timeout_policy)
-        })
+        let bmca = self.bmca.into_grandmaster_tracking();
+
+        self.profile
+            .pre_master(self.port, bmca, qualification_timeout_policy)
     }
 
-    pub(crate) fn synchronization_fault(self) -> PortState<P, B> {
+    pub(crate) fn synchronization_fault(self) -> PortState<P, S> {
         self.port.log(PortEvent::SynchronizationFault);
         PortState::Uncalibrated(UncalibratedPort::new(
             self.port,
@@ -208,7 +201,10 @@ impl<P: Port, B: Bmca> SlavePort<P, B> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{BmcaMasterDecisionPoint, DefaultDS, ForeignClockRecord, IncrementalBmca};
+    use crate::bmca::{
+        BestForeignRecord, BmcaMasterDecisionPoint, ClockDS, ForeignClockRecord,
+        QualificationTimeoutPolicy,
+    };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::e2e::DelayCycle;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
@@ -224,8 +220,7 @@ mod tests {
     type SlaveTestDomainPort<'a> =
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type SlaveTestPort<'a> =
-        SlavePort<SlaveTestDomainPort<'a>, IncrementalBmca<SortedForeignClockRecordsVec>>;
+    type SlaveTestPort<'a> = SlavePort<SlaveTestDomainPort<'a>, SortedForeignClockRecordsVec>;
 
     struct SlavePortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -238,11 +233,11 @@ mod tests {
             Self::new_with_ds(TestClockCatalog::default_mid_grade().default_ds())
         }
 
-        fn new_with_ds(default_ds: DefaultDS) -> Self {
+        fn new_with_ds(ds: ClockDS) -> Self {
             Self {
                 local_clock: LocalClock::new(
                     FakeClock::default(),
-                    default_ds,
+                    ds,
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
                 physical_port: FakePort::new(),
@@ -270,7 +265,7 @@ mod tests {
             SlavePort::new(
                 domain_port,
                 ParentTrackingBmca::new(
-                    IncrementalBmca::new(SortedForeignClockRecordsVec::from_records(records)),
+                    BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
                     ParentPortIdentity::new(parent),
                 ),
                 AnnounceReceiptTimeout::new(
@@ -628,9 +623,8 @@ mod tests {
         // expect a slave recommendation
         assert_eq!(
             decision,
-            Some(StateDecision::RecommendedSlave(BmcaSlaveDecision::new(
-                ParentPortIdentity::new(new_parent),
-                StepsRemoved::new(1),
+            Some(StateDecision::RecommendedSlave(ParentPortIdentity::new(
+                new_parent
             )))
         );
     }
@@ -670,10 +664,9 @@ mod tests {
         // expect a master M2 recommendation since non-gm local clock is better
         assert_eq!(
             decision,
-            Some(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M2,
-                StepsRemoved::new(0),
-            )))
+            Some(StateDecision::RecommendedMaster(
+                QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M2, StepsRemoved::new(0),)
+            ))
         );
     }
 }

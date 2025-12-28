@@ -213,7 +213,7 @@ pub mod infra_support {
                 record.consider(mid_clock, LogInterval::new(0), Instant::from_secs(0))
             });
 
-            let best_clock = records.first().and_then(|record| record.dataset());
+            let best_clock = records.first().and_then(|record| record.qualified_ds());
             assert_eq!(best_clock, Some(&high_clock));
         }
 

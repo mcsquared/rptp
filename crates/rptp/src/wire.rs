@@ -1,4 +1,4 @@
-use crate::bmca::ForeignClockDS;
+use crate::bmca::ClockDS;
 use crate::message::SequenceId;
 use crate::port::DomainNumber;
 use crate::port::PortIdentity;
@@ -140,7 +140,7 @@ impl<'a> AnnouncePayload<'a> {
         Self { payload }
     }
 
-    pub fn foreign_clock_ds(&self) -> Result<ForeignClockDS> {
+    pub fn foreign_clock_ds(&self) -> Result<ClockDS> {
         let fc_bytes = self
             .payload
             .get(13..29)
@@ -150,13 +150,13 @@ impl<'a> AnnouncePayload<'a> {
                 found: self.payload.len().saturating_sub(13),
             })?;
 
-        Ok(ForeignClockDS::from_wire(fc_bytes.try_into().map_err(
-            |_| ParseError::PayloadTooShort {
+        Ok(ClockDS::from_wire(fc_bytes.try_into().map_err(|_| {
+            ParseError::PayloadTooShort {
                 field: "Announce.foreign_clock_ds",
                 expected: 16,
                 found: fc_bytes.len(),
-            },
-        )?))
+            }
+        })?))
     }
 }
 
@@ -491,7 +491,7 @@ bitflags! {
 mod tests {
     use super::*;
 
-    use crate::bmca::{ForeignClockDS, Priority1, Priority2};
+    use crate::bmca::{ClockDS, Priority1, Priority2};
     use crate::clock::{
         ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved, TimeScale,
     };
@@ -587,7 +587,7 @@ mod tests {
         let msg = AnnounceMessage::new(
             21.into(),
             LogMessageInterval::new(0x7F),
-            ForeignClockDS::new(
+            ClockDS::new(
                 ClockIdentity::new(&[0; 8]),
                 Priority1::new(127),
                 Priority2::new(127),

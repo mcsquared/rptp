@@ -1,4 +1,4 @@
-use crate::bmca::{IncrementalBmca, SortedForeignClockRecords};
+use crate::bmca::SortedForeignClockRecords;
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::port::{DomainNumber, DomainPort, PhysicalPort, PortNumber, TimerHost};
@@ -43,7 +43,7 @@ impl<C: SynchronizableClock> OrdinaryClock<C> {
         timestamping: TS,
         log: L,
         sorted_foreign_clock_records: S,
-    ) -> PortState<DomainPort<'a, C, T, TS, L>, IncrementalBmca<S>>
+    ) -> PortState<DomainPort<'a, C, T, TS, L>, S>
     where
         T: TimerHost,
         TS: TxTimestamping,
@@ -60,8 +60,6 @@ impl<C: SynchronizableClock> OrdinaryClock<C> {
             self.port_number,
         );
 
-        let bmca = IncrementalBmca::new(sorted_foreign_clock_records);
-
-        PortProfile::default().initializing(domain_port, bmca)
+        PortProfile::default().initializing(domain_port, sorted_foreign_clock_records)
     }
 }

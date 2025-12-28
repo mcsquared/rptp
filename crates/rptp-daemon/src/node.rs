@@ -315,11 +315,11 @@ mod tests {
 
     use rptp::{
         bmca::{
-            DefaultDS, IncrementalBmca, LocalMasterTrackingBmca, ParentTrackingBmca, Priority1,
+            BestForeignRecord, ClockDS, GrandMasterTrackingBmca, ParentTrackingBmca, Priority1,
             Priority2,
         },
         clock::{
-            ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock,
+            ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
             SynchronizableClock, TimeScale,
         },
         e2e::{DelayCycle, EndToEndDelayMechanism},
@@ -344,7 +344,7 @@ mod tests {
 
     type TestPortMap<'a, C> = SingleDomainPortMap<
         Box<DomainPort<'a, C, TokioTimerHost, FakeTimestamping, TracingPortLog>>,
-        IncrementalBmca<SortedForeignClockRecordsVec>,
+        SortedForeignClockRecordsVec,
     >;
 
     type TestPortsLoop<'a, C, N> = TokioPortsLoop<TestPortMap<'a, C>, N, FakeTimestamping>;
@@ -403,7 +403,7 @@ mod tests {
                 domain_number,
                 port_number,
             ));
-            let bmca = LocalMasterTrackingBmca::new(IncrementalBmca::new(
+            let bmca = GrandMasterTrackingBmca::new(BestForeignRecord::new(
                 SortedForeignClockRecordsVec::new(),
             ));
             let port_state = PortProfile::default().master(domain_port, bmca);
@@ -445,7 +445,7 @@ mod tests {
                         TracingPortLog,
                     >,
                 >,
-                IncrementalBmca<SortedForeignClockRecordsVec>,
+                SortedForeignClockRecordsVec,
             >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
@@ -511,11 +511,12 @@ mod tests {
         let virtual_clock = VirtualClock::new(TimeStamp::new(0, 0), 1.0, TimeScale::Arb);
         let local_clock = LocalClock::new(
             &virtual_clock,
-            DefaultDS::new(
+            ClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+                StepsRemoved::new(0),
             ),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
@@ -535,8 +536,9 @@ mod tests {
             domain_number,
             port_number,
         ));
-        let bmca =
-            LocalMasterTrackingBmca::new(IncrementalBmca::new(SortedForeignClockRecordsVec::new()));
+        let bmca = GrandMasterTrackingBmca::new(BestForeignRecord::new(
+            SortedForeignClockRecordsVec::new(),
+        ));
         let port_state = PortProfile::default().master(domain_port, bmca);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
 
@@ -600,11 +602,12 @@ mod tests {
 
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::new(
+            ClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+                StepsRemoved::new(0),
             ),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
@@ -630,7 +633,7 @@ mod tests {
             PortNumber::new(1),
         ));
         let bmca = ParentTrackingBmca::new(
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
             parent_port_identity,
         );
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
@@ -686,11 +689,12 @@ mod tests {
     async fn ports_loop_handles_unknown_domain_event_message() -> std::io::Result<()> {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::new(
+            ClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x03]),
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+                StepsRemoved::new(0),
             ),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
@@ -721,11 +725,12 @@ mod tests {
     async fn ports_loop_handles_unsupported_ptp_version_event_message() -> std::io::Result<()> {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::new(
+            ClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x04]),
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+                StepsRemoved::new(0),
             ),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
@@ -753,11 +758,12 @@ mod tests {
     async fn ports_loop_handles_header_too_short_event_message() -> std::io::Result<()> {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::new(
+            ClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x05]),
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+                StepsRemoved::new(0),
             ),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
@@ -786,11 +792,12 @@ mod tests {
     async fn ports_loop_handles_length_mismatch_event_message() -> std::io::Result<()> {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::new(
+            ClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x06]),
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+                StepsRemoved::new(0),
             ),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
@@ -821,11 +828,12 @@ mod tests {
     async fn ports_loop_handles_short_payload_event_message() -> std::io::Result<()> {
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            DefaultDS::new(
+            ClockDS::new(
                 ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x07]),
                 Priority1::new(127),
                 Priority2::new(127),
                 ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+                StepsRemoved::new(0),
             ),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );

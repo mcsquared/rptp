@@ -1,28 +1,31 @@
-use crate::bmca::Bmca;
+use crate::bmca::{BestForeignRecord, ListeningBmca, SortedForeignClockRecords};
 use crate::log::PortEvent;
 use crate::port::Port;
 use crate::portstate::{PortProfile, PortState};
 
-pub struct InitializingPort<P: Port, B: Bmca> {
+pub struct InitializingPort<P: Port, S: SortedForeignClockRecords> {
     port: P,
-    bmca: B,
+    sorted_foreign_clock_records: S,
     profile: PortProfile,
 }
 
-impl<P: Port, B: Bmca> InitializingPort<P, B> {
-    pub(crate) fn new(port: P, bmca: B, profile: PortProfile) -> Self {
+impl<P: Port, S: SortedForeignClockRecords> InitializingPort<P, S> {
+    pub(crate) fn new(port: P, sorted_foreign_clock_records: S, profile: PortProfile) -> Self {
         port.log(PortEvent::Static("Become InitializingPort"));
 
         Self {
             port,
-            bmca,
+            sorted_foreign_clock_records,
             profile,
         }
     }
 
-    pub(crate) fn initialized(self) -> PortState<P, B> {
+    pub(crate) fn initialized(self) -> PortState<P, S> {
         self.port.log(PortEvent::Initialized);
-        self.profile.listening(self.port, self.bmca)
+
+        let bmca = ListeningBmca::new(BestForeignRecord::new(self.sorted_foreign_clock_records));
+
+        self.profile.listening(self.port, bmca)
     }
 }
 
@@ -30,7 +33,6 @@ impl<P: Port, B: Bmca> InitializingPort<P, B> {
 mod tests {
     use super::*;
 
-    use crate::bmca::IncrementalBmca;
     use crate::clock::LocalClock;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
@@ -59,7 +61,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            IncrementalBmca::new(SortedForeignClockRecordsVec::new()),
+            SortedForeignClockRecordsVec::new(),
             PortProfile::default(),
         );
 

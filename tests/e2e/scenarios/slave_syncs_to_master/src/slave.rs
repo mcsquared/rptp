@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
 use rptp::{
-    bmca::{DefaultDS, Priority1, Priority2},
+    bmca::{ClockDS, Priority1, Priority2},
     clock::{Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
     log::NOOP_CLOCK_METRICS,
     port::{DomainNumber, PortNumber, SingleDomainPortMap},
@@ -27,11 +27,12 @@ async fn main() -> std::io::Result<()> {
     let fake_clock = FakeClock::new(TimeStamp::new(0, 0), TimeScale::Ptp);
     let local_clock = LocalClock::new(
         &fake_clock,
-        DefaultDS::new(
+        ClockDS::new(
             ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
             Priority1::new(250),
             Priority2::new(255),
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within10ms, 0xFFFF),
+            rptp::clock::StepsRemoved::new(0),
         ),
         Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
     );

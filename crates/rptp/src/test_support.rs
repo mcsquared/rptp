@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use crate::bmca::{DefaultDS, ForeignClockDS, Priority1, Priority2};
+use crate::bmca::{ClockDS, Priority1, Priority2};
 use crate::clock::{
     Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved,
     SynchronizableClock, TimeScale,
@@ -120,17 +120,18 @@ impl TestClockCatalog {
         )
     }
 
-    pub fn default_ds(&self) -> DefaultDS {
-        DefaultDS::new(
+    pub fn default_ds(&self) -> ClockDS {
+        ClockDS::new(
             self.clock_identity,
             self.priority1,
             self.priority2,
             self.clock_quality(),
+            StepsRemoved::new(0),
         )
     }
 
-    pub fn foreign_ds(&self, steps_removed: StepsRemoved) -> ForeignClockDS {
-        ForeignClockDS::new(
+    pub fn foreign_ds(&self, steps_removed: StepsRemoved) -> ClockDS {
+        ClockDS::new(
             self.clock_identity,
             self.priority1,
             self.priority2,
