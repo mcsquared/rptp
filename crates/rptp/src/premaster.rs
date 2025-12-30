@@ -1,6 +1,5 @@
 use crate::bmca::{
-    Bmca, BmcaDecision, GrandMasterTrackingBmca, QualificationTimeoutPolicy,
-    SortedForeignClockRecords,
+    Bmca, BmcaDecision, BmcaMasterDecision, GrandMasterTrackingBmca, SortedForeignClockRecords,
 };
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
@@ -43,9 +42,7 @@ impl<P: Port, S: SortedForeignClockRecords> PreMasterPort<P, S> {
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision(self.port.local_clock()) {
-            Some(BmcaDecision::Master(qualification_timeout_policy)) => Some(
-                StateDecision::RecommendedMaster(qualification_timeout_policy),
-            ),
+            Some(BmcaDecision::Master(decision)) => Some(StateDecision::RecommendedMaster(decision)),
             Some(BmcaDecision::Slave(parent)) => Some(StateDecision::RecommendedSlave(parent)),
             Some(BmcaDecision::Passive) => None, // TODO: Handle Passive transition --- IGNORE ---
             None => None,
@@ -59,12 +56,16 @@ impl<P: Port, S: SortedForeignClockRecords> PreMasterPort<P, S> {
 
     pub(crate) fn recommended_master(
         self,
-        qualification_timeout_policy: QualificationTimeoutPolicy,
+        decision: BmcaMasterDecision,
     ) -> PortState<P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
-        self.profile
-            .pre_master(self.port, self.bmca, qualification_timeout_policy)
+        decision.apply(|qualification_timeout_policy, grandmaster_id| {
+            let bmca = self.bmca.with_grandmaster_id(grandmaster_id);
+
+            self.profile
+                .pre_master(self.port, bmca, qualification_timeout_policy)
+        })
     }
 
     pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, S> {
@@ -131,12 +132,14 @@ mod tests {
             );
 
             let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
+            let grandmaster_id = *self.local_clock.identity();
 
             PreMasterPort::new(
                 domain_port,
-                GrandMasterTrackingBmca::new(BestForeignRecord::new(
-                    SortedForeignClockRecordsVec::from_records(records),
-                )),
+                GrandMasterTrackingBmca::new(
+                    BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
+                    grandmaster_id,
+                ),
                 qualification_timeout,
                 PortProfile::default(),
             )
@@ -190,10 +193,7 @@ mod tests {
             better_port,
             Instant::from_secs(0),
         );
-        assert!(matches!(
-            decision,
-            Some(StateDecision::RecommendedMaster(_))
-        ));
+        assert!(decision.is_none());
 
         // Receive second better announce
         let decision = pre_master.process_announce(

@@ -1,6 +1,5 @@
 use crate::bmca::{
-    Bmca, BmcaDecision, GrandMasterTrackingBmca, QualificationTimeoutPolicy,
-    SortedForeignClockRecords,
+    Bmca, BmcaDecision, BmcaMasterDecision, GrandMasterTrackingBmca, SortedForeignClockRecords,
 };
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortEvent;
@@ -113,12 +112,16 @@ impl<P: Port, S: SortedForeignClockRecords> MasterPort<P, S> {
 
     pub(crate) fn recommended_master(
         self,
-        qualification_timeout_policy: QualificationTimeoutPolicy,
+        decision: BmcaMasterDecision,
     ) -> PortState<P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
-        self.profile
-            .pre_master(self.port, self.bmca, qualification_timeout_policy)
+        decision.apply(|qualification_timeout_policy, grandmaster_id| {
+            let bmca = self.bmca.with_grandmaster_id(grandmaster_id);
+
+            self.profile
+                .pre_master(self.port, bmca, qualification_timeout_policy)
+        })
     }
 
     pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, S> {
@@ -249,12 +252,14 @@ mod tests {
                 domain_port.timeout(SystemMessage::SyncTimeout),
                 LogInterval::new(0),
             );
+            let grandmaster_id = *self.local_clock.identity();
 
             MasterPort::new(
                 domain_port,
-                GrandMasterTrackingBmca::new(BestForeignRecord::new(
-                    SortedForeignClockRecordsVec::from_records(records),
-                )),
+                GrandMasterTrackingBmca::new(
+                    BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
+                    grandmaster_id,
+                ),
                 announce_cycle,
                 sync_cycle,
                 PortProfile::default(),

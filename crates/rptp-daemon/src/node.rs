@@ -403,9 +403,10 @@ mod tests {
                 domain_number,
                 port_number,
             ));
-            let bmca = GrandMasterTrackingBmca::new(BestForeignRecord::new(
-                SortedForeignClockRecordsVec::new(),
-            ));
+            let bmca = GrandMasterTrackingBmca::new(
+                BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+                *local_clock.identity(),
+            );
             let port_state = PortProfile::default().master(domain_port, bmca);
             let portmap = SingleDomainPortMap::new(domain_number, port_state);
 
@@ -536,9 +537,10 @@ mod tests {
             domain_number,
             port_number,
         ));
-        let bmca = GrandMasterTrackingBmca::new(BestForeignRecord::new(
-            SortedForeignClockRecordsVec::new(),
-        ));
+        let bmca = GrandMasterTrackingBmca::new(
+            BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+            *local_clock.identity(),
+        );
         let port_state = PortProfile::default().master(domain_port, bmca);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
 

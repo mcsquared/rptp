@@ -1,5 +1,5 @@
 use crate::bmca::{
-    Bmca, BmcaDecision, ParentTrackingBmca, QualificationTimeoutPolicy, SortedForeignClockRecords,
+    Bmca, BmcaDecision, BmcaMasterDecision, ParentTrackingBmca, SortedForeignClockRecords,
 };
 use crate::e2e::EndToEndDelayMechanism;
 use crate::log::PortEvent;
@@ -52,9 +52,7 @@ impl<P: Port, S: SortedForeignClockRecords> SlavePort<P, S> {
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision(self.port.local_clock()) {
-            Some(BmcaDecision::Master(qualification_timeout_policy)) => Some(
-                StateDecision::RecommendedMaster(qualification_timeout_policy),
-            ),
+            Some(BmcaDecision::Master(decision)) => Some(StateDecision::RecommendedMaster(decision)),
             Some(BmcaDecision::Slave(parent)) => Some(StateDecision::RecommendedSlave(parent)),
             Some(BmcaDecision::Passive) => None, // TODO: Handle Passive transition --- IGNORE ---
             None => None,
@@ -161,7 +159,8 @@ impl<P: Port, S: SortedForeignClockRecords> SlavePort<P, S> {
 
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
-        let bmca = self.bmca.into_grandmaster_tracking();
+        let grandmaster_id = *self.port.local_clock().identity();
+        let bmca = self.bmca.into_grandmaster_tracking(grandmaster_id);
         self.profile.master(self.port, bmca)
     }
 
@@ -175,14 +174,16 @@ impl<P: Port, S: SortedForeignClockRecords> SlavePort<P, S> {
 
     pub(crate) fn recommended_master(
         self,
-        qualification_timeout_policy: QualificationTimeoutPolicy,
+        decision: BmcaMasterDecision,
     ) -> PortState<P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
-        let bmca = self.bmca.into_grandmaster_tracking();
+        decision.apply(|qualification_timeout_policy, grandmaster_id| {
+            let bmca = self.bmca.into_grandmaster_tracking(grandmaster_id);
 
-        self.profile
-            .pre_master(self.port, bmca, qualification_timeout_policy)
+            self.profile
+                .pre_master(self.port, bmca, qualification_timeout_policy)
+        })
     }
 
     pub(crate) fn synchronization_fault(self) -> PortState<P, S> {
@@ -202,8 +203,7 @@ mod tests {
     use super::*;
 
     use crate::bmca::{
-        BestForeignRecord, BmcaMasterDecisionPoint, ClockDS, ForeignClockRecord,
-        QualificationTimeoutPolicy,
+        BestForeignRecord, BmcaMasterDecision, BmcaMasterDecisionPoint, ClockDS, ForeignClockRecord,
     };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::e2e::DelayCycle;
@@ -665,7 +665,11 @@ mod tests {
         assert_eq!(
             decision,
             Some(StateDecision::RecommendedMaster(
-                QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M2, StepsRemoved::new(0),)
+                BmcaMasterDecision::new(
+                    BmcaMasterDecisionPoint::M2,
+                    StepsRemoved::new(0),
+                    *setup.local_clock.identity(),
+                )
             ))
         );
     }

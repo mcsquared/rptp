@@ -1,7 +1,8 @@
 use core::ops::Range;
 
 use crate::clock::{ClockIdentity, ClockQuality, LocalClock, StepsRemoved, SynchronizableClock};
-use crate::port::{ParentPortIdentity, PortIdentity};
+use crate::port::{ParentPortIdentity, Port, PortIdentity};
+use crate::portstate::PortState;
 use crate::time::{Duration, Instant, LogInterval};
 
 pub trait Bmca {
@@ -41,6 +42,13 @@ pub(crate) enum BestForeignDataset<'a> {
 }
 
 impl<'a> BestForeignDataset<'a> {
+    fn grandmaster_id(&self) -> Option<&ClockIdentity> {
+        match self {
+            BestForeignDataset::Qualified { ds, .. } => Some(ds.identity()),
+            BestForeignDataset::Empty => None,
+        }
+    }
+
     fn better_than(&self, other: &BestForeignDataset) -> bool {
         match (self, other) {
             (
@@ -145,11 +153,11 @@ impl<S: SortedForeignClockRecords> ListeningBmca<S> {
         }
     }
 
-    pub(crate) fn into_grandmaster_tracking(self) -> GrandMasterTrackingBmca<S> {
-        GrandMasterTrackingBmca {
-            bmca: self.bmca,
-            best_foreign: self.best_foreign,
-        }
+    pub(crate) fn into_grandmaster_tracking(
+        self,
+        grandmaster_id: ClockIdentity,
+    ) -> GrandMasterTrackingBmca<S> {
+        GrandMasterTrackingBmca::new(self.best_foreign, grandmaster_id)
     }
 }
 
@@ -187,13 +195,23 @@ impl<S: SortedForeignClockRecords> Bmca for ListeningBmca<S> {
 pub struct GrandMasterTrackingBmca<S: SortedForeignClockRecords> {
     bmca: BestMasterClockAlgorithm,
     best_foreign: BestForeignRecord<S>,
+    grandmaster_id: ClockIdentity,
 }
 
 impl<S: SortedForeignClockRecords> GrandMasterTrackingBmca<S> {
-    pub fn new(best_foreign: BestForeignRecord<S>) -> Self {
+    pub fn new(best_foreign: BestForeignRecord<S>, grandmaster_id: ClockIdentity) -> Self {
         Self {
             bmca: BestMasterClockAlgorithm,
             best_foreign,
+            grandmaster_id,
+        }
+    }
+
+    pub(crate) fn with_grandmaster_id(self, grandmaster_id: ClockIdentity) -> Self {
+        Self {
+            bmca: self.bmca,
+            best_foreign: self.best_foreign,
+            grandmaster_id,
         }
     }
 
@@ -229,7 +247,19 @@ impl<S: SortedForeignClockRecords> Bmca for GrandMasterTrackingBmca<S> {
         &self,
         local_clock: &LocalClock<C>,
     ) -> Option<BmcaDecision> {
-        Some(self.bmca.decision(local_clock, self.best_foreign.dataset()))
+        let e_rbest = self.best_foreign.dataset();
+        let decision = self.bmca.decision(local_clock, e_rbest);
+
+        match decision {
+            BmcaDecision::Master(_) => {
+                if *local_clock.identity() == self.grandmaster_id {
+                    None
+                } else {
+                    Some(decision)
+                }
+            }
+            BmcaDecision::Slave(_) | BmcaDecision::Passive => Some(decision),
+        }
     }
 }
 
@@ -267,8 +297,11 @@ impl<S: SortedForeignClockRecords> ParentTrackingBmca<S> {
         }
     }
 
-    pub(crate) fn into_grandmaster_tracking(self) -> GrandMasterTrackingBmca<S> {
-        GrandMasterTrackingBmca::new(self.best_foreign)
+    pub(crate) fn into_grandmaster_tracking(
+        self,
+        grandmaster_id: ClockIdentity,
+    ) -> GrandMasterTrackingBmca<S> {
+        GrandMasterTrackingBmca::new(self.best_foreign, grandmaster_id)
     }
 }
 
@@ -332,9 +365,10 @@ impl BestMasterClockAlgorithm {
         e_rbest: BestForeignDataset,
     ) -> BmcaDecision {
         if d_0.better_than(e_rbest) {
-            BmcaDecision::Master(QualificationTimeoutPolicy::new(
+            BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M1,
                 StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
+                *d_0.identity(),
             ))
         } else {
             BmcaDecision::Passive // Passive decision point P1
@@ -347,13 +381,16 @@ impl BestMasterClockAlgorithm {
         e_rbest: BestForeignDataset,
     ) -> BmcaDecision {
         if d_0.better_than(e_best) {
-            BmcaDecision::Master(QualificationTimeoutPolicy::new(
+            BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M2,
                 StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
+                *d_0.identity(),
             ))
         } else if let Some(parent) = e_best.common_parent(e_rbest) {
             BmcaDecision::Slave(parent) // Slave decision point S1
         } else {
+            // Only a qualified e_best can reach this point, see IEEE 1588-2019 Section 9.3.3., figure 26.
+            debug_assert!(matches!(e_best, BestForeignDataset::Qualified { .. }));
             Self::e_best_better_by_topology_than_e_rbest(e_best, e_rbest)
         }
     }
@@ -365,9 +402,11 @@ impl BestMasterClockAlgorithm {
         if e_best.better_than(&e_rbest) {
             BmcaDecision::Passive // Passive decision point P2
         } else {
-            BmcaDecision::Master(QualificationTimeoutPolicy::new(
+            BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M3,
                 StepsRemoved::new(0),
+                // unwrap is safe here, because only a qualified e_best can win against d_0, see above.
+                e_best.grandmaster_id().copied().unwrap(),
             ))
         }
     }
@@ -410,11 +449,49 @@ pub enum BmcaMasterDecisionPoint {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BmcaDecision {
     /// The port should act as a master.
-    Master(QualificationTimeoutPolicy),
+    Master(BmcaMasterDecision),
     /// The port should act as a slave, following the given parent.
     Slave(ParentPortIdentity),
     /// The port should be passive.
     Passive,
+}
+
+/// BMCA decision for entering a master/pre‑master state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BmcaMasterDecision {
+    decision_point: BmcaMasterDecisionPoint,
+    steps_removed: StepsRemoved,
+    grandmaster_id: ClockIdentity,
+}
+
+impl BmcaMasterDecision {
+    /// Create a new master decision for the given decision point and
+    /// `stepsRemoved`.
+    pub(crate) fn new(
+        decision_point: BmcaMasterDecisionPoint,
+        steps_removed: StepsRemoved,
+        grandmaster_id: ClockIdentity,
+    ) -> Self {
+        Self {
+            decision_point,
+            steps_removed,
+            grandmaster_id,
+        }
+    }
+
+    /// Apply this master decision to a [`Port`], producing a new
+    /// [`PortState`] in the pre‑master state.
+    pub(crate) fn apply<F, P, S>(&self, new_port_state: F) -> PortState<P, S>
+    where
+        P: Port,
+        S: SortedForeignClockRecords,
+        F: FnOnce(QualificationTimeoutPolicy, ClockIdentity) -> PortState<P, S>,
+    {
+        let qualification_timeout_policy =
+            QualificationTimeoutPolicy::new(self.decision_point, self.steps_removed);
+
+        new_port_state(qualification_timeout_policy, self.grandmaster_id)
+    }
 }
 
 /// Qualification timeout policy as defined in IEEE 1588-2019 Section 9.2.6.10.
@@ -837,6 +914,101 @@ pub(crate) mod tests {
     use crate::time::{Duration, Instant};
 
     #[test]
+    fn grandmaster_tracking_bmca_gates_when_grandmaster_id_matches() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            TestClockCatalog::default_high_grade().default_ds(),
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+        );
+
+        let bmca = GrandMasterTrackingBmca::new(
+            BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+            *local_clock.identity(),
+        );
+
+        assert_eq!(bmca.decision(&local_clock), None);
+    }
+
+    #[test]
+    fn grandmaster_tracking_bmca_emits_when_grandmaster_id_differs() {
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            TestClockCatalog::default_high_grade().default_ds(),
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+        );
+
+        let other_grandmaster_id = TestClockCatalog::gps_grandmaster().clock_identity();
+        let bmca = GrandMasterTrackingBmca::new(
+            BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+            other_grandmaster_id,
+        );
+
+        assert!(matches!(
+            bmca.decision(&local_clock),
+            Some(BmcaDecision::Master(_))
+        ));
+    }
+
+    #[test]
+    fn grandmaster_tracking_bmca_does_not_gate_passive_decisions() {
+        let now = Instant::from_secs(0);
+
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            TestClockCatalog::gps_grandmaster().default_ds(),
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+        );
+
+        let better = TestClockCatalog::atomic_grandmaster();
+        let better_port_id = PortIdentity::new(better.clock_identity(), PortNumber::new(1));
+        let better_ds = better.foreign_ds(StepsRemoved::new(0));
+        let records = [ForeignClockRecord::qualified(
+            better_port_id,
+            better_ds,
+            LogInterval::new(0),
+            now,
+        )];
+
+        let bmca = GrandMasterTrackingBmca::new(
+            BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(&records)),
+            *local_clock.identity(),
+        );
+
+        assert_eq!(bmca.decision(&local_clock), Some(BmcaDecision::Passive));
+    }
+
+    #[test]
+    fn grandmaster_tracking_bmca_does_not_gate_slave_decisions() {
+        let now = Instant::from_secs(0);
+
+        let local_clock = LocalClock::new(
+            FakeClock::default(),
+            TestClockCatalog::default_low_grade_slave_only().default_ds(),
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+        );
+
+        let better = TestClockCatalog::default_high_grade();
+        let better_port_id = PortIdentity::new(better.clock_identity(), PortNumber::new(1));
+        let better_ds = better.foreign_ds(StepsRemoved::new(0));
+        let records = [ForeignClockRecord::qualified(
+            better_port_id,
+            better_ds,
+            LogInterval::new(0),
+            now,
+        )];
+
+        let bmca = GrandMasterTrackingBmca::new(
+            BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(&records)),
+            *local_clock.identity(),
+        );
+
+        assert!(matches!(
+            bmca.decision(&local_clock),
+            Some(BmcaDecision::Slave(_))
+        ));
+    }
+
+    #[test]
     fn sliding_window_qualification_requires_two_fast_announces() {
         let t0 = Instant::from_secs(0);
         let high = TestClockCatalog::default_high_grade();
@@ -1175,9 +1347,10 @@ pub(crate) mod tests {
 
         assert_eq!(
             bmca.decision(&local_clock),
-            Some(BmcaDecision::Master(QualificationTimeoutPolicy::new(
+            Some(BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M1,
                 StepsRemoved::new(0),
+                *local_clock.identity(),
             )))
         );
     }
@@ -1205,9 +1378,10 @@ pub(crate) mod tests {
 
         assert_eq!(
             bmca.decision(&local_clock),
-            Some(BmcaDecision::Master(QualificationTimeoutPolicy::new(
+            Some(BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M2,
                 StepsRemoved::new(0),
+                *local_clock.identity(),
             )))
         );
     }

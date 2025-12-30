@@ -1,8 +1,8 @@
 use core::panic;
 
 use crate::bmca::{
-    GrandMasterTrackingBmca, ListeningBmca, ParentTrackingBmca, QualificationTimeoutPolicy,
-    SortedForeignClockRecords,
+    BmcaMasterDecision, GrandMasterTrackingBmca, ListeningBmca, ParentTrackingBmca,
+    QualificationTimeoutPolicy, SortedForeignClockRecords,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::faulty::FaultyPort;
@@ -23,7 +23,7 @@ pub(crate) enum StateDecision {
     Initialized,
     MasterClockSelected,
     RecommendedSlave(ParentPortIdentity),
-    RecommendedMaster(QualificationTimeoutPolicy),
+    RecommendedMaster(BmcaMasterDecision),
     FaultDetected,
     QualificationTimeoutExpired,
     AnnounceReceiptTimeoutExpired,
@@ -69,14 +69,12 @@ impl<P: Port, S: SortedForeignClockRecords> PortState<P, S> {
                     "RecommendedSlave can only be applied in Listening, Master, PreMaster, Slave, or Uncalibrated states"
                 ),
             },
-            StateDecision::RecommendedMaster(timeout_policy) => match self {
-                PortState::Listening(listening) => listening.recommended_master(timeout_policy),
-                PortState::Uncalibrated(uncalibrated) => {
-                    uncalibrated.recommended_master(timeout_policy)
-                }
-                PortState::Master(master) => master.recommended_master(timeout_policy),
-                PortState::Slave(slave) => slave.recommended_master(timeout_policy),
-                PortState::PreMaster(pre_master) => pre_master.recommended_master(timeout_policy),
+            StateDecision::RecommendedMaster(decision) => match self {
+                PortState::Listening(listening) => listening.recommended_master(decision),
+                PortState::Uncalibrated(uncalibrated) => uncalibrated.recommended_master(decision),
+                PortState::Master(master) => master.recommended_master(decision),
+                PortState::Slave(slave) => slave.recommended_master(decision),
+                PortState::PreMaster(pre_master) => pre_master.recommended_master(decision),
                 _ => panic!(
                     "RecommendedMaster can only be applied in Listening, Uncalibrated, Master, or Slave states"
                 ),
@@ -373,8 +371,10 @@ impl PortProfile {
 mod tests {
     use super::*;
 
-    use crate::bmca::{BestForeignRecord, BmcaMasterDecisionPoint, ClockDS, ListeningBmca};
-    use crate::clock::{LocalClock, StepsRemoved};
+    use crate::bmca::{
+        BestForeignRecord, BmcaMasterDecision, BmcaMasterDecisionPoint, ClockDS, ListeningBmca,
+    };
+    use crate::clock::{ClockIdentity, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, TimestampMessage, TwoStepSyncMessage};
@@ -418,6 +418,10 @@ mod tests {
             )
         }
 
+        fn local_clock_identity(&self) -> &ClockIdentity {
+            self.local_clock.identity()
+        }
+
         fn initializing_port(
             &self,
         ) -> PortState<PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
@@ -454,22 +458,26 @@ mod tests {
         fn master_port(
             &self,
         ) -> PortState<PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
+            let grandmaster_id = *self.local_clock.identity();
             PortProfile::default().master(
                 self.domain_port(),
-                GrandMasterTrackingBmca::new(BestForeignRecord::new(
-                    SortedForeignClockRecordsVec::new(),
-                )),
+                GrandMasterTrackingBmca::new(
+                    BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+                    grandmaster_id,
+                ),
             )
         }
 
         fn pre_master_port(
             &self,
         ) -> PortState<PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
+            let grandmaster_id = *self.local_clock.identity();
             PortProfile::default().pre_master(
                 self.domain_port(),
-                GrandMasterTrackingBmca::new(BestForeignRecord::new(
-                    SortedForeignClockRecordsVec::new(),
-                )),
+                GrandMasterTrackingBmca::new(
+                    BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+                    grandmaster_id,
+                ),
                 QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
             )
         }
@@ -572,9 +580,12 @@ mod tests {
 
         let listening = setup.listening_port();
 
-        let pre_master = listening.apply(StateDecision::RecommendedMaster(
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        ));
+        let pre_master =
+            listening.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+                BmcaMasterDecisionPoint::M1,
+                StepsRemoved::new(0),
+                *setup.local_clock_identity(),
+            )));
 
         assert!(matches!(pre_master, PortState::PreMaster(_)));
     }
@@ -717,9 +728,11 @@ mod tests {
 
         let initializing = setup.initializing_port();
 
-        let result = initializing.apply(StateDecision::RecommendedMaster(
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        ));
+        let result = initializing.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+            BmcaMasterDecisionPoint::M1,
+            StepsRemoved::new(0),
+            *setup.local_clock_identity(),
+        )));
 
         assert!(matches!(result, PortState::Faulty(_)));
     }
@@ -730,9 +743,11 @@ mod tests {
 
         let slave = setup.slave_port();
 
-        let result = slave.apply(StateDecision::RecommendedMaster(
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        ));
+        let result = slave.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+            BmcaMasterDecisionPoint::M1,
+            StepsRemoved::new(0),
+            *setup.local_clock_identity(),
+        )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
     }
@@ -743,9 +758,11 @@ mod tests {
 
         let master = setup.master_port();
 
-        let result = master.apply(StateDecision::RecommendedMaster(
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        ));
+        let result = master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+            BmcaMasterDecisionPoint::M1,
+            StepsRemoved::new(0),
+            *setup.local_clock_identity(),
+        )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
     }
@@ -756,9 +773,11 @@ mod tests {
 
         let pre_master = setup.pre_master_port();
 
-        let result = pre_master.apply(StateDecision::RecommendedMaster(
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        ));
+        let result = pre_master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+            BmcaMasterDecisionPoint::M1,
+            StepsRemoved::new(0),
+            *setup.local_clock_identity(),
+        )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
     }
@@ -769,9 +788,11 @@ mod tests {
 
         let uncalibrated = setup.uncalibrated_port();
 
-        let result = uncalibrated.apply(StateDecision::RecommendedMaster(
-            QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
-        ));
+        let result = uncalibrated.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+            BmcaMasterDecisionPoint::M1,
+            StepsRemoved::new(0),
+            *setup.local_clock_identity(),
+        )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
     }
@@ -880,9 +901,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            GrandMasterTrackingBmca::new(BestForeignRecord::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            GrandMasterTrackingBmca::new(
+                BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+                *local_clock.identity(),
+            ),
         );
 
         let transition = master.dispatch_system(SystemMessage::AnnounceSendTimeout);
@@ -908,9 +930,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            GrandMasterTrackingBmca::new(BestForeignRecord::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            GrandMasterTrackingBmca::new(
+                BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+                *local_clock.identity(),
+            ),
         );
 
         let transition = master.dispatch_event(
@@ -940,9 +963,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            GrandMasterTrackingBmca::new(BestForeignRecord::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            GrandMasterTrackingBmca::new(
+                BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+                *local_clock.identity(),
+            ),
         );
 
         let sync_msg = TwoStepSyncMessage::new(0.into(), LogMessageInterval::new(0));
@@ -972,9 +996,10 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            GrandMasterTrackingBmca::new(BestForeignRecord::new(
-                SortedForeignClockRecordsVec::new(),
-            )),
+            GrandMasterTrackingBmca::new(
+                BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+                *local_clock.identity(),
+            ),
         );
 
         let transition = master.dispatch_system(SystemMessage::SyncTimeout);
