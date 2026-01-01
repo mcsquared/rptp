@@ -314,22 +314,20 @@ mod tests {
     use tokio::time;
 
     use rptp::{
-        bmca::{
-            BestForeignRecord, ClockDS, GrandMasterTrackingBmca, ParentTrackingBmca, Priority1,
-            Priority2,
-        },
+        bmca::{ClockDS, Priority1, Priority2},
         clock::{
             ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
             SynchronizableClock, TimeScale,
         },
-        e2e::{DelayCycle, EndToEndDelayMechanism},
         infra::infra_support::SortedForeignClockRecordsVec,
         log::NOOP_CLOCK_METRICS,
         message::{EventMessage, GeneralMessage},
         port::{DomainPort, ParentPortIdentity, PortIdentity, PortNumber, SingleDomainPortMap},
         portstate::{PortProfile, PortState},
         servo::{Servo, SteppingServo},
-        test_support::{FakeClock, FakeTimestamping, TestMessage},
+        test_support::{
+            FakeClock, FakeTimestamping, TestMessage, master_port_state, uncalibrated_port_state,
+        },
         time::{LogInterval, TimeStamp},
     };
 
@@ -403,11 +401,11 @@ mod tests {
                 domain_number,
                 port_number,
             ));
-            let bmca = GrandMasterTrackingBmca::new(
-                BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
-                *local_clock.identity(),
+            let port_state = master_port_state(
+                domain_port,
+                SortedForeignClockRecordsVec::new(),
+                PortProfile::default(),
             );
-            let port_state = PortProfile::default().master(domain_port, bmca);
             let portmap = SingleDomainPortMap::new(domain_number, port_state);
 
             let rx_timestamping = FakeTimestamping::new();
@@ -537,11 +535,11 @@ mod tests {
             domain_number,
             port_number,
         ));
-        let bmca = GrandMasterTrackingBmca::new(
-            BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
-            *local_clock.identity(),
+        let port_state = master_port_state(
+            domain_port,
+            SortedForeignClockRecordsVec::new(),
+            PortProfile::default(),
         );
-        let port_state = PortProfile::default().master(domain_port, bmca);
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
 
         let rx_timestamping = FakeTimestamping::new();
@@ -618,8 +616,6 @@ mod tests {
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         let port_number = PortNumber::new(1);
         let timer_host = TokioTimerHost::new(domain_number, system_tx.clone());
-        let delay_timeout = timer_host.timeout(SystemMessage::DelayRequestTimeout);
-        delay_timeout.restart(Duration::from_secs(0));
         let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
@@ -634,19 +630,17 @@ mod tests {
             ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
             PortNumber::new(1),
         ));
-        let bmca = ParentTrackingBmca::new(
-            BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+        let port_state = uncalibrated_port_state(
+            domain_port,
+            SortedForeignClockRecordsVec::new(),
             parent_port_identity,
+            PortProfile::new(
+                Duration::from_secs(60),
+                LogInterval::new(0),
+                LogInterval::new(0),
+                LogInterval::new(0),
+            ),
         );
-        let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
-
-        let port_state = PortProfile::new(
-            Duration::from_secs(10),
-            LogInterval::new(0),
-            LogInterval::new(0),
-            LogInterval::new(0),
-        )
-        .slave(domain_port, bmca, EndToEndDelayMechanism::new(delay_cycle));
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
         let rx_timestamping = FakeTimestamping::new();
 

@@ -41,8 +41,10 @@ impl<P: Port, S: SortedForeignClockRecords> PreMasterPort<P, S> {
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
-        match self.bmca.decision(self.port.local_clock()) {
-            Some(BmcaDecision::Master(decision)) => Some(StateDecision::RecommendedMaster(decision)),
+        match self.bmca.decision() {
+            Some(BmcaDecision::Master(decision)) => {
+                Some(StateDecision::RecommendedMaster(decision))
+            }
             Some(BmcaDecision::Slave(parent)) => Some(StateDecision::RecommendedSlave(parent)),
             Some(BmcaDecision::Passive) => None, // TODO: Handle Passive transition --- IGNORE ---
             None => None,
@@ -54,10 +56,7 @@ impl<P: Port, S: SortedForeignClockRecords> PreMasterPort<P, S> {
         self.profile.master(self.port, self.bmca)
     }
 
-    pub(crate) fn recommended_master(
-        self,
-        decision: BmcaMasterDecision,
-    ) -> PortState<P, S> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
         decision.apply(|qualification_timeout_policy, grandmaster_id| {
@@ -81,7 +80,10 @@ impl<P: Port, S: SortedForeignClockRecords> PreMasterPort<P, S> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{BestForeignRecord, ClockDS, ForeignClockRecord, GrandMasterTrackingBmca};
+    use crate::bmca::{
+        BestForeignRecord, BestMasterClockAlgorithm, ClockDS, ForeignClockRecord,
+        GrandMasterTrackingBmca,
+    };
     use crate::clock::{LocalClock, StepsRemoved, TimeScale};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
@@ -137,6 +139,7 @@ mod tests {
             PreMasterPort::new(
                 domain_port,
                 GrandMasterTrackingBmca::new(
+                    BestMasterClockAlgorithm::new(*self.local_clock.default_ds()),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
                     grandmaster_id,
                 ),

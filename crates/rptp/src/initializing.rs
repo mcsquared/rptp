@@ -1,20 +1,29 @@
-use crate::bmca::{BestForeignRecord, ListeningBmca, SortedForeignClockRecords};
+use crate::bmca::{
+    BestForeignRecord, BestMasterClockAlgorithm, ListeningBmca, SortedForeignClockRecords,
+};
 use crate::log::PortEvent;
 use crate::port::Port;
 use crate::portstate::{PortProfile, PortState};
 
 pub struct InitializingPort<P: Port, S: SortedForeignClockRecords> {
     port: P,
+    bmca: BestMasterClockAlgorithm,
     sorted_foreign_clock_records: S,
     profile: PortProfile,
 }
 
 impl<P: Port, S: SortedForeignClockRecords> InitializingPort<P, S> {
-    pub(crate) fn new(port: P, sorted_foreign_clock_records: S, profile: PortProfile) -> Self {
+    pub(crate) fn new(
+        port: P,
+        bmca: BestMasterClockAlgorithm,
+        sorted_foreign_clock_records: S,
+        profile: PortProfile,
+    ) -> Self {
         port.log(PortEvent::Static("Become InitializingPort"));
 
         Self {
             port,
+            bmca,
             sorted_foreign_clock_records,
             profile,
         }
@@ -23,7 +32,10 @@ impl<P: Port, S: SortedForeignClockRecords> InitializingPort<P, S> {
     pub(crate) fn initialized(self) -> PortState<P, S> {
         self.port.log(PortEvent::Initialized);
 
-        let bmca = ListeningBmca::new(BestForeignRecord::new(self.sorted_foreign_clock_records));
+        let bmca = ListeningBmca::new(
+            self.bmca,
+            BestForeignRecord::new(self.sorted_foreign_clock_records),
+        );
 
         self.profile.listening(self.port, bmca)
     }
@@ -61,6 +73,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
+            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
             SortedForeignClockRecordsVec::new(),
             PortProfile::default(),
         );

@@ -57,7 +57,7 @@ impl<P: Port, S: SortedForeignClockRecords> MasterPort<P, S> {
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
-        match self.bmca.decision(self.port.local_clock()) {
+        match self.bmca.decision() {
             // While already in the Master state, a Master BMCA decision does not require any
             // state transition.
             Some(BmcaDecision::Master(_)) => None,
@@ -110,10 +110,7 @@ impl<P: Port, S: SortedForeignClockRecords> MasterPort<P, S> {
         Ok(())
     }
 
-    pub(crate) fn recommended_master(
-        self,
-        decision: BmcaMasterDecision,
-    ) -> PortState<P, S> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
         decision.apply(|qualification_timeout_policy, grandmaster_id| {
@@ -189,7 +186,10 @@ impl<T: Timeout> SyncCycle<T> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{BestForeignRecord, ClockDS, ForeignClockRecord, GrandMasterTrackingBmca};
+    use crate::bmca::{
+        BestForeignRecord, BestMasterClockAlgorithm, ClockDS, ForeignClockRecord,
+        GrandMasterTrackingBmca,
+    };
     use crate::clock::{LocalClock, StepsRemoved, TimeScale};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
@@ -257,6 +257,7 @@ mod tests {
             MasterPort::new(
                 domain_port,
                 GrandMasterTrackingBmca::new(
+                    BestMasterClockAlgorithm::new(*self.local_clock.default_ds()),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
                     grandmaster_id,
                 ),

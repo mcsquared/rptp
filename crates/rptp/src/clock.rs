@@ -1,7 +1,6 @@
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
-use crate::bmca::BestForeignDataset;
 use crate::{
     bmca::ClockDS,
     message::{AnnounceMessage, SequenceId},
@@ -334,6 +333,10 @@ impl<C: SynchronizableClock> LocalClock<C> {
         self.clock.now()
     }
 
+    pub fn default_ds(&self) -> &ClockDS {
+        &self.ds
+    }
+
     pub(crate) fn announce(
         &self,
         sequence_id: SequenceId,
@@ -345,17 +348,6 @@ impl<C: SynchronizableClock> LocalClock<C> {
             self.ds,
             self.clock.time_scale(),
         )
-    }
-
-    pub(crate) fn is_grandmaster_capable(&self) -> bool {
-        self.ds.is_grandmaster_capable()
-    }
-
-    pub(crate) fn better_than(&self, other: BestForeignDataset) -> bool {
-        match other {
-            BestForeignDataset::Qualified { ds: other_ds, .. } => self.ds.better_than(other_ds),
-            BestForeignDataset::Empty => true,
-        }
     }
 
     pub(crate) fn discipline(&self, sample: ServoSample) -> ServoState {

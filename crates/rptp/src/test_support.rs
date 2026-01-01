@@ -19,6 +19,10 @@ use std::rc::Rc;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::time::Duration;
 
+use crate::bmca::{BestForeignRecord, BestMasterClockAlgorithm, SortedForeignClockRecords};
+use crate::port::{ParentPortIdentity, Port};
+use crate::portstate::{PortProfile, PortState};
+
 pub struct TestClockCatalog {
     clock_identity: ClockIdentity,
     clock_class: ClockClass,
@@ -217,6 +221,34 @@ impl SynchronizableClock for FakeClock {
     fn adjust(&self, rate: f64) {
         self.last_adjust.set(Some(rate));
     }
+}
+
+pub fn master_port_state<P: Port, S: SortedForeignClockRecords>(
+    port: P,
+    sorted_foreign_clock_records: S,
+    profile: PortProfile,
+) -> PortState<P, S> {
+    let grandmaster_id = *port.local_clock().identity();
+    let bmca = crate::bmca::GrandMasterTrackingBmca::new(
+        BestMasterClockAlgorithm::new(*port.local_clock().default_ds()),
+        BestForeignRecord::new(sorted_foreign_clock_records),
+        grandmaster_id,
+    );
+    profile.master(port, bmca)
+}
+
+pub fn uncalibrated_port_state<P: Port, S: SortedForeignClockRecords>(
+    port: P,
+    sorted_foreign_clock_records: S,
+    parent_port_identity: ParentPortIdentity,
+    profile: PortProfile,
+) -> PortState<P, S> {
+    let bmca = crate::bmca::ParentTrackingBmca::new(
+        BestMasterClockAlgorithm::new(*port.local_clock().default_ds()),
+        BestForeignRecord::new(sorted_foreign_clock_records),
+        parent_port_identity,
+    );
+    profile.uncalibrated(port, bmca)
 }
 
 impl SynchronizableClock for &FakeClock {

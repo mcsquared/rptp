@@ -52,8 +52,7 @@ impl<P: Port, S: SortedForeignClockRecords> ListeningPort<P, S> {
 
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
-        let grandmaster_id = *self.port.local_clock().identity();
-        let bmca = self.bmca.into_grandmaster_tracking(grandmaster_id);
+        let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
 
@@ -68,7 +67,7 @@ impl<P: Port, S: SortedForeignClockRecords> ListeningPort<P, S> {
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
-        match self.bmca.decision(self.port.local_clock()) {
+        match self.bmca.decision() {
             Some(BmcaDecision::Master(decision)) => {
                 Some(StateDecision::RecommendedMaster(decision))
             }
@@ -83,7 +82,10 @@ impl<P: Port, S: SortedForeignClockRecords> ListeningPort<P, S> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{BestForeignRecord, BmcaMasterDecisionPoint, ClockDS, ListeningBmca};
+    use crate::bmca::{
+        BestForeignRecord, BestMasterClockAlgorithm, BmcaMasterDecisionPoint, ClockDS,
+        ListeningBmca,
+    };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
@@ -142,7 +144,10 @@ mod tests {
 
             ListeningPort::new(
                 domain_port,
-                ListeningBmca::new(BestForeignRecord::new(SortedForeignClockRecordsVec::new())),
+                ListeningBmca::new(
+                    BestMasterClockAlgorithm::new(*self.local_clock.default_ds()),
+                    BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+                ),
                 announce_receipt_timeout,
                 PortProfile::default(),
             )

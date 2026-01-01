@@ -1,8 +1,8 @@
 use core::panic;
 
 use crate::bmca::{
-    BmcaMasterDecision, GrandMasterTrackingBmca, ListeningBmca, ParentTrackingBmca,
-    QualificationTimeoutPolicy, SortedForeignClockRecords,
+    BestMasterClockAlgorithm, BmcaMasterDecision, GrandMasterTrackingBmca, ListeningBmca,
+    ParentTrackingBmca, QualificationTimeoutPolicy, SortedForeignClockRecords,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::faulty::FaultyPort;
@@ -258,8 +258,10 @@ impl PortProfile {
         port: P,
         sorted_foreign_clock_records: S,
     ) -> PortState<P, S> {
+        let bmca = BestMasterClockAlgorithm::new(*port.local_clock().default_ds());
         PortState::Initializing(InitializingPort::new(
             port,
+            bmca,
             sorted_foreign_clock_records,
             self,
         ))
@@ -284,7 +286,7 @@ impl PortProfile {
         ))
     }
 
-    pub fn master<P: Port, S: SortedForeignClockRecords>(
+    pub(crate) fn master<P: Port, S: SortedForeignClockRecords>(
         self,
         port: P,
         bmca: GrandMasterTrackingBmca<S>,
@@ -306,7 +308,7 @@ impl PortProfile {
         ))
     }
 
-    pub fn slave<P: Port, S: SortedForeignClockRecords>(
+    pub(crate) fn slave<P: Port, S: SortedForeignClockRecords>(
         self,
         port: P,
         bmca: ParentTrackingBmca<S>,
@@ -434,7 +436,10 @@ mod tests {
         ) -> PortState<PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
             PortProfile::default().listening(
                 self.domain_port(),
-                ListeningBmca::new(BestForeignRecord::new(SortedForeignClockRecordsVec::new())),
+                ListeningBmca::new(
+                    BestMasterClockAlgorithm::new(*self.local_clock.default_ds()),
+                    BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+                ),
             )
         }
 
@@ -444,6 +449,7 @@ mod tests {
             PortProfile::default().slave(
                 self.domain_port(),
                 ParentTrackingBmca::new(
+                    BestMasterClockAlgorithm::new(*self.local_clock.default_ds()),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                     ParentPortIdentity::new(PortIdentity::fake()),
                 ),
@@ -462,6 +468,7 @@ mod tests {
             PortProfile::default().master(
                 self.domain_port(),
                 GrandMasterTrackingBmca::new(
+                    BestMasterClockAlgorithm::new(*self.local_clock.default_ds()),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                     grandmaster_id,
                 ),
@@ -475,6 +482,7 @@ mod tests {
             PortProfile::default().pre_master(
                 self.domain_port(),
                 GrandMasterTrackingBmca::new(
+                    BestMasterClockAlgorithm::new(*self.local_clock.default_ds()),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                     grandmaster_id,
                 ),
@@ -488,6 +496,7 @@ mod tests {
             PortProfile::default().uncalibrated(
                 self.domain_port(),
                 ParentTrackingBmca::new(
+                    BestMasterClockAlgorithm::new(*self.local_clock.default_ds()),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                     ParentPortIdentity::new(PortIdentity::fake()),
                 ),
@@ -902,6 +911,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             GrandMasterTrackingBmca::new(
+                BestMasterClockAlgorithm::new(*local_clock.default_ds()),
                 BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 *local_clock.identity(),
             ),
@@ -931,6 +941,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             GrandMasterTrackingBmca::new(
+                BestMasterClockAlgorithm::new(*local_clock.default_ds()),
                 BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 *local_clock.identity(),
             ),
@@ -964,6 +975,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             GrandMasterTrackingBmca::new(
+                BestMasterClockAlgorithm::new(*local_clock.default_ds()),
                 BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 *local_clock.identity(),
             ),
@@ -997,6 +1009,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             GrandMasterTrackingBmca::new(
+                BestMasterClockAlgorithm::new(*local_clock.default_ds()),
                 BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 *local_clock.identity(),
             ),
@@ -1027,6 +1040,7 @@ mod tests {
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         let bmca = ParentTrackingBmca::new(
+            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
             parent_port_identity,
         );
