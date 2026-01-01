@@ -482,13 +482,18 @@ fn main() -> ! {
         SYSTEM_TICK.now().as_smol_instant(),
     );
 
-    let local_clock = LocalClock::new(
-        &demo_clock,
-        demo_default_ds(),
-        Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-    );
+    let default_ds = demo_default_ds();
 
-    let ordinary_clock = OrdinaryClock::new(local_clock, DomainNumber::new(0), PortNumber::new(1));
+    let ordinary_clock = OrdinaryClock::new(
+        LocalClock::new(
+            &demo_clock,
+            *default_ds.identity(),
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+        ),
+        default_ds,
+        DomainNumber::new(0),
+        PortNumber::new(1),
+    );
 
     let physical_port = DemoPhysicalPort {
         inner: network.physical_port(),

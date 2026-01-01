@@ -2,10 +2,8 @@ use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
 use crate::{
-    bmca::ClockDS,
-    message::{AnnounceMessage, SequenceId},
     servo::{Servo, ServoSample, ServoState},
-    time::{LogMessageInterval, TimeStamp},
+    time::TimeStamp,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -316,38 +314,29 @@ pub trait SynchronizableClock: Clock {
 
 pub struct LocalClock<C: SynchronizableClock> {
     clock: C,
-    ds: ClockDS,
+    identity: ClockIdentity,
     servo: Servo,
 }
 
 impl<C: SynchronizableClock> LocalClock<C> {
-    pub fn new(clock: C, ds: ClockDS, servo: Servo) -> Self {
-        Self { clock, ds, servo }
+    pub fn new(clock: C, identity: ClockIdentity, servo: Servo) -> Self {
+        Self {
+            clock,
+            identity,
+            servo,
+        }
     }
 
     pub fn identity(&self) -> &ClockIdentity {
-        self.ds.identity()
+        &self.identity
     }
 
     pub fn now(&self) -> TimeStamp {
         self.clock.now()
     }
 
-    pub fn default_ds(&self) -> &ClockDS {
-        &self.ds
-    }
-
-    pub(crate) fn announce(
-        &self,
-        sequence_id: SequenceId,
-        log_message_interval: LogMessageInterval,
-    ) -> AnnounceMessage {
-        AnnounceMessage::new(
-            sequence_id,
-            log_message_interval,
-            self.ds,
-            self.clock.time_scale(),
-        )
+    pub fn time_scale(&self) -> TimeScale {
+        self.clock.time_scale()
     }
 
     pub(crate) fn discipline(&self, sample: ServoSample) -> ServoState {
@@ -376,34 +365,4 @@ impl StepsRemoved {
 pub enum TimeScale {
     Ptp,
     Arb,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use crate::log::NOOP_CLOCK_METRICS;
-    use crate::servo::SteppingServo;
-    use crate::test_support::{FakeClock, TestClockCatalog};
-
-    #[test]
-    fn local_clock_announces() {
-        let local_clock = LocalClock::new(
-            FakeClock::new(TimeStamp::new(0, 0), TimeScale::Ptp),
-            TestClockCatalog::default_high_grade().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-
-        let announce = local_clock.announce(SequenceId::new(1), LogMessageInterval::new(1));
-
-        assert_eq!(
-            announce,
-            AnnounceMessage::new(
-                SequenceId::new(1),
-                LogMessageInterval::new(1),
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
-                TimeScale::Ptp,
-            )
-        )
-    }
 }

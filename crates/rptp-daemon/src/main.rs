@@ -31,24 +31,28 @@ async fn main() -> std::io::Result<()> {
     rptp_daemon::init_tracing();
 
     let virtual_clock = VirtualClock::new(TimeStamp::new(0, 0), 1.0, TimeScale::Ptp);
-    let local_clock = LocalClock::new(
-        &virtual_clock,
-        ClockDS::new(
-            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
-            Priority1::new(127),
-            Priority2::new(127),
-            ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-            StepsRemoved::new(0),
-        ),
-        Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+    let default_ds = ClockDS::new(
+        ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+        Priority1::new(127),
+        Priority2::new(127),
+        ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+        StepsRemoved::new(0),
     );
 
     let event_socket = Rc::new(MulticastSocket::event().await?);
     let general_socket = Rc::new(MulticastSocket::general().await?);
     let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-    let ordinary_clock =
-        OrdinaryTokioClock::new(local_clock, DomainNumber::new(0), PortNumber::new(1));
+    let ordinary_clock = OrdinaryTokioClock::new(
+        LocalClock::new(
+            &virtual_clock,
+            *default_ds.identity(),
+            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
+        ),
+        default_ds,
+        DomainNumber::new(0),
+        PortNumber::new(1),
+    );
 
     let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 

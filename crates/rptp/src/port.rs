@@ -356,8 +356,7 @@ mod tests {
     use core::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::bmca::{ClockDS, Priority1, Priority2};
-    use crate::clock::{ClockAccuracy, ClockClass, ClockQuality, StepsRemoved};
+    use crate::clock::ClockIdentity;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, FollowUpMessage};
     use crate::servo::{Servo, SteppingServo};
@@ -391,13 +390,7 @@ mod tests {
         let identity = ClockIdentity::new(&[1, 2, 3, 4, 5, 6, 7, 8]);
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            ClockDS::new(
-                identity,
-                Priority1::new(127),
-                Priority2::new(127),
-                ClockQuality::new(ClockClass::Default, ClockAccuracy::Within100us, 0xFFFF),
-                StepsRemoved::new(0),
-            ),
+            identity,
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let (cap_port, sent) = CapturePort::new();
@@ -434,13 +427,7 @@ mod tests {
         let identity = ClockIdentity::new(&[8, 7, 6, 5, 4, 3, 2, 1]);
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            ClockDS::new(
-                identity,
-                Priority1::new(127),
-                Priority2::new(127),
-                ClockQuality::new(ClockClass::Default, ClockAccuracy::Within100us, 0xFFFF),
-                StepsRemoved::new(0),
-            ),
+            identity,
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let (cap_port, sent) = CapturePort::new();

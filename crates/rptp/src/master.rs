@@ -1,5 +1,6 @@
 use crate::bmca::{
-    Bmca, BmcaDecision, BmcaMasterDecision, GrandMasterTrackingBmca, SortedForeignClockRecords,
+    Bmca, BmcaDecision, BmcaMasterDecision, GrandMaster, GrandMasterTrackingBmca,
+    SortedForeignClockRecords,
 };
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortEvent;
@@ -39,7 +40,9 @@ impl<P: Port, S: SortedForeignClockRecords> MasterPort<P, S> {
     }
 
     pub(crate) fn send_announce(&mut self) -> SendResult {
-        let announce_message = self.announce_cycle.announce(self.port.local_clock());
+        let announce_message = self
+            .announce_cycle
+            .announce(self.port.local_clock(), self.bmca.grandmaster());
         self.port
             .send_general(GeneralMessage::Announce(announce_message))?;
         self.announce_cycle.next();
@@ -151,8 +154,16 @@ impl<T: Timeout> AnnounceCycle<T> {
         self.sequence_id = self.sequence_id.next();
     }
 
-    pub fn announce<C: SynchronizableClock>(&self, local_clock: &LocalClock<C>) -> AnnounceMessage {
-        local_clock.announce(self.sequence_id, self.log_interval.log_message_interval())
+    pub fn announce<C: SynchronizableClock>(
+        &self,
+        local_clock: &LocalClock<C>,
+        grandmaster: GrandMaster,
+    ) -> AnnounceMessage {
+        grandmaster.announce(
+            self.sequence_id,
+            self.log_interval.log_message_interval(),
+            local_clock.time_scale(),
+        )
     }
 }
 
@@ -211,6 +222,7 @@ mod tests {
 
     struct MasterPortTestSetup {
         local_clock: LocalClock<FakeClock>,
+        default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
     }
@@ -224,9 +236,10 @@ mod tests {
             Self {
                 local_clock: LocalClock::new(
                     FakeClock::new(now, TimeScale::Ptp),
-                    ds,
+                    *ds.identity(),
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
+                default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
             }
@@ -257,7 +270,7 @@ mod tests {
             MasterPort::new(
                 domain_port,
                 GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(*self.local_clock.default_ds()),
+                    BestMasterClockAlgorithm::new(self.default_ds),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
                     grandmaster_id,
                 ),
@@ -515,27 +528,29 @@ mod tests {
 
     #[test]
     fn announce_cycle_produces_announce_messages_with_monotonic_sequence_ids() {
+        let clock_ds = TestClockCatalog::default_high_grade().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            TestClockCatalog::default_high_grade().default_ds(),
+            *clock_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
+        let bmca = BestMasterClockAlgorithm::new(clock_ds);
 
         let mut cycle = AnnounceCycle::new(
             0.into(),
             FakeTimeout::new(SystemMessage::AnnounceSendTimeout),
             LogInterval::new(0),
         );
-        let msg1 = cycle.announce(&local_clock);
+        let msg1 = cycle.announce(&local_clock, bmca.grandmaster());
         cycle.next();
-        let msg2 = cycle.announce(&local_clock);
+        let msg2 = cycle.announce(&local_clock, bmca.grandmaster());
 
         assert_eq!(
             msg1,
             AnnounceMessage::new(
                 0.into(),
                 LogInterval::new(0).log_message_interval(),
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
+                clock_ds,
                 TimeScale::Ptp,
             )
         );
@@ -544,7 +559,7 @@ mod tests {
             AnnounceMessage::new(
                 1.into(),
                 LogInterval::new(0).log_message_interval(),
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
+                clock_ds,
                 TimeScale::Ptp,
             )
         );

@@ -1,15 +1,16 @@
 use std::cell::Cell;
 
-use crate::bmca::{ClockDS, Priority1, Priority2};
+use crate::bmca::{ClockDS, GrandMasterTrackingBmca, ParentTrackingBmca, Priority1, Priority2};
 use crate::clock::{
     Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved,
     SynchronizableClock, TimeScale,
 };
+use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::port::{
     PhysicalPort, PortIdentity, PortNumber, SendError, SendResult, Timeout, TimerHost,
 };
 use crate::result::Result;
-use crate::time::TimeStamp;
+use crate::time::{LogInterval, TimeStamp};
 use crate::timestamping::TxTimestamping;
 use crate::wire::{MessageHeader, UnvalidatedMessage};
 
@@ -223,32 +224,38 @@ impl SynchronizableClock for FakeClock {
     }
 }
 
-pub fn master_port_state<P: Port, S: SortedForeignClockRecords>(
+pub fn master_test_port<P: Port, S: SortedForeignClockRecords>(
     port: P,
+    default_ds: ClockDS,
     sorted_foreign_clock_records: S,
     profile: PortProfile,
 ) -> PortState<P, S> {
     let grandmaster_id = *port.local_clock().identity();
-    let bmca = crate::bmca::GrandMasterTrackingBmca::new(
-        BestMasterClockAlgorithm::new(*port.local_clock().default_ds()),
+    let bmca = GrandMasterTrackingBmca::new(
+        BestMasterClockAlgorithm::new(default_ds),
         BestForeignRecord::new(sorted_foreign_clock_records),
         grandmaster_id,
     );
     profile.master(port, bmca)
 }
 
-pub fn uncalibrated_port_state<P: Port, S: SortedForeignClockRecords>(
+pub fn slave_test_port<P: Port, S: SortedForeignClockRecords>(
     port: P,
+    default_ds: ClockDS,
     sorted_foreign_clock_records: S,
     parent_port_identity: ParentPortIdentity,
     profile: PortProfile,
 ) -> PortState<P, S> {
-    let bmca = crate::bmca::ParentTrackingBmca::new(
-        BestMasterClockAlgorithm::new(*port.local_clock().default_ds()),
+    let bmca = ParentTrackingBmca::new(
+        BestMasterClockAlgorithm::new(default_ds),
         BestForeignRecord::new(sorted_foreign_clock_records),
         parent_port_identity,
     );
-    profile.uncalibrated(port, bmca)
+    let delay_timeout = port.timeout(SystemMessage::DelayRequestTimeout);
+    delay_timeout.restart(Duration::from_secs(0));
+    let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
+    let e2e = EndToEndDelayMechanism::new(delay_cycle);
+    profile.slave(port, bmca, e2e)
 }
 
 impl SynchronizableClock for &FakeClock {

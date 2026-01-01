@@ -1,4 +1,4 @@
-use crate::bmca::SortedForeignClockRecords;
+use crate::bmca::{BestMasterClockAlgorithm, ClockDS, SortedForeignClockRecords};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::port::{DomainNumber, DomainPort, PhysicalPort, PortNumber, TimerHost};
@@ -7,6 +7,7 @@ use crate::timestamping::TxTimestamping;
 
 pub struct OrdinaryClock<C: SynchronizableClock> {
     local_clock: LocalClock<C>,
+    default_ds: ClockDS,
     domain_number: DomainNumber,
     port_number: PortNumber,
 }
@@ -14,11 +15,13 @@ pub struct OrdinaryClock<C: SynchronizableClock> {
 impl<C: SynchronizableClock> OrdinaryClock<C> {
     pub fn new(
         local_clock: LocalClock<C>,
+        default_ds: ClockDS,
         domain_number: DomainNumber,
         port_number: PortNumber,
     ) -> Self {
         OrdinaryClock {
             local_clock,
+            default_ds,
             domain_number,
             port_number,
         }
@@ -60,6 +63,8 @@ impl<C: SynchronizableClock> OrdinaryClock<C> {
             self.port_number,
         );
 
-        PortProfile::default().initializing(domain_port, sorted_foreign_clock_records)
+        let bmca = BestMasterClockAlgorithm::new(self.default_ds);
+
+        PortProfile::default().initializing(domain_port, bmca, sorted_foreign_clock_records)
     }
 }

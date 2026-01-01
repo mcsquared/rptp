@@ -105,6 +105,7 @@ mod tests {
 
     struct ListeningPortTestSetup {
         local_clock: LocalClock<FakeClock>,
+        default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
     }
@@ -114,9 +115,10 @@ mod tests {
             Self {
                 local_clock: LocalClock::new(
                     FakeClock::default(),
-                    ds,
+                    *ds.identity(),
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
+                default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
             }
@@ -145,7 +147,7 @@ mod tests {
             ListeningPort::new(
                 domain_port,
                 ListeningBmca::new(
-                    BestMasterClockAlgorithm::new(*self.local_clock.default_ds()),
+                    BestMasterClockAlgorithm::new(self.default_ds),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 ),
                 announce_receipt_timeout,

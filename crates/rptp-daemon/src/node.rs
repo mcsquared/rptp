@@ -326,7 +326,7 @@ mod tests {
         portstate::{PortProfile, PortState},
         servo::{Servo, SteppingServo},
         test_support::{
-            FakeClock, FakeTimestamping, TestMessage, master_port_state, uncalibrated_port_state,
+            FakeClock, FakeTimestamping, TestMessage, master_test_port, slave_test_port,
         },
         time::{LogInterval, TimeStamp},
     };
@@ -382,6 +382,7 @@ mod tests {
     impl<'a, C: SynchronizableClock, N: NetworkSocket> MasterTestNode<'a, C, N> {
         async fn new(
             local_clock: &'a LocalClock<C>,
+            default_ds: ClockDS,
             event_socket: Rc<N>,
             general_socket: Rc<N>,
             physical_port: &'a TokioPhysicalPort<N>,
@@ -401,8 +402,9 @@ mod tests {
                 domain_number,
                 port_number,
             ));
-            let port_state = master_port_state(
+            let port_state = master_test_port(
                 domain_port,
+                default_ds,
                 SortedForeignClockRecordsVec::new(),
                 PortProfile::default(),
             );
@@ -508,15 +510,16 @@ mod tests {
         let domain_number = DomainNumber::new(0);
 
         let virtual_clock = VirtualClock::new(TimeStamp::new(0, 0), 1.0, TimeScale::Arb);
+        let default_ds = ClockDS::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            Priority1::new(127),
+            Priority2::new(127),
+            ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+            StepsRemoved::new(0),
+        );
         let local_clock = LocalClock::new(
             &virtual_clock,
-            ClockDS::new(
-                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
-                Priority1::new(127),
-                Priority2::new(127),
-                ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                StepsRemoved::new(0),
-            ),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -535,8 +538,9 @@ mod tests {
             domain_number,
             port_number,
         ));
-        let port_state = master_port_state(
+        let port_state = master_test_port(
             domain_port,
+            default_ds,
             SortedForeignClockRecordsVec::new(),
             PortProfile::default(),
         );
@@ -600,15 +604,16 @@ mod tests {
 
         let domain_number = DomainNumber::new(0);
 
+        let default_ds = ClockDS::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
+            Priority1::new(127),
+            Priority2::new(127),
+            ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+            StepsRemoved::new(0),
+        );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            ClockDS::new(
-                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
-                Priority1::new(127),
-                Priority2::new(127),
-                ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                StepsRemoved::new(0),
-            ),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -630,8 +635,9 @@ mod tests {
             ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
             PortNumber::new(1),
         ));
-        let port_state = uncalibrated_port_state(
+        let port_state = slave_test_port(
             domain_port,
+            default_ds,
             SortedForeignClockRecordsVec::new(),
             parent_port_identity,
             PortProfile::new(
@@ -683,15 +689,16 @@ mod tests {
 
     #[tokio::test]
     async fn ports_loop_handles_unknown_domain_event_message() -> std::io::Result<()> {
+        let default_ds = ClockDS::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x03]),
+            Priority1::new(127),
+            Priority2::new(127),
+            ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+            StepsRemoved::new(0),
+        );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            ClockDS::new(
-                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x03]),
-                Priority1::new(127),
-                Priority2::new(127),
-                ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                StepsRemoved::new(0),
-            ),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -703,8 +710,14 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
-        let node =
-            MasterTestNode::new(&local_clock, event_socket, general_socket, &physical_port).await?;
+        let node = MasterTestNode::new(
+            &local_clock,
+            default_ds,
+            event_socket,
+            general_socket,
+            &physical_port,
+        )
+        .await?;
 
         event_queue
             .lock()
@@ -719,15 +732,16 @@ mod tests {
 
     #[tokio::test]
     async fn ports_loop_handles_unsupported_ptp_version_event_message() -> std::io::Result<()> {
+        let default_ds = ClockDS::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x04]),
+            Priority1::new(127),
+            Priority2::new(127),
+            ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+            StepsRemoved::new(0),
+        );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            ClockDS::new(
-                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x04]),
-                Priority1::new(127),
-                Priority2::new(127),
-                ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                StepsRemoved::new(0),
-            ),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -739,8 +753,14 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
-        let node =
-            MasterTestNode::new(&local_clock, event_socket, general_socket, &physical_port).await?;
+        let node = MasterTestNode::new(
+            &local_clock,
+            default_ds,
+            event_socket,
+            general_socket,
+            &physical_port,
+        )
+        .await?;
 
         event_queue.lock().unwrap().push_back(PTP_V1_SYNC.to_vec());
 
@@ -752,15 +772,16 @@ mod tests {
 
     #[tokio::test]
     async fn ports_loop_handles_header_too_short_event_message() -> std::io::Result<()> {
+        let default_ds = ClockDS::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x05]),
+            Priority1::new(127),
+            Priority2::new(127),
+            ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+            StepsRemoved::new(0),
+        );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            ClockDS::new(
-                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x05]),
-                Priority1::new(127),
-                Priority2::new(127),
-                ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                StepsRemoved::new(0),
-            ),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -772,8 +793,14 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
-        let node =
-            MasterTestNode::new(&local_clock, event_socket, general_socket, &physical_port).await?;
+        let node = MasterTestNode::new(
+            &local_clock,
+            default_ds,
+            event_socket,
+            general_socket,
+            &physical_port,
+        )
+        .await?;
 
         // Inject a buffer that is shorter than the PTP header (34 bytes).
         event_queue.lock().unwrap().push_back(vec![0u8; 10]);
@@ -786,15 +813,16 @@ mod tests {
 
     #[tokio::test]
     async fn ports_loop_handles_length_mismatch_event_message() -> std::io::Result<()> {
+        let default_ds = ClockDS::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x06]),
+            Priority1::new(127),
+            Priority2::new(127),
+            ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+            StepsRemoved::new(0),
+        );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            ClockDS::new(
-                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x06]),
-                Priority1::new(127),
-                Priority2::new(127),
-                ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                StepsRemoved::new(0),
-            ),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -806,8 +834,14 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
-        let node =
-            MasterTestNode::new(&local_clock, event_socket, general_socket, &physical_port).await?;
+        let node = MasterTestNode::new(
+            &local_clock,
+            default_ds,
+            event_socket,
+            general_socket,
+            &physical_port,
+        )
+        .await?;
 
         event_queue
             .lock()
@@ -822,15 +856,16 @@ mod tests {
 
     #[tokio::test]
     async fn ports_loop_handles_short_payload_event_message() -> std::io::Result<()> {
+        let default_ds = ClockDS::new(
+            ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x07]),
+            Priority1::new(127),
+            Priority2::new(127),
+            ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
+            StepsRemoved::new(0),
+        );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            ClockDS::new(
-                ClockIdentity::new(&[0x00, 0x1B, 0x19, 0xFF, 0xFE, 0x00, 0x00, 0x07]),
-                Priority1::new(127),
-                Priority2::new(127),
-                ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
-                StepsRemoved::new(0),
-            ),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -842,8 +877,14 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
-        let node =
-            MasterTestNode::new(&local_clock, event_socket, general_socket, &physical_port).await?;
+        let node = MasterTestNode::new(
+            &local_clock,
+            default_ds,
+            event_socket,
+            general_socket,
+            &physical_port,
+        )
+        .await?;
 
         event_queue
             .lock()

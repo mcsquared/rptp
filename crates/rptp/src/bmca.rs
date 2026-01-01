@@ -1,9 +1,10 @@
 use core::ops::Range;
 
-use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved};
+use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved, TimeScale};
+use crate::message::{AnnounceMessage, SequenceId};
 use crate::port::{ParentPortIdentity, Port, PortIdentity};
 use crate::portstate::PortState;
-use crate::time::{Duration, Instant, LogInterval};
+use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
 pub trait Bmca {
     fn consider(
@@ -153,7 +154,7 @@ impl<S: SortedForeignClockRecords> ListeningBmca<S> {
     }
 
     pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<S> {
-        let current_grandmaster_id = *self.bmca.local_clock_id();
+        let current_grandmaster_id = *self.bmca.grandmaster().identity();
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 }
@@ -186,6 +187,29 @@ impl<S: SortedForeignClockRecords> Bmca for ListeningBmca<S> {
     }
 }
 
+pub(crate) struct GrandMaster<'a> {
+    ds: &'a ClockDS,
+}
+
+impl<'a> GrandMaster<'a> {
+    fn new(ds: &'a ClockDS) -> Self {
+        Self { ds }
+    }
+
+    pub fn identity(&self) -> &ClockIdentity {
+        self.ds.identity()
+    }
+
+    pub fn announce(
+        &self,
+        sequence_id: SequenceId,
+        log_message_interval: LogMessageInterval,
+        time_scale: TimeScale,
+    ) -> AnnounceMessage {
+        AnnounceMessage::new(sequence_id, log_message_interval, *self.ds, time_scale)
+    }
+}
+
 pub(crate) struct GrandMasterTrackingBmca<S: SortedForeignClockRecords> {
     bmca: BestMasterClockAlgorithm,
     best_foreign: BestForeignRecord<S>,
@@ -203,6 +227,10 @@ impl<S: SortedForeignClockRecords> GrandMasterTrackingBmca<S> {
             best_foreign,
             grandmaster_id,
         }
+    }
+
+    pub(crate) fn grandmaster(&self) -> GrandMaster<'_> {
+        self.bmca.grandmaster()
     }
 
     pub(crate) fn with_grandmaster_id(self, grandmaster_id: ClockIdentity) -> Self {
@@ -297,7 +325,7 @@ impl<S: SortedForeignClockRecords> ParentTrackingBmca<S> {
     }
 
     pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<S> {
-        let current_grandmaster_id = *self.bmca.local_clock_id();
+        let current_grandmaster_id = *self.bmca.grandmaster().identity();
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 }
@@ -335,6 +363,7 @@ impl<S: SortedForeignClockRecords> Bmca for ParentTrackingBmca<S> {
     }
 }
 
+// #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BestMasterClockAlgorithm {
     d_0: ClockDS,
 }
@@ -344,7 +373,13 @@ impl BestMasterClockAlgorithm {
         Self { d_0: default_ds }
     }
 
-    pub fn decision(&self, e_rbest: BestForeignDataset) -> BmcaDecision {
+    pub(crate) fn grandmaster(&self) -> GrandMaster<'_> {
+        // TODO: once multi-port is supported, this should return the grandmaster, whether local or
+        // foreign. With only single port support atm, it's always local d_0.
+        GrandMaster::new(&self.d_0)
+    }
+
+    pub(crate) fn decision(&self, e_rbest: BestForeignDataset) -> BmcaDecision {
         if self.d_0.is_grandmaster_capable() {
             self.d0_better_or_better_by_topology_than_e_rbest(e_rbest)
         } else {
@@ -353,10 +388,6 @@ impl BestMasterClockAlgorithm {
                 e_rbest,
             )
         }
-    }
-
-    fn local_clock_id(&self) -> &ClockIdentity {
-        self.d_0.identity()
     }
 
     fn d0_better_or_better_by_topology_than_e_rbest(
@@ -784,7 +815,7 @@ impl ClockDS {
     }
 
     /// Return the clock identity of this foreign clock.
-    pub(crate) fn identity(&self) -> &ClockIdentity {
+    pub fn identity(&self) -> &ClockIdentity {
         &self.identity
     }
 
@@ -923,14 +954,15 @@ pub(crate) mod tests {
 
     #[test]
     fn grandmaster_tracking_bmca_gates_when_grandmaster_id_matches() {
+        let default_ds = TestClockCatalog::default_high_grade().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            TestClockCatalog::default_high_grade().default_ds(),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let bmca = GrandMasterTrackingBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
             *local_clock.identity(),
         );
@@ -940,32 +972,26 @@ pub(crate) mod tests {
 
     #[test]
     fn grandmaster_tracking_bmca_emits_when_grandmaster_id_differs() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::default_high_grade().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let default_ds = TestClockCatalog::default_high_grade().default_ds();
 
         let other_grandmaster_id = TestClockCatalog::gps_grandmaster().clock_identity();
         let bmca = GrandMasterTrackingBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
             other_grandmaster_id,
         );
 
-        assert!(matches!(
-            bmca.decision(),
-            Some(BmcaDecision::Master(_))
-        ));
+        assert!(matches!(bmca.decision(), Some(BmcaDecision::Master(_))));
     }
 
     #[test]
     fn grandmaster_tracking_bmca_does_not_gate_passive_decisions() {
         let now = Instant::from_secs(0);
 
+        let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            TestClockCatalog::gps_grandmaster().default_ds(),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -980,7 +1006,7 @@ pub(crate) mod tests {
         )];
 
         let bmca = GrandMasterTrackingBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(&records)),
             *local_clock.identity(),
         );
@@ -992,9 +1018,10 @@ pub(crate) mod tests {
     fn grandmaster_tracking_bmca_does_not_gate_slave_decisions() {
         let now = Instant::from_secs(0);
 
+        let default_ds = TestClockCatalog::default_low_grade_slave_only().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            TestClockCatalog::default_low_grade_slave_only().default_ds(),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -1009,15 +1036,12 @@ pub(crate) mod tests {
         )];
 
         let bmca = GrandMasterTrackingBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(&records)),
             *local_clock.identity(),
         );
 
-        assert!(matches!(
-            bmca.decision(),
-            Some(BmcaDecision::Slave(_))
-        ));
+        assert!(matches!(bmca.decision(), Some(BmcaDecision::Slave(_))));
     }
 
     #[test]
@@ -1237,7 +1261,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn incremental_bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
+    fn listening_bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
         let high = TestClockCatalog::default_high_grade();
         let mid = TestClockCatalog::default_mid_grade();
         let low = TestClockCatalog::default_low_grade_slave_only();
@@ -1297,14 +1321,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn incremental_bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::gps_grandmaster().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn listening_bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
+        let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
         let bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1312,14 +1332,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn incremental_bmca_gm_capable_local_loses_tuple_returns_passive() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::gps_grandmaster().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn listening_bmca_gm_capable_local_loses_tuple_returns_passive() {
+        let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1346,14 +1362,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn incremental_bmca_gm_capable_local_better_than_foreign_returns_master_m1() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::gps_grandmaster().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn listening_bmca_gm_capable_local_better_than_foreign_returns_master_m1() {
+        let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
+        let local_identity = *default_ds.identity();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1372,20 +1385,17 @@ pub(crate) mod tests {
             Some(BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M1,
                 StepsRemoved::new(0),
-                *local_clock.identity(),
+                local_identity,
             )))
         );
     }
 
     #[test]
-    fn incremental_bmca_non_gm_local_better_than_foreign_returns_master_m2() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::default_mid_grade().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn listening_bmca_non_gm_local_better_than_foreign_returns_master_m2() {
+        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
+        let local_identity = *default_ds.identity();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1405,20 +1415,16 @@ pub(crate) mod tests {
             Some(BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M2,
                 StepsRemoved::new(0),
-                *local_clock.identity(),
+                local_identity,
             )))
         );
     }
 
     #[test]
-    fn incremental_bmca_non_gm_local_loses_tuple_returns_slave() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::default_mid_grade().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn listening_bmca_non_gm_local_loses_tuple_returns_slave() {
+        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1438,14 +1444,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn incremental_bmca_recommends_slave_from_interleaved_announce_sequence() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::default_low_grade().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn listening_bmca_recommends_slave_from_interleaved_announce_sequence() {
+        let default_ds = TestClockCatalog::default_low_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1491,14 +1493,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn incremental_bmca_recommends_slave_from_non_interleaved_announce_sequence() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::default_low_grade().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn listening_bmca_recommends_slave_from_non_interleaved_announce_sequence() {
+        let default_ds = TestClockCatalog::default_low_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1544,14 +1542,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn incremental_bmca_undecided_when_no_announces_yet() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::default_mid_grade().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn listening_bmca_undecided_when_no_announces_yet() {
+        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1559,14 +1553,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn incremental_bmca_undecided_when_no_qualified_clock_records_yet() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::default_mid_grade().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn listening_bmca_undecided_when_no_qualified_clock_records_yet() {
+        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1583,14 +1573,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn incremental_bmca_undecided_when_only_single_announces_each() {
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            TestClockCatalog::default_mid_grade().default_ds(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+    fn listening_bmca_undecided_when_only_single_announces_each() {
+        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 

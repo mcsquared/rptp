@@ -1,6 +1,7 @@
 use tokio::sync::mpsc;
 
 use rptp::{
+    bmca::ClockDS,
     clock::{LocalClock, SynchronizableClock},
     infra::infra_support::SortedForeignClockRecordsVec,
     message::SystemMessage,
@@ -24,11 +25,12 @@ pub struct OrdinaryTokioClock<C: SynchronizableClock> {
 impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
     pub fn new(
         local_clock: LocalClock<C>,
+        default_ds: ClockDS,
         domain_number: DomainNumber,
         port_number: PortNumber,
     ) -> Self {
         OrdinaryTokioClock {
-            ordinary_clock: OrdinaryClock::new(local_clock, domain_number, port_number),
+            ordinary_clock: OrdinaryClock::new(local_clock, default_ds, domain_number, port_number),
         }
     }
 

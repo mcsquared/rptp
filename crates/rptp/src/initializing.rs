@@ -57,9 +57,10 @@ mod tests {
 
     #[test]
     fn initializing_port_to_listening_transition() {
+        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            TestClockCatalog::default_mid_grade().default_ds(),
+            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let physical_port = FakePort::new();
@@ -73,7 +74,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            BestMasterClockAlgorithm::new(*local_clock.default_ds()),
+            BestMasterClockAlgorithm::new(default_ds),
             SortedForeignClockRecordsVec::new(),
             PortProfile::default(),
         );
