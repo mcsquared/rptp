@@ -77,7 +77,9 @@ impl<'a, P: Port, S: SortedForeignClockRecords> UncalibratedPort<'a, P, S> {
             let state = self.port.local_clock().discipline(sample);
 
             match state {
-                ServoState::Locked => Some(StateDecision::MasterClockSelected),
+                ServoState::Locked => Some(StateDecision::MasterClockSelected(
+                    ParentPortIdentity::new(source_port_identity),
+                )),
                 _ => None,
             }
         } else {
@@ -116,7 +118,9 @@ impl<'a, P: Port, S: SortedForeignClockRecords> UncalibratedPort<'a, P, S> {
         if let Some(sample) = self.delay_mechanism.sample() {
             let servo_state = self.port.local_clock().discipline(sample);
             match servo_state {
-                ServoState::Locked => Some(StateDecision::MasterClockSelected),
+                ServoState::Locked => Some(StateDecision::MasterClockSelected(
+                    ParentPortIdentity::new(source_port_identity),
+                )),
                 _ => None,
             }
         } else {
@@ -159,10 +163,8 @@ impl<'a, P: Port, S: SortedForeignClockRecords> UncalibratedPort<'a, P, S> {
         Ok(())
     }
 
-    pub(crate) fn master_clock_selected(self) -> PortState<'a, P, S> {
-        self.port.log(PortEvent::MasterClockSelected {
-            parent: self.bmca.parent(),
-        });
+    pub(crate) fn master_clock_selected(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
+        self.port.log(PortEvent::MasterClockSelected { parent });
         self.profile
             .slave(self.port, self.bmca, self.delay_mechanism)
     }
@@ -208,7 +210,7 @@ mod tests {
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, DelayResponseMessage, SystemMessage};
-    use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
+    use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{
         FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockCatalog,
@@ -389,7 +391,10 @@ mod tests {
             TimeStamp::new(1, 0),
         );
 
-        assert!(matches!(decision, Some(StateDecision::MasterClockSelected)));
+        assert!(matches!(
+            decision,
+            Some(StateDecision::MasterClockSelected(_))
+        ));
     }
 
     #[test]

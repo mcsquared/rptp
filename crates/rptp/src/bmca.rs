@@ -297,10 +297,6 @@ impl<'a, S: SortedForeignClockRecords> ParentTrackingBmca<'a, S> {
         }
     }
 
-    pub(crate) fn parent(&self) -> ParentPortIdentity {
-        self.parent_port_identity
-    }
-
     pub(crate) fn matches_parent(&self, source: &PortIdentity) -> bool {
         self.parent_port_identity.matches(source)
     }

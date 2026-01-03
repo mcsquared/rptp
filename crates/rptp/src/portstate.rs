@@ -21,7 +21,7 @@ use crate::uncalibrated::UncalibratedPort;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StateDecision {
     Initialized,
-    MasterClockSelected,
+    MasterClockSelected(ParentPortIdentity),
     RecommendedSlave(ParentPortIdentity),
     RecommendedMaster(BmcaMasterDecision),
     FaultDetected,
@@ -55,8 +55,8 @@ impl<'a, P: Port, S: SortedForeignClockRecords> PortState<'a, P, S> {
                     "AnnounceReceiptTimeoutExpired can only be applied in Listening, Slave, or Uncalibrated states"
                 ),
             },
-            StateDecision::MasterClockSelected => match self {
-                PortState::Uncalibrated(uncalibrated) => uncalibrated.master_clock_selected(),
+            StateDecision::MasterClockSelected(parent) => match self {
+                PortState::Uncalibrated(uncalibrated) => uncalibrated.master_clock_selected(parent),
                 _ => panic!("MasterClockSelected can only be applied in Uncalibrated state"),
             },
             StateDecision::RecommendedSlave(decision) => match self {
@@ -588,7 +588,9 @@ mod tests {
 
         let uncalibrated = setup.uncalibrated_port();
 
-        let slave = uncalibrated.apply(StateDecision::MasterClockSelected);
+        let slave = uncalibrated.apply(StateDecision::MasterClockSelected(
+            ParentPortIdentity::new(PortIdentity::fake()),
+        ));
 
         assert!(matches!(slave, PortState::Slave(_)));
     }
@@ -673,7 +675,9 @@ mod tests {
 
         let initializing = setup.initializing_port();
 
-        initializing.apply(StateDecision::MasterClockSelected);
+        initializing.apply(StateDecision::MasterClockSelected(ParentPortIdentity::new(
+            PortIdentity::fake(),
+        )));
     }
 
     #[test]
@@ -683,7 +687,9 @@ mod tests {
 
         let listening = setup.listening_port();
 
-        listening.apply(StateDecision::MasterClockSelected);
+        listening.apply(StateDecision::MasterClockSelected(ParentPortIdentity::new(
+            PortIdentity::fake(),
+        )));
     }
 
     #[test]
@@ -693,7 +699,9 @@ mod tests {
 
         let slave = setup.slave_port();
 
-        slave.apply(StateDecision::MasterClockSelected);
+        slave.apply(StateDecision::MasterClockSelected(ParentPortIdentity::new(
+            PortIdentity::fake(),
+        )));
     }
 
     #[test]
@@ -703,7 +711,9 @@ mod tests {
 
         let master = setup.master_port();
 
-        master.apply(StateDecision::MasterClockSelected);
+        master.apply(StateDecision::MasterClockSelected(ParentPortIdentity::new(
+            PortIdentity::fake(),
+        )));
     }
 
     #[test]
@@ -713,7 +723,9 @@ mod tests {
 
         let pre_master = setup.pre_master_port();
 
-        pre_master.apply(StateDecision::MasterClockSelected);
+        pre_master.apply(StateDecision::MasterClockSelected(ParentPortIdentity::new(
+            PortIdentity::fake(),
+        )));
     }
 
     #[test]
