@@ -150,7 +150,7 @@ impl<'a, S: SortedForeignClockRecords> ListeningBmca<'a, S> {
     }
 
     pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<'a, S> {
-        let current_grandmaster_id = *self.bmca.grandmaster().identity();
+        let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 }
@@ -183,7 +183,7 @@ impl<'a, S: SortedForeignClockRecords> Bmca for ListeningBmca<'a, S> {
     }
 }
 
-pub(crate) struct GrandMaster<'a> {
+pub struct GrandMaster<'a> {
     ds: &'a ClockDS,
 }
 
@@ -225,8 +225,8 @@ impl<'a, S: SortedForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
         }
     }
 
-    pub(crate) fn grandmaster(&self) -> GrandMaster<'_> {
-        self.bmca.grandmaster()
+    pub(crate) fn using_grandmaster<R>(&self, f: impl FnOnce(GrandMaster<'_>) -> R) -> R {
+        self.bmca.using_grandmaster(f)
     }
 
     pub(crate) fn with_grandmaster_id(self, grandmaster_id: ClockIdentity) -> Self {
@@ -321,7 +321,7 @@ impl<'a, S: SortedForeignClockRecords> ParentTrackingBmca<'a, S> {
     }
 
     pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<'a, S> {
-        let current_grandmaster_id = *self.bmca.grandmaster().identity();
+        let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 }
@@ -400,53 +400,65 @@ impl ForeignGrandMasterCandidates for Cell<BestForeignSnapshot> {
     }
 }
 
+pub trait LocalGrandMasterCandidate {
+    fn snapshot(&self) -> ClockDS;
+}
+
+impl LocalGrandMasterCandidate for ClockDS {
+    fn snapshot(&self) -> ClockDS {
+        *self
+    }
+}
+
 pub(crate) struct BestMasterClockAlgorithm<'a> {
-    d_0: ClockDS,
-    port_number: PortNumber,
+    local_candidate: &'a dyn LocalGrandMasterCandidate,
     foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
+    port_number: PortNumber,
 }
 
 impl<'a> BestMasterClockAlgorithm<'a> {
     pub fn new(
-        port_number: PortNumber,
-        default_ds: ClockDS,
+        local_candidate: &'a dyn LocalGrandMasterCandidate,
         foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
+        port_number: PortNumber,
     ) -> Self {
         Self {
-            d_0: default_ds,
-            port_number,
+            local_candidate,
             foreign_candidates,
+            port_number,
         }
     }
 
-    pub(crate) fn grandmaster(&self) -> GrandMaster<'_> {
+    pub(crate) fn using_grandmaster<R>(&self, f: impl FnOnce(GrandMaster<'_>) -> R) -> R {
         // TODO: once multi-port is supported, this should return the grandmaster, whether local or
         // foreign. With only single port support atm, it's always local d_0.
-        GrandMaster::new(&self.d_0)
+        let d_0 = self.local_candidate.snapshot();
+        f(GrandMaster::new(&d_0))
     }
 
     pub(crate) fn decision(&self, e_rbest: BestForeignDataset) -> BmcaDecision {
         self.foreign_candidates
             .remember(self.port_number, e_rbest.snapshot());
 
-        if self.d_0.is_grandmaster_capable() {
-            self.d0_better_or_better_by_topology_than_e_rbest(e_rbest)
+        let d_0 = self.local_candidate.snapshot();
+        if d_0.is_grandmaster_capable() {
+            Self::d0_better_or_better_by_topology_than_e_rbest(&d_0, e_rbest)
         } else {
             let best_snapshot = self.foreign_candidates.best();
             let e_best = best_snapshot.as_best_foreign_dataset();
-            self.d0_better_or_better_by_topology_than_e_best(e_best, e_rbest)
+            Self::d0_better_or_better_by_topology_than_e_best(&d_0, e_best, e_rbest)
         }
     }
 
     fn d0_better_or_better_by_topology_than_e_rbest(
-        &self,
+        d_0: &ClockDS,
         e_rbest: BestForeignDataset,
     ) -> BmcaDecision {
-        if self.d_0.better_than_foreign(e_rbest) {
+        if d_0.better_than_foreign(e_rbest) {
             BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M1,
                 StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
-                *self.d_0.identity(),
+                *d_0.identity(),
             ))
         } else {
             BmcaDecision::Passive // Passive decision point P1
@@ -454,15 +466,15 @@ impl<'a> BestMasterClockAlgorithm<'a> {
     }
 
     fn d0_better_or_better_by_topology_than_e_best(
-        &self,
+        d_0: &ClockDS,
         e_best: BestForeignDataset,
         e_rbest: BestForeignDataset,
     ) -> BmcaDecision {
-        if self.d_0.better_than_foreign(e_best) {
+        if d_0.better_than_foreign(e_best) {
             BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M2,
                 StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
-                *self.d_0.identity(),
+                *d_0.identity(),
             ))
         } else if let Some(parent) = e_best.common_parent(e_rbest) {
             BmcaDecision::Slave(parent) // Slave decision point S1
@@ -994,7 +1006,7 @@ pub(crate) mod tests {
         );
 
         let bmca = GrandMasterTrackingBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
             *local_clock.identity(),
         );
@@ -1009,7 +1021,7 @@ pub(crate) mod tests {
 
         let other_grandmaster_id = TestClockCatalog::gps_grandmaster().clock_identity();
         let bmca = GrandMasterTrackingBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
             other_grandmaster_id,
         );
@@ -1040,7 +1052,7 @@ pub(crate) mod tests {
         )];
 
         let bmca = GrandMasterTrackingBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(&records)),
             *local_clock.identity(),
         );
@@ -1071,7 +1083,7 @@ pub(crate) mod tests {
         )];
 
         let bmca = GrandMasterTrackingBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(&records)),
             *local_clock.identity(),
         );
@@ -1373,12 +1385,9 @@ pub(crate) mod tests {
         let gm_foreign = gm.foreign_ds(StepsRemoved::new(0));
 
         // Consider a new announce from a different foreign clock.
+        let default_ds = TestClockCatalog::default_high_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(
-                PortNumber::new(1),
-                TestClockCatalog::default_high_grade().default_ds(),
-                &foreign_candidates,
-            ),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(sorted_records),
         );
         bmca.consider(
@@ -1414,7 +1423,7 @@ pub(crate) mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
         let bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1426,7 +1435,7 @@ pub(crate) mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1458,7 +1467,7 @@ pub(crate) mod tests {
         let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
         let local_identity = *default_ds.identity();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1488,7 +1497,7 @@ pub(crate) mod tests {
         let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let local_identity = *default_ds.identity();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1518,7 +1527,7 @@ pub(crate) mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1542,7 +1551,7 @@ pub(crate) mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_low_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1592,7 +1601,7 @@ pub(crate) mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_low_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1642,7 +1651,7 @@ pub(crate) mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1654,7 +1663,7 @@ pub(crate) mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 
@@ -1675,7 +1684,7 @@ pub(crate) mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let mut bmca = ListeningBmca::new(
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
         );
 

@@ -77,7 +77,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
+            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             SortedForeignClockRecordsVec::new(),
             PortProfile::default(),
         );

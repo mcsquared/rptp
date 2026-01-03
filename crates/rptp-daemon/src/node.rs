@@ -384,7 +384,7 @@ mod tests {
     impl<'a, C: SynchronizableClock, N: NetworkSocket> MasterTestNode<'a, C, N> {
         async fn new(
             local_clock: &'a LocalClock<C>,
-            default_ds: ClockDS,
+            default_ds: &'a ClockDS,
             foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
             event_socket: Rc<N>,
             general_socket: Rc<N>,
@@ -545,7 +545,7 @@ mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let port_state = master_test_port(
             domain_port,
-            default_ds,
+            &default_ds,
             SortedForeignClockRecordsVec::new(),
             &foreign_candidates,
             PortProfile::default(),
@@ -644,7 +644,7 @@ mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let port_state = slave_test_port(
             domain_port,
-            default_ds,
+            &default_ds,
             SortedForeignClockRecordsVec::new(),
             &foreign_candidates,
             parent_port_identity,
@@ -721,7 +721,7 @@ mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let node = MasterTestNode::new(
             &local_clock,
-            default_ds,
+            &default_ds,
             &foreign_candidates,
             event_socket,
             general_socket,
@@ -766,7 +766,7 @@ mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let node = MasterTestNode::new(
             &local_clock,
-            default_ds,
+            &default_ds,
             &foreign_candidates,
             event_socket,
             general_socket,
@@ -808,7 +808,7 @@ mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let node = MasterTestNode::new(
             &local_clock,
-            default_ds,
+            &default_ds,
             &foreign_candidates,
             event_socket,
             general_socket,
@@ -851,7 +851,7 @@ mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let node = MasterTestNode::new(
             &local_clock,
-            default_ds,
+            &default_ds,
             &foreign_candidates,
             event_socket,
             general_socket,
@@ -896,7 +896,7 @@ mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let node = MasterTestNode::new(
             &local_clock,
-            default_ds,
+            &default_ds,
             &foreign_candidates,
             event_socket,
             general_socket,

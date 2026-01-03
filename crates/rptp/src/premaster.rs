@@ -146,9 +146,9 @@ mod tests {
                 domain_port,
                 GrandMasterTrackingBmca::new(
                     BestMasterClockAlgorithm::new(
-                        PortNumber::new(1),
-                        self.default_ds,
+                        &self.default_ds,
                         &self.foreign_candidates,
+                        PortNumber::new(1),
                     ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
                     grandmaster_id,

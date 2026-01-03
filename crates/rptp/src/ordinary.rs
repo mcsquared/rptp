@@ -72,9 +72,9 @@ impl<C: SynchronizableClock> OrdinaryClock<C> {
         );
 
         let bmca = BestMasterClockAlgorithm::new(
-            self.port_number,
-            self.default_ds,
+            &self.default_ds,
             &self.foreign_candidates,
+            self.port_number,
         );
 
         PortProfile::default().initializing(domain_port, bmca, sorted_foreign_clock_records)

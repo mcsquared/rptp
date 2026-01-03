@@ -40,9 +40,11 @@ impl<'a, P: Port, S: SortedForeignClockRecords> MasterPort<'a, P, S> {
     }
 
     pub(crate) fn send_announce(&mut self) -> SendResult {
+        let local_clock = self.port.local_clock();
+        let announce_cycle = &mut self.announce_cycle;
         let announce_message = self
-            .announce_cycle
-            .announce(self.port.local_clock(), self.bmca.grandmaster());
+            .bmca
+            .using_grandmaster(|gm| announce_cycle.announce(local_clock, gm));
         self.port
             .send_general(GeneralMessage::Announce(announce_message))?;
         self.announce_cycle.next();
@@ -276,9 +278,9 @@ mod tests {
                 domain_port,
                 GrandMasterTrackingBmca::new(
                     BestMasterClockAlgorithm::new(
-                        PortNumber::new(1),
-                        self.default_ds,
+                        &self.default_ds,
                         &self.foreign_candidates,
+                        PortNumber::new(1),
                     ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
                     grandmaster_id,
@@ -544,16 +546,17 @@ mod tests {
             *clock_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let bmca = BestMasterClockAlgorithm::new(PortNumber::new(1), clock_ds, &foreign_candidates);
+        let bmca =
+            BestMasterClockAlgorithm::new(&clock_ds, &foreign_candidates, PortNumber::new(1));
 
         let mut cycle = AnnounceCycle::new(
             0.into(),
             FakeTimeout::new(SystemMessage::AnnounceSendTimeout),
             LogInterval::new(0),
         );
-        let msg1 = cycle.announce(&local_clock, bmca.grandmaster());
+        let msg1 = bmca.using_grandmaster(|gm| cycle.announce(&local_clock, gm));
         cycle.next();
-        let msg2 = cycle.announce(&local_clock, bmca.grandmaster());
+        let msg2 = bmca.using_grandmaster(|gm| cycle.announce(&local_clock, gm));
 
         assert_eq!(
             msg1,
