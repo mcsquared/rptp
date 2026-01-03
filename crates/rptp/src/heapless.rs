@@ -1,9 +1,6 @@
 use heapless::Vec;
 
-use crate::bmca::{
-    ForeignClockRecord, ForeignClockResult, ForeignClockStatus, SortedForeignClockRecords,
-};
-use crate::port::PortIdentity;
+use crate::bmca::{ForeignClockRecord, ForeignClockStatus, SortedForeignClockRecords};
 
 /// Heapless implementation of [`SortedForeignClockRecords`] backed by a bounded
 /// `heapless::Vec`.
@@ -43,7 +40,18 @@ impl Default for HeaplessSortedForeignClockRecords<0> {
 }
 
 impl<const N: usize> SortedForeignClockRecords for HeaplessSortedForeignClockRecords<N> {
-    fn insert(&mut self, record: ForeignClockRecord) {
+    fn remember(&mut self, record: ForeignClockRecord) {
+        if let Some(existing) = self
+            .records
+            .iter_mut()
+            .find(|r| r.same_source_as(record.source_port_identity()))
+        {
+            if let ForeignClockStatus::Updated = existing.update_from(&record) {
+                self.records.sort_unstable();
+            }
+            return;
+        }
+
         let record = match self.records.push(record) {
             Ok(()) => {
                 self.records.sort_unstable();
@@ -62,31 +70,10 @@ impl<const N: usize> SortedForeignClockRecords for HeaplessSortedForeignClockRec
         }
     }
 
-    fn update_record<F>(
-        &mut self,
-        source_port_identity: &PortIdentity,
-        update: F,
-    ) -> ForeignClockResult
-    where
-        F: FnOnce(&mut ForeignClockRecord) -> ForeignClockStatus,
-    {
-        if let Some(record) = self
-            .records
-            .iter_mut()
-            .find(|r| r.same_source_as(source_port_identity))
-        {
-            let status = update(record);
-            if let ForeignClockStatus::Updated = status {
-                self.records.sort_unstable();
-            }
-            ForeignClockResult::Status(status)
-        } else {
-            ForeignClockResult::NotFound
-        }
-    }
-
-    fn first(&self) -> Option<&ForeignClockRecord> {
-        self.records.first()
+    fn best_qualified(&self) -> Option<&ForeignClockRecord> {
+        self.records
+            .first()
+            .filter(|record| record.qualified_ds().is_some())
     }
 
     fn prune_stale(&mut self, now: crate::time::Instant) -> bool {
@@ -164,7 +151,7 @@ mod tests {
             ),
         ]);
 
-        let best_clock = records.first().and_then(|record| record.qualified_ds());
+        let best_clock = records.best_qualified().and_then(|record| record.qualified_ds());
         assert_eq!(best_clock, Some(&high_clock));
     }
 
@@ -200,7 +187,7 @@ mod tests {
         ]);
 
         // Insert a better clock; capacity is exceeded, so low should be removed.
-        records.insert(ForeignClockRecord::new(
+        records.remember(ForeignClockRecord::new(
             high_port_id,
             high_clock,
             LogInterval::new(0),
@@ -274,7 +261,7 @@ mod tests {
         ]);
 
         // Insert a worse clock; capacity is exceeded, but no record should be replaced.
-        records.insert(ForeignClockRecord::new(
+        records.remember(ForeignClockRecord::new(
             low_port_id,
             low_clock,
             LogInterval::new(0),
@@ -326,7 +313,7 @@ mod tests {
         let high_port_id = new_port_identity(1);
 
         let mut records = HeaplessSortedForeignClockRecords::<4>::new();
-        records.insert(ForeignClockRecord::new(
+        records.remember(ForeignClockRecord::new(
             high_port_id,
             high_clock,
             LogInterval::new(0),
@@ -350,7 +337,7 @@ mod tests {
         let high_port_id = new_port_identity(1);
 
         let mut records = HeaplessSortedForeignClockRecords::<4>::new();
-        records.insert(ForeignClockRecord::new(
+        records.remember(ForeignClockRecord::new(
             high_port_id,
             high_clock,
             LogInterval::new(0),

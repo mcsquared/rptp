@@ -2,13 +2,11 @@
 pub mod infra_support {
     use std::rc::Rc;
 
-    use crate::bmca::{
-        ForeignClockRecord, ForeignClockResult, ForeignClockStatus, SortedForeignClockRecords,
-    };
+    use crate::bmca::{ForeignClockRecord, ForeignClockStatus, SortedForeignClockRecords};
     use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
     use crate::log::PortEvent;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-    use crate::port::{Port, PortIdentity, SendResult};
+    use crate::port::{Port, SendResult};
     use crate::time::TimeStamp;
 
     impl Clock for Rc<dyn SynchronizableClock> {
@@ -88,36 +86,25 @@ pub mod infra_support {
     }
 
     impl SortedForeignClockRecords for SortedForeignClockRecordsVec {
-        fn insert(&mut self, record: ForeignClockRecord) {
-            self.records.push(record);
-            self.sort_records();
-        }
-
-        fn update_record<F>(
-            &mut self,
-            source_port_identity: &PortIdentity,
-            update: F,
-        ) -> ForeignClockResult
-        where
-            F: FnOnce(&mut ForeignClockRecord) -> ForeignClockStatus,
-        {
-            if let Some(record) = self
+        fn remember(&mut self, record: ForeignClockRecord) {
+            if let Some(existing) = self
                 .records
                 .iter_mut()
-                .find(|r| r.same_source_as(source_port_identity))
+                .find(|r| r.same_source_as(record.source_port_identity()))
             {
-                let status = update(record);
-                if let ForeignClockStatus::Updated = status {
+                if let ForeignClockStatus::Updated = existing.update_from(&record) {
                     self.sort_records();
                 }
-                ForeignClockResult::Status(status)
             } else {
-                ForeignClockResult::NotFound
+                self.records.push(record);
+                self.sort_records();
             }
         }
 
-        fn first(&self) -> Option<&ForeignClockRecord> {
-            self.records.first()
+        fn best_qualified(&self) -> Option<&ForeignClockRecord> {
+            self.records
+                .first()
+                .filter(|record| record.qualified_ds().is_some())
         }
 
         fn prune_stale(&mut self, now: crate::time::Instant) -> bool {
@@ -128,23 +115,12 @@ pub mod infra_support {
     }
 
     impl<S: SortedForeignClockRecords> SortedForeignClockRecords for &mut S {
-        fn insert(&mut self, record: ForeignClockRecord) {
-            (*self).insert(record);
+        fn remember(&mut self, record: ForeignClockRecord) {
+            (*self).remember(record);
         }
 
-        fn update_record<F>(
-            &mut self,
-            source_port_identity: &PortIdentity,
-            update: F,
-        ) -> ForeignClockResult
-        where
-            F: FnOnce(&mut ForeignClockRecord) -> ForeignClockStatus,
-        {
-            (*self).update_record(source_port_identity, update)
-        }
-
-        fn first(&self) -> Option<&ForeignClockRecord> {
-            (**self).first()
+        fn best_qualified(&self) -> Option<&ForeignClockRecord> {
+            (**self).best_qualified()
         }
 
         fn prune_stale(&mut self, now: crate::time::Instant) -> bool {
@@ -184,36 +160,48 @@ pub mod infra_support {
                 PortNumber::new(1),
             );
 
-            records.insert(ForeignClockRecord::new(
+            records.remember(ForeignClockRecord::new(
                 high_port_id,
                 high_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
             ));
-            records.insert(ForeignClockRecord::new(
+            records.remember(ForeignClockRecord::new(
                 low_port_id,
                 low_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
             ));
-            records.insert(ForeignClockRecord::new(
+            records.remember(ForeignClockRecord::new(
                 mid_port_id,
                 mid_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
             ));
 
-            records.update_record(&high_port_id, |record| {
-                record.consider(high_clock, LogInterval::new(0), Instant::from_secs(0))
-            });
-            records.update_record(&low_port_id, |record| {
-                record.consider(low_clock, LogInterval::new(0), Instant::from_secs(0))
-            });
-            records.update_record(&mid_port_id, |record| {
-                record.consider(mid_clock, LogInterval::new(0), Instant::from_secs(0))
-            });
+            // Qualify by remembering a second announce (threshold=2).
+            records.remember(ForeignClockRecord::new(
+                high_port_id,
+                high_clock,
+                LogInterval::new(0),
+                Instant::from_secs(0),
+            ));
+            records.remember(ForeignClockRecord::new(
+                low_port_id,
+                low_clock,
+                LogInterval::new(0),
+                Instant::from_secs(0),
+            ));
+            records.remember(ForeignClockRecord::new(
+                mid_port_id,
+                mid_clock,
+                LogInterval::new(0),
+                Instant::from_secs(0),
+            ));
 
-            let best_clock = records.first().and_then(|record| record.qualified_ds());
+            let best_clock = records
+                .best_qualified()
+                .and_then(|record| record.qualified_ds());
             assert_eq!(best_clock, Some(&high_clock));
         }
 
@@ -227,7 +215,7 @@ pub mod infra_support {
             );
 
             let mut records = SortedForeignClockRecordsVec::new();
-            records.insert(ForeignClockRecord::new(
+            records.remember(ForeignClockRecord::new(
                 high_port_id,
                 high_clock,
                 LogInterval::new(0),
@@ -251,7 +239,7 @@ pub mod infra_support {
             );
 
             let mut records = SortedForeignClockRecordsVec::new();
-            records.insert(ForeignClockRecord::new(
+            records.remember(ForeignClockRecord::new(
                 high_port_id,
                 high_clock,
                 LogInterval::new(0),
