@@ -12,18 +12,18 @@ use crate::port::{ParentPortIdentity, Port, PortIdentity, SendResult, Timeout};
 use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::time::{Instant, LogInterval, TimeStamp};
 
-pub struct MasterPort<P: Port, S: SortedForeignClockRecords> {
+pub struct MasterPort<'a, P: Port, S: SortedForeignClockRecords> {
     port: P,
-    bmca: GrandMasterTrackingBmca<S>,
+    bmca: GrandMasterTrackingBmca<'a, S>,
     announce_cycle: AnnounceCycle<P::Timeout>,
     sync_cycle: SyncCycle<P::Timeout>,
     profile: PortProfile,
 }
 
-impl<P: Port, S: SortedForeignClockRecords> MasterPort<P, S> {
+impl<'a, P: Port, S: SortedForeignClockRecords> MasterPort<'a, P, S> {
     pub(crate) fn new(
         port: P,
-        bmca: GrandMasterTrackingBmca<S>,
+        bmca: GrandMasterTrackingBmca<'a, S>,
         announce_cycle: AnnounceCycle<P::Timeout>,
         sync_cycle: SyncCycle<P::Timeout>,
         profile: PortProfile,
@@ -113,7 +113,7 @@ impl<P: Port, S: SortedForeignClockRecords> MasterPort<P, S> {
         Ok(())
     }
 
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, S> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
         decision.apply(|qualification_timeout_policy, grandmaster_id| {
@@ -124,7 +124,7 @@ impl<P: Port, S: SortedForeignClockRecords> MasterPort<P, S> {
         })
     }
 
-    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, S> {
+    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
         let bmca = self.bmca.into_parent_tracking(parent);
@@ -197,9 +197,11 @@ impl<T: Timeout> SyncCycle<T> {
 mod tests {
     use super::*;
 
+    use core::cell::Cell;
+
     use crate::bmca::{
-        BestForeignRecord, BestMasterClockAlgorithm, ClockDS, ForeignClockRecord,
-        GrandMasterTrackingBmca,
+        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
+        ForeignClockRecord, GrandMasterTrackingBmca,
     };
     use crate::clock::{LocalClock, StepsRemoved, TimeScale};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
@@ -218,13 +220,15 @@ mod tests {
     type MasterTestDomainPort<'a> =
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type MasterTestPort<'a> = MasterPort<MasterTestDomainPort<'a>, SortedForeignClockRecordsVec>;
+    type MasterTestPort<'a> =
+        MasterPort<'a, MasterTestDomainPort<'a>, SortedForeignClockRecordsVec>;
 
     struct MasterPortTestSetup {
         local_clock: LocalClock<FakeClock>,
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
+        foreign_candidates: Cell<BestForeignSnapshot>,
     }
 
     impl MasterPortTestSetup {
@@ -242,6 +246,7 @@ mod tests {
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
+                foreign_candidates: Cell::new(BestForeignSnapshot::Empty),
             }
         }
 
@@ -270,7 +275,11 @@ mod tests {
             MasterPort::new(
                 domain_port,
                 GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(self.default_ds),
+                    BestMasterClockAlgorithm::new(
+                        PortNumber::new(1),
+                        self.default_ds,
+                        &self.foreign_candidates,
+                    ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
                     grandmaster_id,
                 ),
@@ -528,13 +537,14 @@ mod tests {
 
     #[test]
     fn announce_cycle_produces_announce_messages_with_monotonic_sequence_ids() {
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let clock_ds = TestClockCatalog::default_high_grade().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *clock_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let bmca = BestMasterClockAlgorithm::new(clock_ds);
+        let bmca = BestMasterClockAlgorithm::new(PortNumber::new(1), clock_ds, &foreign_candidates);
 
         let mut cycle = AnnounceCycle::new(
             0.into(),

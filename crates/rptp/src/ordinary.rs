@@ -1,4 +1,8 @@
-use crate::bmca::{BestMasterClockAlgorithm, ClockDS, SortedForeignClockRecords};
+use core::cell::Cell;
+
+use crate::bmca::{
+    BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS, SortedForeignClockRecords,
+};
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::port::{DomainNumber, DomainPort, PhysicalPort, PortNumber, TimerHost};
@@ -10,6 +14,7 @@ pub struct OrdinaryClock<C: SynchronizableClock> {
     default_ds: ClockDS,
     domain_number: DomainNumber,
     port_number: PortNumber,
+    foreign_candidates: Cell<BestForeignSnapshot>,
 }
 
 impl<C: SynchronizableClock> OrdinaryClock<C> {
@@ -19,11 +24,14 @@ impl<C: SynchronizableClock> OrdinaryClock<C> {
         domain_number: DomainNumber,
         port_number: PortNumber,
     ) -> Self {
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
+
         OrdinaryClock {
             local_clock,
             default_ds,
             domain_number,
             port_number,
+            foreign_candidates,
         }
     }
 
@@ -46,7 +54,7 @@ impl<C: SynchronizableClock> OrdinaryClock<C> {
         timestamping: TS,
         log: L,
         sorted_foreign_clock_records: S,
-    ) -> PortState<DomainPort<'a, C, T, TS, L>, S>
+    ) -> PortState<'a, DomainPort<'a, C, T, TS, L>, S>
     where
         T: TimerHost,
         TS: TxTimestamping,
@@ -63,7 +71,11 @@ impl<C: SynchronizableClock> OrdinaryClock<C> {
             self.port_number,
         );
 
-        let bmca = BestMasterClockAlgorithm::new(self.default_ds);
+        let bmca = BestMasterClockAlgorithm::new(
+            self.port_number,
+            self.default_ds,
+            &self.foreign_candidates,
+        );
 
         PortProfile::default().initializing(domain_port, bmca, sorted_foreign_clock_records)
     }

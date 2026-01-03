@@ -314,7 +314,7 @@ mod tests {
     use tokio::time;
 
     use rptp::{
-        bmca::{ClockDS, Priority1, Priority2},
+        bmca::{BestForeignSnapshot, ClockDS, ForeignGrandMasterCandidates, Priority1, Priority2},
         clock::{
             ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
             SynchronizableClock, TimeScale,
@@ -336,11 +336,13 @@ mod tests {
     use crate::timestamping::ClockTxTimestamping;
     use crate::virtualclock::VirtualClock;
 
+    use std::cell::Cell;
     use std::collections::VecDeque;
     use std::net::SocketAddr;
     use std::time::Duration as StdDuration;
 
     type TestPortMap<'a, C> = SingleDomainPortMap<
+        'a,
         Box<DomainPort<'a, C, TokioTimerHost, FakeTimestamping, TracingPortLog>>,
         SortedForeignClockRecordsVec,
     >;
@@ -383,6 +385,7 @@ mod tests {
         async fn new(
             local_clock: &'a LocalClock<C>,
             default_ds: ClockDS,
+            foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
             event_socket: Rc<N>,
             general_socket: Rc<N>,
             physical_port: &'a TokioPhysicalPort<N>,
@@ -406,6 +409,7 @@ mod tests {
                 domain_port,
                 default_ds,
                 SortedForeignClockRecordsVec::new(),
+                foreign_candidates,
                 PortProfile::default(),
             );
             let portmap = SingleDomainPortMap::new(domain_number, port_state);
@@ -538,10 +542,12 @@ mod tests {
             domain_number,
             port_number,
         ));
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let port_state = master_test_port(
             domain_port,
             default_ds,
             SortedForeignClockRecordsVec::new(),
+            &foreign_candidates,
             PortProfile::default(),
         );
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
@@ -635,10 +641,12 @@ mod tests {
             ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
             PortNumber::new(1),
         ));
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let port_state = slave_test_port(
             domain_port,
             default_ds,
             SortedForeignClockRecordsVec::new(),
+            &foreign_candidates,
             parent_port_identity,
             PortProfile::new(
                 Duration::from_secs(60),
@@ -710,9 +718,11 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let node = MasterTestNode::new(
             &local_clock,
             default_ds,
+            &foreign_candidates,
             event_socket,
             general_socket,
             &physical_port,
@@ -753,9 +763,11 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let node = MasterTestNode::new(
             &local_clock,
             default_ds,
+            &foreign_candidates,
             event_socket,
             general_socket,
             &physical_port,
@@ -793,9 +805,11 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let node = MasterTestNode::new(
             &local_clock,
             default_ds,
+            &foreign_candidates,
             event_socket,
             general_socket,
             &physical_port,
@@ -834,9 +848,11 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let node = MasterTestNode::new(
             &local_clock,
             default_ds,
+            &foreign_candidates,
             event_socket,
             general_socket,
             &physical_port,
@@ -877,9 +893,11 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let node = MasterTestNode::new(
             &local_clock,
             default_ds,
+            &foreign_candidates,
             event_socket,
             general_socket,
             &physical_port,

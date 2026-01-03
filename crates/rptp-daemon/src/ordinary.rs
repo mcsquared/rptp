@@ -15,8 +15,11 @@ use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
 use crate::node::{TokioPhysicalPort, TokioTimerHost};
 
-pub type TokioPort<'a, C, TS> =
-    PortState<DomainPort<'a, C, TokioTimerHost, TS, TracingPortLog>, SortedForeignClockRecordsVec>;
+pub type TokioPort<'a, C, TS> = PortState<
+    'a,
+    DomainPort<'a, C, TokioTimerHost, TS, TracingPortLog>,
+    SortedForeignClockRecordsVec,
+>;
 
 pub struct OrdinaryTokioClock<C: SynchronizableClock> {
     ordinary_clock: OrdinaryClock<C>,

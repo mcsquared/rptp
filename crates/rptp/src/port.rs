@@ -258,13 +258,13 @@ pub trait PortMap {
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress>;
 }
 
-pub struct SingleDomainPortMap<P: Port, S: SortedForeignClockRecords> {
+pub struct SingleDomainPortMap<'a, P: Port, S: SortedForeignClockRecords> {
     domain_number: DomainNumber,
-    port_state: Option<PortState<P, S>>,
+    port_state: Option<PortState<'a, P, S>>,
 }
 
-impl<P: Port, S: SortedForeignClockRecords> SingleDomainPortMap<P, S> {
-    pub fn new(domain_number: DomainNumber, port_state: PortState<P, S>) -> Self {
+impl<'a, P: Port, S: SortedForeignClockRecords> SingleDomainPortMap<'a, P, S> {
+    pub fn new(domain_number: DomainNumber, port_state: PortState<'a, P, S>) -> Self {
         Self {
             domain_number,
             port_state: Some(port_state),
@@ -272,7 +272,7 @@ impl<P: Port, S: SortedForeignClockRecords> SingleDomainPortMap<P, S> {
     }
 }
 
-impl<P: Port, S: SortedForeignClockRecords> PortMap for SingleDomainPortMap<P, S> {
+impl<'a, P: Port, S: SortedForeignClockRecords> PortMap for SingleDomainPortMap<'a, P, S> {
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress> {
         if self.domain_number == domain_number {
             Ok(&mut self.port_state)
@@ -298,7 +298,7 @@ pub trait PortIngress {
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
-impl<P: Port, S: SortedForeignClockRecords> PortIngress for Option<PortState<P, S>> {
+impl<'a, P: Port, S: SortedForeignClockRecords> PortIngress for Option<PortState<'a, P, S>> {
     fn process_event_message(
         &mut self,
         source_port_identity: PortIdentity,

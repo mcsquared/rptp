@@ -12,18 +12,18 @@ use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::servo::ServoState;
 use crate::time::{Instant, TimeStamp};
 
-pub struct UncalibratedPort<P: Port, S: SortedForeignClockRecords> {
+pub struct UncalibratedPort<'a, P: Port, S: SortedForeignClockRecords> {
     port: P,
-    bmca: ParentTrackingBmca<S>,
+    bmca: ParentTrackingBmca<'a, S>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
     profile: PortProfile,
 }
 
-impl<P: Port, S: SortedForeignClockRecords> UncalibratedPort<P, S> {
+impl<'a, P: Port, S: SortedForeignClockRecords> UncalibratedPort<'a, P, S> {
     pub(crate) fn new(
         port: P,
-        bmca: ParentTrackingBmca<S>,
+        bmca: ParentTrackingBmca<'a, S>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
         profile: PortProfile,
@@ -159,7 +159,7 @@ impl<P: Port, S: SortedForeignClockRecords> UncalibratedPort<P, S> {
         Ok(())
     }
 
-    pub(crate) fn master_clock_selected(self) -> PortState<P, S> {
+    pub(crate) fn master_clock_selected(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::MasterClockSelected {
             parent: self.bmca.parent(),
         });
@@ -167,13 +167,13 @@ impl<P: Port, S: SortedForeignClockRecords> UncalibratedPort<P, S> {
             .slave(self.port, self.bmca, self.delay_mechanism)
     }
 
-    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, S> {
+    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
 
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, S> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
         decision.apply(|qualification_timeout_policy, grandmaster_id| {
@@ -184,7 +184,7 @@ impl<P: Port, S: SortedForeignClockRecords> UncalibratedPort<P, S> {
         })
     }
 
-    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, S> {
+    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
         let bmca = self.bmca.with_parent(parent);
@@ -197,9 +197,11 @@ impl<P: Port, S: SortedForeignClockRecords> UncalibratedPort<P, S> {
 mod tests {
     use super::*;
 
+    use core::cell::Cell;
+
     use crate::bmca::{
-        BestForeignRecord, BestMasterClockAlgorithm, BmcaMasterDecision, BmcaMasterDecisionPoint,
-        ClockDS, ForeignClockRecord,
+        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, BmcaMasterDecision,
+        BmcaMasterDecisionPoint, ClockDS, ForeignClockRecord,
     };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::e2e::DelayCycle;
@@ -217,13 +219,14 @@ mod tests {
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type UncalibratedTestPort<'a> =
-        UncalibratedPort<UncalibratedTestDomainPort<'a>, SortedForeignClockRecordsVec>;
+        UncalibratedPort<'a, UncalibratedTestDomainPort<'a>, SortedForeignClockRecordsVec>;
 
     struct UncalibratedPortTestSetup {
         local_clock: LocalClock<FakeClock>,
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
+        foreign_candidates: Cell<BestForeignSnapshot>,
     }
 
     impl UncalibratedPortTestSetup {
@@ -237,6 +240,7 @@ mod tests {
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
+                foreign_candidates: Cell::new(BestForeignSnapshot::Empty),
             }
         }
 
@@ -266,7 +270,11 @@ mod tests {
             UncalibratedPort::new(
                 domain_port,
                 ParentTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(self.default_ds),
+                    BestMasterClockAlgorithm::new(
+                        PortNumber::new(1),
+                        self.default_ds,
+                        &self.foreign_candidates,
+                    ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
                     ParentPortIdentity::new(parent_port),
                 ),

@@ -13,18 +13,18 @@ use crate::servo::ServoState;
 use crate::time::{Instant, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 
-pub struct SlavePort<P: Port, S: SortedForeignClockRecords> {
+pub struct SlavePort<'a, P: Port, S: SortedForeignClockRecords> {
     port: P,
-    bmca: ParentTrackingBmca<S>,
+    bmca: ParentTrackingBmca<'a, S>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
     profile: PortProfile,
 }
 
-impl<P: Port, S: SortedForeignClockRecords> SlavePort<P, S> {
+impl<'a, P: Port, S: SortedForeignClockRecords> SlavePort<'a, P, S> {
     pub(crate) fn new(
         port: P,
-        bmca: ParentTrackingBmca<S>,
+        bmca: ParentTrackingBmca<'a, S>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
         profile: PortProfile,
@@ -159,13 +159,13 @@ impl<P: Port, S: SortedForeignClockRecords> SlavePort<P, S> {
         Ok(())
     }
 
-    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, S> {
+    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
 
-    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, S> {
+    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
         let bmca = self.bmca.with_parent(parent);
@@ -173,7 +173,7 @@ impl<P: Port, S: SortedForeignClockRecords> SlavePort<P, S> {
         self.profile.uncalibrated(self.port, bmca)
     }
 
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, S> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
         decision.apply(|qualification_timeout_policy, grandmaster_id| {
@@ -184,7 +184,7 @@ impl<P: Port, S: SortedForeignClockRecords> SlavePort<P, S> {
         })
     }
 
-    pub(crate) fn synchronization_fault(self) -> PortState<P, S> {
+    pub(crate) fn synchronization_fault(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::SynchronizationFault);
         PortState::Uncalibrated(UncalibratedPort::new(
             self.port,
@@ -200,9 +200,11 @@ impl<P: Port, S: SortedForeignClockRecords> SlavePort<P, S> {
 mod tests {
     use super::*;
 
+    use core::cell::Cell;
+
     use crate::bmca::{
-        BestForeignRecord, BestMasterClockAlgorithm, BmcaMasterDecision, BmcaMasterDecisionPoint,
-        ClockDS, ForeignClockRecord,
+        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, BmcaMasterDecision,
+        BmcaMasterDecisionPoint, ClockDS, ForeignClockRecord,
     };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::e2e::DelayCycle;
@@ -219,13 +221,14 @@ mod tests {
     type SlaveTestDomainPort<'a> =
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type SlaveTestPort<'a> = SlavePort<SlaveTestDomainPort<'a>, SortedForeignClockRecordsVec>;
+    type SlaveTestPort<'a> = SlavePort<'a, SlaveTestDomainPort<'a>, SortedForeignClockRecordsVec>;
 
     struct SlavePortTestSetup {
         local_clock: LocalClock<FakeClock>,
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
+        foreign_candidates: Cell<BestForeignSnapshot>,
     }
 
     impl SlavePortTestSetup {
@@ -243,6 +246,7 @@ mod tests {
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
+                foreign_candidates: Cell::new(BestForeignSnapshot::Empty),
             }
         }
 
@@ -266,7 +270,11 @@ mod tests {
             SlavePort::new(
                 domain_port,
                 ParentTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(self.default_ds),
+                    BestMasterClockAlgorithm::new(
+                        PortNumber::new(1),
+                        self.default_ds,
+                        &self.foreign_candidates,
+                    ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
                     ParentPortIdentity::new(parent),
                 ),

@@ -32,17 +32,17 @@ pub(crate) enum StateDecision {
 
 // Port states as defined in IEEE 1588 Section 9.2.5, figure 24
 #[allow(clippy::large_enum_variant)]
-pub enum PortState<P: Port, S: SortedForeignClockRecords> {
-    Initializing(InitializingPort<P, S>),
-    Listening(ListeningPort<P, S>),
-    Slave(SlavePort<P, S>),
-    Master(MasterPort<P, S>),
-    PreMaster(PreMasterPort<P, S>),
-    Uncalibrated(UncalibratedPort<P, S>),
+pub enum PortState<'a, P: Port, S: SortedForeignClockRecords> {
+    Initializing(InitializingPort<'a, P, S>),
+    Listening(ListeningPort<'a, P, S>),
+    Slave(SlavePort<'a, P, S>),
+    Master(MasterPort<'a, P, S>),
+    PreMaster(PreMasterPort<'a, P, S>),
+    Uncalibrated(UncalibratedPort<'a, P, S>),
     Faulty(FaultyPort<P, S>),
 }
 
-impl<P: Port, S: SortedForeignClockRecords> PortState<P, S> {
+impl<'a, P: Port, S: SortedForeignClockRecords> PortState<'a, P, S> {
     pub(crate) fn apply(self, decision: StateDecision) -> Self {
         match decision {
             StateDecision::AnnounceReceiptTimeoutExpired => match self {
@@ -373,8 +373,11 @@ impl PortProfile {
 mod tests {
     use super::*;
 
+    use core::cell::Cell;
+
     use crate::bmca::{
-        BestForeignRecord, BmcaMasterDecision, BmcaMasterDecisionPoint, ClockDS, ListeningBmca,
+        BestForeignRecord, BestForeignSnapshot, BmcaMasterDecision, BmcaMasterDecisionPoint,
+        ClockDS, ListeningBmca,
     };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
@@ -395,6 +398,7 @@ mod tests {
         local_clock: LocalClock<FakeClock>,
         default_ds: ClockDS,
         physical_port: FakePort,
+        foreign_candidates: Cell<BestForeignSnapshot>,
     }
 
     impl PortStateTestSetup {
@@ -407,6 +411,7 @@ mod tests {
                 ),
                 default_ds: ds,
                 physical_port: FakePort::new(),
+                foreign_candidates: Cell::new(BestForeignSnapshot::Empty),
             }
         }
 
@@ -428,21 +433,29 @@ mod tests {
 
         fn initializing_port(
             &self,
-        ) -> PortState<PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
+        ) -> PortState<'_, PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
             PortProfile::default().initializing(
                 self.domain_port(),
-                BestMasterClockAlgorithm::new(self.default_ds),
+                BestMasterClockAlgorithm::new(
+                    PortNumber::new(1),
+                    self.default_ds,
+                    &self.foreign_candidates,
+                ),
                 SortedForeignClockRecordsVec::new(),
             )
         }
 
         fn listening_port(
             &self,
-        ) -> PortState<PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
+        ) -> PortState<'_, PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
             PortProfile::default().listening(
                 self.domain_port(),
                 ListeningBmca::new(
-                    BestMasterClockAlgorithm::new(self.default_ds),
+                    BestMasterClockAlgorithm::new(
+                        PortNumber::new(1),
+                        self.default_ds,
+                        &self.foreign_candidates,
+                    ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 ),
             )
@@ -450,11 +463,15 @@ mod tests {
 
         fn slave_port(
             &self,
-        ) -> PortState<PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
+        ) -> PortState<'_, PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
             PortProfile::default().slave(
                 self.domain_port(),
                 ParentTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(self.default_ds),
+                    BestMasterClockAlgorithm::new(
+                        PortNumber::new(1),
+                        self.default_ds,
+                        &self.foreign_candidates,
+                    ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                     ParentPortIdentity::new(PortIdentity::fake()),
                 ),
@@ -468,12 +485,16 @@ mod tests {
 
         fn master_port(
             &self,
-        ) -> PortState<PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
+        ) -> PortState<'_, PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
             let grandmaster_id = *self.local_clock.identity();
             PortProfile::default().master(
                 self.domain_port(),
                 GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(self.default_ds),
+                    BestMasterClockAlgorithm::new(
+                        PortNumber::new(1),
+                        self.default_ds,
+                        &self.foreign_candidates,
+                    ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                     grandmaster_id,
                 ),
@@ -482,12 +503,16 @@ mod tests {
 
         fn pre_master_port(
             &self,
-        ) -> PortState<PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
+        ) -> PortState<'_, PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
             let grandmaster_id = *self.local_clock.identity();
             PortProfile::default().pre_master(
                 self.domain_port(),
                 GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(self.default_ds),
+                    BestMasterClockAlgorithm::new(
+                        PortNumber::new(1),
+                        self.default_ds,
+                        &self.foreign_candidates,
+                    ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                     grandmaster_id,
                 ),
@@ -497,11 +522,15 @@ mod tests {
 
         fn uncalibrated_port(
             &self,
-        ) -> PortState<PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
+        ) -> PortState<'_, PortStateTestDomainPort<'_>, SortedForeignClockRecordsVec> {
             PortProfile::default().uncalibrated(
                 self.domain_port(),
                 ParentTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(self.default_ds),
+                    BestMasterClockAlgorithm::new(
+                        PortNumber::new(1),
+                        self.default_ds,
+                        &self.foreign_candidates,
+                    ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                     ParentPortIdentity::new(PortIdentity::fake()),
                 ),
@@ -899,6 +928,7 @@ mod tests {
 
     #[test]
     fn portstate_master_enters_faulty_on_announce_send_failure() {
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_high_grade().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
@@ -917,7 +947,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             GrandMasterTrackingBmca::new(
-                BestMasterClockAlgorithm::new(default_ds),
+                BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
                 BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 *local_clock.identity(),
             ),
@@ -930,6 +960,7 @@ mod tests {
 
     #[test]
     fn portstate_master_enters_faulty_on_delay_response_send_failure() {
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_high_grade().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
@@ -948,7 +979,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             GrandMasterTrackingBmca::new(
-                BestMasterClockAlgorithm::new(default_ds),
+                BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
                 BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 *local_clock.identity(),
             ),
@@ -965,6 +996,7 @@ mod tests {
 
     #[test]
     fn portstate_master_enters_faulty_on_follow_up_send_failure() {
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_high_grade().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
@@ -983,7 +1015,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             GrandMasterTrackingBmca::new(
-                BestMasterClockAlgorithm::new(default_ds),
+                BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
                 BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 *local_clock.identity(),
             ),
@@ -1000,6 +1032,7 @@ mod tests {
 
     #[test]
     fn portstate_master_enters_faulty_on_sync_send_failure() {
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_high_grade().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
@@ -1018,7 +1051,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             GrandMasterTrackingBmca::new(
-                BestMasterClockAlgorithm::new(default_ds),
+                BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
                 BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 *local_clock.identity(),
             ),
@@ -1031,6 +1064,7 @@ mod tests {
 
     #[test]
     fn portstate_slave_enters_faulty_on_delay_request_send_failure() {
+        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
@@ -1050,7 +1084,7 @@ mod tests {
 
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         let bmca = ParentTrackingBmca::new(
-            BestMasterClockAlgorithm::new(default_ds),
+            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
             BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
             parent_port_identity,
         );

@@ -7,17 +7,17 @@ use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity
 use crate::portstate::{PortProfile, PortState, StateDecision};
 use crate::time::Instant;
 
-pub struct ListeningPort<P: Port, S: SortedForeignClockRecords> {
+pub struct ListeningPort<'a, P: Port, S: SortedForeignClockRecords> {
     port: P,
-    bmca: ListeningBmca<S>,
+    bmca: ListeningBmca<'a, S>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     profile: PortProfile,
 }
 
-impl<P: Port, S: SortedForeignClockRecords> ListeningPort<P, S> {
+impl<'a, P: Port, S: SortedForeignClockRecords> ListeningPort<'a, P, S> {
     pub(crate) fn new(
         port: P,
-        bmca: ListeningBmca<S>,
+        bmca: ListeningBmca<'a, S>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         profile: PortProfile,
     ) -> Self {
@@ -31,7 +31,7 @@ impl<P: Port, S: SortedForeignClockRecords> ListeningPort<P, S> {
         }
     }
 
-    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, S> {
+    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
         let parent_tracking_bmca = self.bmca.into_parent_tracking(parent);
@@ -39,7 +39,7 @@ impl<P: Port, S: SortedForeignClockRecords> ListeningPort<P, S> {
         self.profile.uncalibrated(self.port, parent_tracking_bmca)
     }
 
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, S> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
         decision.apply(|qualification_timeout_policy, grandmaster_id| {
@@ -50,7 +50,7 @@ impl<P: Port, S: SortedForeignClockRecords> ListeningPort<P, S> {
         })
     }
 
-    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, S> {
+    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
@@ -82,9 +82,11 @@ impl<P: Port, S: SortedForeignClockRecords> ListeningPort<P, S> {
 mod tests {
     use super::*;
 
+    use core::cell::Cell;
+
     use crate::bmca::{
-        BestForeignRecord, BestMasterClockAlgorithm, BmcaMasterDecisionPoint, ClockDS,
-        ListeningBmca,
+        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, BmcaMasterDecisionPoint,
+        ClockDS, ListeningBmca,
     };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
@@ -101,13 +103,14 @@ mod tests {
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type ListeningTestPort<'a> =
-        ListeningPort<ListeningTestDomainPort<'a>, SortedForeignClockRecordsVec>;
+        ListeningPort<'a, ListeningTestDomainPort<'a>, SortedForeignClockRecordsVec>;
 
     struct ListeningPortTestSetup {
         local_clock: LocalClock<FakeClock>,
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
+        foreign_candidates: Cell<BestForeignSnapshot>,
     }
 
     impl ListeningPortTestSetup {
@@ -121,6 +124,7 @@ mod tests {
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
+                foreign_candidates: Cell::new(BestForeignSnapshot::Empty),
             }
         }
 
@@ -147,7 +151,11 @@ mod tests {
             ListeningPort::new(
                 domain_port,
                 ListeningBmca::new(
-                    BestMasterClockAlgorithm::new(self.default_ds),
+                    BestMasterClockAlgorithm::new(
+                        PortNumber::new(1),
+                        self.default_ds,
+                        &self.foreign_candidates,
+                    ),
                     BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
                 ),
                 announce_receipt_timeout,

@@ -5,17 +5,17 @@ use crate::log::PortEvent;
 use crate::port::Port;
 use crate::portstate::{PortProfile, PortState};
 
-pub struct InitializingPort<P: Port, S: SortedForeignClockRecords> {
+pub struct InitializingPort<'a, P: Port, S: SortedForeignClockRecords> {
     port: P,
-    bmca: BestMasterClockAlgorithm,
+    bmca: BestMasterClockAlgorithm<'a>,
     sorted_foreign_clock_records: S,
     profile: PortProfile,
 }
 
-impl<P: Port, S: SortedForeignClockRecords> InitializingPort<P, S> {
+impl<'a, P: Port, S: SortedForeignClockRecords> InitializingPort<'a, P, S> {
     pub(crate) fn new(
         port: P,
-        bmca: BestMasterClockAlgorithm,
+        bmca: BestMasterClockAlgorithm<'a>,
         sorted_foreign_clock_records: S,
         profile: PortProfile,
     ) -> Self {
@@ -29,7 +29,7 @@ impl<P: Port, S: SortedForeignClockRecords> InitializingPort<P, S> {
         }
     }
 
-    pub(crate) fn initialized(self) -> PortState<P, S> {
+    pub(crate) fn initialized(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::Initialized);
 
         let bmca = ListeningBmca::new(
@@ -45,6 +45,8 @@ impl<P: Port, S: SortedForeignClockRecords> InitializingPort<P, S> {
 mod tests {
     use super::*;
 
+    use core::cell::Cell;
+
     use crate::clock::LocalClock;
     use crate::infra::infra_support::SortedForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
@@ -57,6 +59,7 @@ mod tests {
 
     #[test]
     fn initializing_port_to_listening_transition() {
+        let foreign_candidates = Cell::new(crate::bmca::BestForeignSnapshot::Empty);
         let default_ds = TestClockCatalog::default_mid_grade().default_ds();
         let local_clock = LocalClock::new(
             FakeClock::default(),
@@ -74,7 +77,7 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            BestMasterClockAlgorithm::new(default_ds),
+            BestMasterClockAlgorithm::new(PortNumber::new(1), default_ds, &foreign_candidates),
             SortedForeignClockRecordsVec::new(),
             PortProfile::default(),
         );
