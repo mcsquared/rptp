@@ -8,7 +8,9 @@
 
 ## Introduction
 
-`rptp` is an early domain-driven implementation of IEEE 1588‑2019 / PTP in Rust, exploratory and growing.
+`rptp` is a **work in progress**: an early, exploratory, domain-driven implementation of IEEE 1588‑2019 / PTP in Rust.
+
+Expect incomplete protocol coverage, rough edges, and frequent refactors as domain knowledge and understanding deepens, the model matures and tests grow.
 
 This repository contains:
 
@@ -43,7 +45,7 @@ Expect **0.x** semantics: the design and APIs will evolve as the model matures.
 
 ## Status & Agenda
 
-This is an **early-stage, experimental project**, with a deliberate focus on a testable **domain core first**:
+This is a **work-in-progress, early-stage, experimental project**, with a deliberate focus on a testable **domain core first**:
 
 - APIs are **unstable** and may change in 0.x releases.
 - The design is actively evolving as domain understanding deepens.
