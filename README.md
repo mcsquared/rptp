@@ -64,7 +64,6 @@ You **must not** treat `rptp` or `rptp-daemon` as a hardened, production-ready P
 - Virtual clocks and software timestamping for simulation & tests.  
 - A deliberately rough but effective **bare-metal QEMU demo harness** (`crates/rptp-embedded-demo`) that runs as grandmaster on a 12 MHz Cortex‑M target, still fits within a 64‑KiB MCU budget, and is exercised by Dockerized e2e tests against `ptp4l`. It exists to keep the embedded trajectory honest, not as production firmware yet.  
 - Thin, Tokio-driven integration that wires the core to UDP multicast sockets and system timers for tests and experiments.  
-- Promising early locality/performance behavior in the core, with the hot paths kept free from unnecessary allocation, infrastructure or framework concerns.  
 
 ### Near‑Term Focus (0.x)
 
@@ -81,6 +80,9 @@ These are concrete areas of work planned for the near term, before the project c
 
 - **PI servo tuning and constraints**  
   Tune the PI servo (`kp`/`ki`) based on the Sync log message interval, clamp drift in the PI servo, and derive parameters such as `min_delta` from `ki` rather than ad‑hoc choices.
+
+- **FaultyPort transitions & better error handling and and fault recovery story**  
+  At the moment, FaultyPort is a dead end stub in the state machine. The implementation shall support graceful fault transitions, error logging and recovery paths soon.  
 
 - **Stronger acceptance tests vs. `ptp4l`**  
   Tighten interoperability and acceptance criteria against `ptp4l`, including timescale awareness and correctness, not just message flow compatibility.
@@ -114,6 +116,9 @@ For details on how to report potential vulnerabilities or security-sensitive iss
 From the repository root:
 
 ```bash
+# build the whole workspace
+cargo build
+
 # Run the full test suite for the workspace
 cargo test
 
@@ -124,19 +129,45 @@ cargo fmt
 cargo clippy --all-targets --all-features
 ```
 
-### Run the Tokio-based daemon
+### See it in Action
 
-`rptp-daemon` currently wires the core to:
+There are two ways to run the code at the moment: to run the e2e acceptance tests, or to run the grafana-prometheus demo.
 
-- a virtual clock (for experimentation),
-- UDP multicast sockets for PTP event and general messages,
-- a small Tokio event loop.
+#### End-to-End Acceptence ("Smoke") Tests
 
-To run it:
+From the repository root:
+```sh
+# To speed up the test run, it's recommended to build the docker images once first
+docker build -f tests/e2e/docker/Dockerfile \
+  --build-arg MANIFEST_DIR=tests/e2e/scenarios -t rptp-e2e-tests .
+docker build -f tests/e2e/docker/qemu.Dockerfile \
+  --build-arg MANIFEST_DIR=crates/rptp-embedded-demo -t rptp-e2e-test:qemu .
+docker build -f tests/e2e/docker/ptp4l.Dockerfile -t rptp-e2e-test:ptp4l tests/e2e/docker
 
-```bash
-cargo run -p rptp-daemon
+# Run the e2e acceptance tests
+cargo test -p rptp-e2e-tests -- --nocapture --ignored
 ```
+
+#### Grafana & Prometheus Demo
+
+This demo was introduced as a fast and easy first way to provide a graphical live view of clock sync and servo behaviour.
+It sets up two ordinary clocks connected by an software loopback, everything in-process and in-memory. This demo can be seen as an early feedback tool too, besides the other tests.
+
+```sh
+cd crates/grafana-prometheus-demo
+
+# Start up the Demo
+docker compose up --build
+
+# Open http://localhost:3000/. After logging in with admin-admin you should
+# see a Grafana dashboard with a "Offset From Master" live graph
+
+# Shutdown the Demo (from the same directory)
+docker compose down
+```
+
+After starting the demo, a Grafana dashboard should be available on localhost (`http://localhost:3000`, admin:admin). The dashboard has a pre-configured graph view for the master offset. After approximately 90s the demo simulates two consecutive clock steps. The first one big enough, to force a hard clock step on the slave side too. The second step is below the step-threshold, resulting in clock slewing behaviour.
+
 
 By design this is still a **playground**:
 
