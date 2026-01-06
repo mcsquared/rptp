@@ -5,10 +5,24 @@ pub struct TimeStamp {
 }
 
 impl TimeStamp {
+    const MAX_SECONDS_EXCL: u64 = 1 << 48;
+    const NANOS_PER_SECOND: u32 = 1_000_000_000;
+
     pub fn new(seconds: u64, nanos: u32) -> Self {
-        assert!(seconds < (1 << 47));
+        assert!(seconds < Self::MAX_SECONDS_EXCL);
         assert!(nanos < 1_000_000_000);
         Self { seconds, nanos }
+    }
+
+    pub fn try_new_i64(seconds: i64, nanos: u32) -> Option<Self> {
+        if (0..Self::MAX_SECONDS_EXCL as i64).contains(&seconds) && nanos < Self::NANOS_PER_SECOND {
+            Some(Self {
+                seconds: seconds as u64,
+                nanos,
+            })
+        } else {
+            None
+        }
     }
 
     pub(crate) fn to_wire(self) -> [u8; 10] {
@@ -23,16 +37,12 @@ impl TimeStamp {
         let mut seconds = (self.seconds as i64).checked_add(rhs.seconds)?;
         let mut nanos = self.nanos + rhs.nanos;
 
-        if nanos >= 1_000_000_000 {
-            nanos -= 1_000_000_000;
+        if nanos >= Self::NANOS_PER_SECOND {
+            nanos -= Self::NANOS_PER_SECOND;
             seconds = seconds.checked_add(1)?;
         }
 
-        if !(0..(1 << 47)).contains(&seconds) {
-            return None;
-        }
-
-        Some(TimeStamp::new(seconds as u64, nanos))
+        TimeStamp::try_new_i64(seconds, nanos)
     }
 }
 
@@ -284,7 +294,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn timestamp_new_panics_on_invalid_seconds() {
-        let _ = TimeStamp::new(1 << 47, 500_000_000);
+        let _ = TimeStamp::new(1 << 48, 500_000_000);
     }
 
     #[test]
@@ -307,14 +317,14 @@ mod tests {
 
     #[test]
     fn timestamp_subtraction_max_range() {
-        let ts1 = TimeStamp::new((1 << 47) - 1, 999_999_999);
+        let ts1 = TimeStamp::new((1 << 48) - 1, 999_999_999);
         let ts2 = TimeStamp::new(0, 0);
 
         let duration = ts1 - ts2;
-        assert_eq!(duration, TimeInterval::new((1 << 47) - 1, 999_999_999));
+        assert_eq!(duration, TimeInterval::new((1 << 48) - 1, 999_999_999));
 
         let duration = ts2 - ts1;
-        assert_eq!(duration, TimeInterval::new(-((1 << 47) - 1) - 1, 1));
+        assert_eq!(duration, TimeInterval::new(-((1 << 48) - 1) - 1, 1));
     }
 
     #[test]
@@ -365,16 +375,16 @@ mod tests {
 
     #[test]
     fn timestamp_checked_add_hits_upper_bound() {
-        let ts = TimeStamp::new((1 << 47) - 2, 999_999_999);
+        let ts = TimeStamp::new((1 << 48) - 2, 999_999_999);
         let interval = TimeInterval::new(0, 1);
 
         let result = ts.checked_add(interval).unwrap();
-        assert_eq!(result, TimeStamp::new((1 << 47) - 1, 0));
+        assert_eq!(result, TimeStamp::new((1 << 48) - 1, 0));
     }
 
     #[test]
     fn timestamp_checked_add_beyond_upper_bound_returns_none() {
-        let ts = TimeStamp::new((1 << 47) - 2, 0);
+        let ts = TimeStamp::new((1 << 48) - 2, 0);
         let interval = TimeInterval::new(3, 0);
 
         let result = ts.checked_add(interval);

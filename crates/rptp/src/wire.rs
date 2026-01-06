@@ -671,6 +671,17 @@ mod tests {
     }
 
     #[test]
+    fn wire_timestamp_maximum_seconds() {
+        let wire = [
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // seconds
+            0x00, 0x00, 0x00, 42, // nanoseconds
+        ];
+        let parsed = WireTimeStamp::new(&wire).timestamp();
+
+        assert_eq!(parsed, Ok(TimeStamp::new((1 << 48) - 1, 42)));
+    }
+
+    #[test]
     fn wire_timestamp_roundtrip() {
         let ts = TimeStamp::new(42, 500_000_000);
         let wire = ts.to_wire();
