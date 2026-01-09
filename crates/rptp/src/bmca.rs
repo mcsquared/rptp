@@ -437,7 +437,7 @@ impl<'a> BestMasterClockAlgorithm<'a> {
             .remember(self.port_number, e_rbest.snapshot());
 
         let d_0 = self.local_candidate.snapshot();
-        if d_0.is_grandmaster_capable() {
+        if d_0.is_authoritative() {
             Self::d0_better_or_better_by_topology_than_e_rbest(&d_0, e_rbest)
         } else {
             let best_snapshot = self.foreign_candidates.best();
@@ -858,8 +858,8 @@ impl ClockDS {
         &self.identity
     }
 
-    pub(crate) fn is_grandmaster_capable(&self) -> bool {
-        self.quality.is_grandmaster_capable()
+    pub(crate) fn is_authoritative(&self) -> bool {
+        self.quality.is_authoritative()
     }
 
     /// Parse a `ForeignClockDS` from the binary representation used on the

@@ -100,7 +100,7 @@ impl ClockClass {
         }
     }
 
-    pub(crate) fn is_grandmaster_capable(&self) -> bool {
+    pub(crate) fn is_authoritative(&self) -> bool {
         (1..=127).contains(&self.as_u8())
     }
 
@@ -254,8 +254,8 @@ impl ClockQuality {
         }
     }
 
-    pub(crate) fn is_grandmaster_capable(&self) -> bool {
-        self.clock_class.is_grandmaster_capable()
+    pub(crate) fn is_authoritative(&self) -> bool {
+        self.clock_class.is_authoritative()
     }
 
     pub(crate) fn from_wire(buf: &[u8; 4]) -> Self {
