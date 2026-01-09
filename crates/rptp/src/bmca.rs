@@ -4,7 +4,7 @@ use core::ops::Range;
 use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved, TimeScale};
 use crate::message::{AnnounceMessage, SequenceId};
 use crate::port::{ParentPortIdentity, Port, PortIdentity, PortNumber};
-use crate::portstate::PortState;
+use crate::portstate::{PortState, StateDecision};
 use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
 pub trait Bmca {
@@ -538,6 +538,16 @@ pub enum BmcaDecision {
     Slave(ParentPortIdentity),
     /// The port should be passive.
     Passive,
+}
+
+impl BmcaDecision {
+    pub(crate) fn to_state_decision(self) -> Option<StateDecision> {
+        match self {
+            BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
+            BmcaDecision::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
+            BmcaDecision::Passive => None, // TODO: Handle passive recommendation
+        }
+    }
 }
 
 /// BMCA decision for entering a master/pre‑master state.

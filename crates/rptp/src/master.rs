@@ -1,6 +1,5 @@
 use crate::bmca::{
-    Bmca, BmcaDecision, BmcaMasterDecision, GrandMaster, GrandMasterTrackingBmca,
-    SortedForeignClockRecords,
+    Bmca, BmcaMasterDecision, GrandMaster, GrandMasterTrackingBmca, SortedForeignClockRecords,
 };
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortEvent;
@@ -63,11 +62,7 @@ impl<'a, P: Port, S: SortedForeignClockRecords> MasterPort<'a, P, S> {
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision() {
-            // While already in the Master state, a Master BMCA decision does not require any
-            // state transition.
-            Some(BmcaDecision::Master(_)) => None,
-            Some(BmcaDecision::Slave(parent)) => Some(StateDecision::RecommendedSlave(parent)),
-            Some(BmcaDecision::Passive) => None, // TODO: Handle Passive transition --- IGNORE ---
+            Some(decision) => decision.to_state_decision(),
             None => None,
         }
     }

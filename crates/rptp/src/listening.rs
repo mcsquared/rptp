@@ -1,6 +1,4 @@
-use crate::bmca::{
-    Bmca, BmcaDecision, BmcaMasterDecision, ListeningBmca, SortedForeignClockRecords,
-};
+use crate::bmca::{Bmca, BmcaMasterDecision, ListeningBmca, SortedForeignClockRecords};
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity};
@@ -68,11 +66,7 @@ impl<'a, P: Port, S: SortedForeignClockRecords> ListeningPort<'a, P, S> {
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision() {
-            Some(BmcaDecision::Master(decision)) => {
-                Some(StateDecision::RecommendedMaster(decision))
-            }
-            Some(BmcaDecision::Slave(parent)) => Some(StateDecision::RecommendedSlave(parent)),
-            Some(BmcaDecision::Passive) => None, // TODO: Handle Passive transition --- IGNORE ---
+            Some(decision) => decision.to_state_decision(),
             None => None,
         }
     }

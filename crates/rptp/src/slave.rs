@@ -1,6 +1,4 @@
-use crate::bmca::{
-    Bmca, BmcaDecision, BmcaMasterDecision, ParentTrackingBmca, SortedForeignClockRecords,
-};
+use crate::bmca::{Bmca, BmcaMasterDecision, ParentTrackingBmca, SortedForeignClockRecords};
 use crate::e2e::EndToEndDelayMechanism;
 use crate::log::PortEvent;
 use crate::message::{
@@ -52,11 +50,7 @@ impl<'a, P: Port, S: SortedForeignClockRecords> SlavePort<'a, P, S> {
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
 
         match self.bmca.decision() {
-            Some(BmcaDecision::Master(decision)) => {
-                Some(StateDecision::RecommendedMaster(decision))
-            }
-            Some(BmcaDecision::Slave(parent)) => Some(StateDecision::RecommendedSlave(parent)),
-            Some(BmcaDecision::Passive) => None, // TODO: Handle Passive transition --- IGNORE ---
+            Some(decision) => decision.to_state_decision(),
             None => None,
         }
     }
