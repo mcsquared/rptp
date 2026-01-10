@@ -1,5 +1,23 @@
+//! `std`-based infrastructure helpers.
+//!
+//! This module is enabled behind the crate feature `std` and provides small adapter implementations
+//! that make it easier to wire the `rptp` domain core into `std` environments (Tokio daemons, test
+//! harnesses, demos).
+//!
+//! The intent is convenience, not a “one true runtime layer”: infrastructure is expected to supply
+//! its own concrete implementations for networking, timers, and timestamping. These helpers exist
+//! mainly to avoid repetitive glue for common `std` collection and pointer types.
+//!
+//! For allocator-free environments, see the `heapless-storage` feature and `crate::heapless`.
+
 #[cfg(feature = "std")]
 pub mod infra_support {
+    //! Convenience adapters used by `std` integrations and tests.
+    //!
+    //! This submodule intentionally contains “glue code” only:
+    //! - adapters for common pointer/container types (`Rc`, `Box`, `&mut _`),
+    //! - and a simple `Vec`-backed [`ForeignClockRecords`] implementation for BMCA.
+
     use std::rc::Rc;
 
     use crate::bmca::{ForeignClockRecord, ForeignClockStatus, ForeignClockRecords};
@@ -44,6 +62,13 @@ pub mod infra_support {
         }
     }
 
+    /// `Vec`-backed implementation of [`ForeignClockRecords`].
+    ///
+    /// This is the default “easy mode” storage adapter for `std` environments and is used heavily
+    /// in tests. Records are kept sorted so that “best first” holds (see [`ForeignClockRecord`]'s
+    /// ordering).
+    ///
+    /// For fixed-capacity / `no_std` environments, see [`crate::heapless::HeaplessForeignClockRecords`].
     pub struct ForeignClockRecordsVec {
         records: Vec<ForeignClockRecord>,
     }
@@ -55,12 +80,17 @@ pub mod infra_support {
     }
 
     impl ForeignClockRecordsVec {
+        /// Create an empty store.
         pub fn new() -> Self {
             Self {
                 records: Vec::new(),
             }
         }
 
+        /// Create a store from pre-seeded records (tests/support only).
+        ///
+        /// The resulting store is sorted according to the record ordering so that “best first”
+        /// holds.
         #[cfg(any(test, feature = "test-support"))]
         pub fn from_records(records: &[ForeignClockRecord]) -> Self {
             let mut vec = Self {
@@ -76,6 +106,7 @@ pub mod infra_support {
         }
 
         #[cfg(test)]
+        /// Return the number of currently stored records (tests only).
         pub(crate) fn len(&self) -> usize {
             self.records.len()
         }
@@ -86,6 +117,7 @@ pub mod infra_support {
     }
 
     impl ForeignClockRecords for ForeignClockRecordsVec {
+        /// Remember (insert or update) a record and keep the internal list sorted.
         fn remember(&mut self, record: ForeignClockRecord) {
             if let Some(existing) = self
                 .records
@@ -101,12 +133,14 @@ pub mod infra_support {
             }
         }
 
+        /// Return the best qualified record, if any.
         fn best_qualified(&self) -> Option<&ForeignClockRecord> {
             self.records
                 .first()
                 .filter(|record| record.qualified_ds().is_some())
         }
 
+        /// Prune stale records and report whether any were removed.
         fn prune_stale(&mut self, now: crate::time::Instant) -> bool {
             let before = self.records.len();
             self.records.retain(|record| !record.is_stale(now));
@@ -114,6 +148,7 @@ pub mod infra_support {
         }
     }
 
+    /// Blanket impl to allow passing `&mut S` where an owned `S: ForeignClockRecords` is expected.
     impl<S: ForeignClockRecords> ForeignClockRecords for &mut S {
         fn remember(&mut self, record: ForeignClockRecord) {
             (*self).remember(record);

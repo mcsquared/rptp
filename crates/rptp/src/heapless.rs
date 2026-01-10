@@ -1,6 +1,21 @@
+//! Heapless storage helpers for `no_std` / embedded use.
+//!
+//! This module is available when the crate feature `heapless-storage` is enabled (it is part of
+//! the default feature set). It provides ready-made, fixed-capacity implementations of
+//! domain-facing storage traits used by the core.
+//!
+//! The goal is to let embedded adopters wire `rptp` without pulling in a heap allocator, while
+//! keeping the domain core independent from concrete collection types.
+//! If you prefer a different storage strategy (arrays, custom lists, arena allocators, …), you can
+//! ignore these helpers and implement the relevant traits yourself.
+//!
+//! Currently this module provides:
+//! - [`HeaplessForeignClockRecords`]: a bounded [`ForeignClockRecords`] implementation used by BMCA
+//!   to track and qualify foreign master candidates from Announce messages.
+
 use heapless::Vec;
 
-use crate::bmca::{ForeignClockRecord, ForeignClockStatus, ForeignClockRecords};
+use crate::bmca::{ForeignClockRecord, ForeignClockRecords, ForeignClockStatus};
 
 /// Heapless implementation of [`ForeignClockRecords`] backed by a bounded
 /// `heapless::Vec`.
@@ -8,12 +23,33 @@ use crate::bmca::{ForeignClockRecord, ForeignClockStatus, ForeignClockRecords};
 /// This type is intended for embedded adopters that want a ready‑made fixed‑capacity
 /// foreign clock store. Applications that prefer to supply their own storage can
 /// ignore this type and implement [`ForeignClockRecords`] on their own.
+///
+/// ## Ordering and selection
+///
+/// Internally, records are kept sorted so that `records[0]` is the *best* candidate according to
+/// [`ForeignClockRecord`]'s ordering (qualification first, then dataset ranking, then identity).
+/// [`ForeignClockRecords::best_qualified`] therefore returns `self.records.first()` if it is
+/// qualified.
+///
+/// ## Capacity and replacement behaviour
+///
+/// This store has a hard capacity `N`. When capacity is exceeded, it may drop an existing record
+/// to make room for the new candidate:
+///
+/// - The replacement decision is made **by dataset quality only** (ignoring qualification).
+/// - A new record that is *better than at least one existing record* replaces the worst record
+///   that it beats.
+/// - A new record that is worse than all existing records is dropped.
+///
+/// This intentionally allows a “better but not yet qualified” candidate to enter the set and
+/// become qualified later, instead of being permanently excluded by capacity pressure.
 pub struct HeaplessForeignClockRecords<const N: usize> {
     records: Vec<ForeignClockRecord, N>,
     removal_policy: RemovalPolicy,
 }
 
 impl<const N: usize> HeaplessForeignClockRecords<N> {
+    /// Create an empty store with capacity `N`.
     pub fn new() -> Self {
         Self {
             records: Vec::new(),
@@ -21,6 +57,9 @@ impl<const N: usize> HeaplessForeignClockRecords<N> {
         }
     }
 
+    /// Create a store from pre-seeded records (tests/support only).
+    ///
+    /// The resulting store is sorted according to the record ordering so that “best first” holds.
     #[cfg(any(test, feature = "test-support"))]
     #[allow(dead_code)]
     pub(crate) fn from_records(records: &[ForeignClockRecord]) -> Self {
@@ -40,6 +79,9 @@ impl Default for HeaplessForeignClockRecords<0> {
 }
 
 impl<const N: usize> ForeignClockRecords for HeaplessForeignClockRecords<N> {
+    /// Remember (insert or update) a record.
+    ///
+    /// If capacity is exceeded, [`RemovalPolicy`] may choose a record to remove.
     fn remember(&mut self, record: ForeignClockRecord) {
         if let Some(existing) = self
             .records
@@ -85,9 +127,18 @@ impl<const N: usize> ForeignClockRecords for HeaplessForeignClockRecords<N> {
 
 // Replacement policy to determine which record to possibly remove when capacity is
 // exceeded to make room for a new, possibly better record, even if unqualified.
+//
+// The current policy:
+// - ignores qualification (considers only dataset ranking),
+// - scans from worst → best, and
+// - replaces the worst record that the candidate beats.
 struct RemovalPolicy;
 
 impl RemovalPolicy {
+    /// Return the index of a record to remove to make room for `candidate`.
+    ///
+    /// The returned index points into `current` (which is assumed to be sorted best→worst).
+    /// The policy chooses the worst record that is still worse than `candidate` by dataset ranking.
     fn candidate_index(
         &self,
         current: &[ForeignClockRecord],

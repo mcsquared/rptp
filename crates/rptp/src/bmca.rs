@@ -1,3 +1,22 @@
+//! Best Master Clock Algorithm (BMCA) and related data sets.
+//!
+//! This module implements the parts of the IEEE 1588-2019 Precision Time Protocol (PTP) best-master
+//! selection story that `rptp` currently needs:
+//!
+//! - Tracking and qualifying foreign master candidates learned from Announce messages
+//! - Comparing local and foreign clock data sets (`ClockDS`) and producing high-level decisions
+//! - Gating decision emission while tracking an already-selected parent/grandmaster
+//!
+//! The implementation is deliberately domain-oriented: the output of the algorithm is expressed as
+//! a small set of domain decisions (`BmcaDecision`) that the port state machine can apply.
+//!
+//! ## Current limitations
+//!
+//! - Multi-port / boundary-clock scenarios are still evolving; some collaborators are intentionally
+//!   modeled as traits so that storage and topology can be swapped without changing core logic.
+//! - Some topology-only comparisons are currently simplified; TODOs in this module mark those
+//!   places explicitly.
+
 use core::cell::Cell;
 use core::ops::Range;
 
@@ -7,7 +26,16 @@ use crate::port::{ParentPortIdentity, Port, PortIdentity, PortNumber};
 use crate::portstate::{PortState, StateDecision};
 use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
-pub trait Bmca {
+/// Incremental Best Master Clock Algorithm interface.
+///
+/// The BMCA is driven by Announce reception: each received Announce contributes a new observation
+/// about a foreign clock candidate. Implementations keep local state (e.g. qualification windows)
+/// and can emit a high-level decision once enough information is available.
+pub(crate) trait Bmca {
+    /// Consider a new Announce-derived snapshot for a foreign clock candidate.
+    ///
+    /// `log_announce_interval` should be the interval announced by the sender, and is used for
+    /// qualification and staleness decisions.
     fn consider(
         &mut self,
         source_port_identity: PortIdentity,
@@ -16,15 +44,34 @@ pub trait Bmca {
         now: Instant,
     );
 
+    /// Return the latest BMCA decision, if one should be acted upon.
+    ///
+    /// Returning `None` means “no new decision”: either not enough information is available yet
+    /// (e.g. no qualified foreign candidates), or the decision would be identical to the currently
+    /// tracked parent/grandmaster.
     fn decision(&self) -> Option<BmcaDecision>;
 }
 
+/// Storage surface for foreign clock records.
+///
+/// The BMCA needs to retain foreign clock candidates, update them on subsequent Announce messages,
+/// qualify them, and efficiently retrieve the best qualified candidate.
+///
+/// This is a trait to keep the core portable across `std` and `no_std` environments, and to allow
+/// different storage strategies (heap, heapless, fixed arrays, etc.).
 pub trait ForeignClockRecords {
+    /// Remember (insert or update) a record.
     fn remember(&mut self, record: ForeignClockRecord);
+    /// Return the best *qualified* record, if any.
     fn best_qualified(&self) -> Option<&ForeignClockRecord>;
+    /// Prune stale records and return `true` if any were removed.
     fn prune_stale(&mut self, now: Instant) -> bool;
 }
 
+/// Representation of a best foreign dataset observed on a port as the input to
+/// BestMasterClockAlgorithm.
+///
+/// Maps to `E_best` and `E_rbest` in the IEEE 1588-2019 §9.3
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BestForeignDataset<'a> {
     Qualified {
@@ -36,6 +83,7 @@ pub(crate) enum BestForeignDataset<'a> {
 }
 
 impl<'a> BestForeignDataset<'a> {
+    /// Return the grandmaster identity of this dataset, if non-empty.
     fn grandmaster_id(&self) -> Option<&ClockIdentity> {
         match self {
             BestForeignDataset::Qualified { ds, .. } => Some(ds.identity()),
@@ -43,6 +91,7 @@ impl<'a> BestForeignDataset<'a> {
         }
     }
 
+    /// Return `true` if `self` is better than `other` according to BMCA dataset comparison.
     fn better_than(&self, other: &BestForeignDataset) -> bool {
         match (self, other) {
             (
@@ -55,6 +104,7 @@ impl<'a> BestForeignDataset<'a> {
         }
     }
 
+    // Return the parent port identity if this dataset was received on the given port.
     fn parent_if_received_on_port(self, port: PortNumber) -> Option<ParentPortIdentity> {
         match self {
             BestForeignDataset::Qualified {
@@ -66,6 +116,7 @@ impl<'a> BestForeignDataset<'a> {
         }
     }
 
+    // Convert to a snapshot owning the dataset.
     fn snapshot(self) -> BestForeignSnapshot {
         match self {
             BestForeignDataset::Qualified {
@@ -95,6 +146,7 @@ impl<S: ForeignClockRecords> BestForeignRecord<S> {
         }
     }
 
+    /// Consider a new foreign clock record observation.
     pub(crate) fn consider(
         &mut self,
         source_port_identity: PortIdentity,
@@ -111,6 +163,7 @@ impl<S: ForeignClockRecords> BestForeignRecord<S> {
         ));
     }
 
+    /// Return the best qualified foreign dataset observed so far.
     fn dataset<'a>(&'a self) -> BestForeignDataset<'a> {
         match self.foreign_clock_records.best_qualified() {
             Some(record) => BestForeignDataset::Qualified {
@@ -125,17 +178,23 @@ impl<S: ForeignClockRecords> BestForeignRecord<S> {
     }
 }
 
+/// ListeningBmca
+///
+/// BMCA role decorator, that encodes listening mode behavior/gating of decisions.
+///
+/// Represents the first diamond in the BMCA decision flow chart,
+/// see IEEE 1588-2019 §9.3.3; Fig. 33.
 pub(crate) struct ListeningBmca<'a, S: ForeignClockRecords> {
     bmca: BestMasterClockAlgorithm<'a>,
     best_foreign: BestForeignRecord<S>,
 }
 
 impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
-    /// Create a new incremental BMCA around the given BestForeignRecord.
     pub fn new(bmca: BestMasterClockAlgorithm<'a>, best_foreign: BestForeignRecord<S>) -> Self {
         Self { bmca, best_foreign }
     }
 
+    /// Convert to a ParentTrackingBmca that tracks the given parent.
     pub(crate) fn into_parent_tracking(
         self,
         parent_port_identity: ParentPortIdentity,
@@ -143,6 +202,7 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
         ParentTrackingBmca::new(self.bmca, self.best_foreign, parent_port_identity)
     }
 
+    /// Convert to a GrandMasterTrackingBmca that tracks the given grandmaster.
     pub(crate) fn into_grandmaster_tracking(
         self,
         grandmaster_id: ClockIdentity,
@@ -150,6 +210,7 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
         GrandMasterTrackingBmca::new(self.bmca, self.best_foreign, grandmaster_id)
     }
 
+    /// Convert to a GrandMasterTrackingBmca that tracks the currently known grandmaster.
     pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<'a, S> {
         let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
@@ -172,11 +233,11 @@ impl<'a, S: ForeignClockRecords> Bmca for ListeningBmca<'a, S> {
         );
     }
 
+    /// Return a decision in listening mode only if there is a qualified foreign dataset, as in
+    /// IEEE 1588-2019 §9.3.3; Fig. 33 - first flow chart diamond.
     fn decision(&self) -> Option<BmcaDecision> {
         let e_rbest = self.best_foreign.dataset();
 
-        // In listening mode, only non-empty foreign datasets are considered for BMCA decisions.
-        // See IEEE 1588-2019 Section 9.3.3, figure 26.
         match e_rbest {
             BestForeignDataset::Qualified { .. } => Some(self.bmca.decision(e_rbest)),
             BestForeignDataset::Empty => None,
@@ -184,7 +245,11 @@ impl<'a, S: ForeignClockRecords> Bmca for ListeningBmca<'a, S> {
     }
 }
 
-pub struct GrandMaster<'a> {
+/// A view of the currently selected GrandMaster.
+///
+/// It's the announce surface that hides whether the current grandmaster is local or foreign.
+/// MasterPort uses this to generate Announce messages.
+pub(crate) struct GrandMaster<'a> {
     ds: &'a ClockDS,
 }
 
@@ -207,6 +272,12 @@ impl<'a> GrandMaster<'a> {
     }
 }
 
+/// BMCA role decorator that suppresses “master” decisions while tracking a grandmaster.
+///
+/// If the underlying BMCA would decide to be master *for the same grandmaster*, this wrapper
+/// returns `None` from `decision()` to avoid repeatedly re-emitting identical transitions.
+/// If the underlying BMCA selects a different grandmaster (or decides slave/passive), the
+/// decision is emitted.
 pub(crate) struct GrandMasterTrackingBmca<'a, S: ForeignClockRecords> {
     bmca: BestMasterClockAlgorithm<'a>,
     best_foreign: BestForeignRecord<S>,
@@ -226,10 +297,12 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
         }
     }
 
+    /// Access the currently tracked grandmaster via the given closure.
     pub(crate) fn using_grandmaster<R>(&self, f: impl FnOnce(GrandMaster<'_>) -> R) -> R {
         self.bmca.using_grandmaster(f)
     }
 
+    /// Convert to a GrandMasterTrackingBmca that tracks the given new grandmaster.
     pub(crate) fn with_grandmaster_id(self, grandmaster_id: ClockIdentity) -> Self {
         Self {
             bmca: self.bmca,
@@ -238,6 +311,7 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
         }
     }
 
+    /// Convert to a ParentTrackingBmca that tracks the given parent.
     pub(crate) fn into_parent_tracking(
         self,
         parent_port_identity: ParentPortIdentity,
@@ -262,6 +336,7 @@ impl<'a, S: ForeignClockRecords> Bmca for GrandMasterTrackingBmca<'a, S> {
         );
     }
 
+    /// Return a decision while suppressing identical master decisions.
     fn decision(&self) -> Option<BmcaDecision> {
         let e_rbest = self.best_foreign.dataset();
         let decision = self.bmca.decision(e_rbest);
@@ -279,6 +354,15 @@ impl<'a, S: ForeignClockRecords> Bmca for GrandMasterTrackingBmca<'a, S> {
     }
 }
 
+/// ParentTrackingBmca
+///
+/// BMCA role decorator that suppresses “slave” decisions while tracking a parent.
+///
+/// If the underlying BMCA would decide to be slave of the same `parent_port_identity`, this
+/// wrapper returns `None` from `decision()` to avoid repeatedly re-emitting identical
+/// transitions. If a different parent is selected, the decision is emitted.
+///
+/// Encodes the transition gating (new_master != old_master) in IEEE 1588-2019 §9.2.5; Fig. 30 & 31.
 pub(crate) struct ParentTrackingBmca<'a, S: ForeignClockRecords> {
     bmca: BestMasterClockAlgorithm<'a>,
     best_foreign: BestForeignRecord<S>,
@@ -298,10 +382,13 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
         }
     }
 
+    /// Return `true` if the given source matches the currently tracked parent. This is useful
+    /// for filtering sync, follow-up & delay response messages.
     pub(crate) fn matches_parent(&self, source: &PortIdentity) -> bool {
         self.parent_port_identity.matches(source)
     }
 
+    /// Convert to a ParentTrackingBmca that tracks the given new parent.
     pub(crate) fn with_parent(self, parent: ParentPortIdentity) -> Self {
         Self {
             bmca: self.bmca,
@@ -310,6 +397,7 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
         }
     }
 
+    /// Convert to a GrandMasterTrackingBmca that tracks the given grandmaster.
     pub(crate) fn into_grandmaster_tracking(
         self,
         grandmaster_id: ClockIdentity,
@@ -317,6 +405,7 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
         GrandMasterTrackingBmca::new(self.bmca, self.best_foreign, grandmaster_id)
     }
 
+    /// Convert to a GrandMasterTrackingBmca that tracks the currently known grandmaster.
     pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<'a, S> {
         let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
@@ -339,6 +428,7 @@ impl<'a, S: ForeignClockRecords> Bmca for ParentTrackingBmca<'a, S> {
         );
     }
 
+    /// Return a decision while suppressing identical decisions with the same parent.
     fn decision(&self) -> Option<BmcaDecision> {
         let e_rbest = self.best_foreign.dataset();
         let decision = self.bmca.decision(e_rbest);
@@ -356,17 +446,25 @@ impl<'a, S: ForeignClockRecords> Bmca for ParentTrackingBmca<'a, S> {
     }
 }
 
+/// Snapshot of best foreign datasets.
+///
+/// This is the dataset-owning counterpart of BestForeignDataset. BestForeignDataset is to present
+/// momentary dataset views to the BMCA, while BestForeignSnapshot is to store and retrieve them
+/// as needed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BestForeignSnapshot {
+    /// A qualified foreign candidate and the identity of the port that announced it.
     Qualified {
         ds: ClockDS,
         source_port_identity: PortIdentity,
         received_on_port: PortNumber,
     },
+    /// No qualified foreign candidate is currently known. The empty dataset in spec language.
     Empty,
 }
 
 impl BestForeignSnapshot {
+    /// Convert to a BestForeignDataset for BMCA consumption.
     fn as_best_foreign_dataset(&self) -> BestForeignDataset<'_> {
         match self {
             BestForeignSnapshot::Qualified {
@@ -383,6 +481,10 @@ impl BestForeignSnapshot {
     }
 }
 
+/// Foreign grandmaster candidates storage surface to present the cross-port shared best
+/// foreign dataset.
+///
+/// Infrastructure implementations own storage strategy, locking, etc.
 pub trait ForeignGrandMasterCandidates {
     fn remember(&self, snapshot: BestForeignSnapshot);
     fn best(&self) -> BestForeignSnapshot;
@@ -408,16 +510,34 @@ impl ForeignGrandMasterCandidates for Cell<BestForeignSnapshot> {
     }
 }
 
+/// Local grandmaster dataset storage surface to present the local clock's data set shared
+/// across ports.
+///
+/// Infrastructure implementations own storage strategy, locking, etc.
 pub trait LocalGrandMasterCandidate {
     fn snapshot(&self) -> ClockDS;
 }
 
+// Simple in-memory implementation of LocalGrandMasterCandidate for single-port use cases.
 impl LocalGrandMasterCandidate for ClockDS {
     fn snapshot(&self) -> ClockDS {
         *self
     }
 }
 
+/// Best Master Clock Algorithm (BMCA).
+///
+/// Implements the core best master clock decision algorithm as per IEEE 1588-2019 §9.3.3, Fig. 33,
+/// excluding the first listening-mode diamond, which is extracted into `ListeningBmca`, to keep the
+/// core logic clean and simple.
+///
+/// Each BMCA instance is identified by the port number it serves, to allow multi-port scenarios.
+/// Clock-level shared storage surfaces for local and foreign candidates are injected via trait
+/// objects which represent the cross-port shared state (`D_0` and `E_best` in spec).
+///
+/// ## Known limitations:
+///  - M3 topology-only comparison is not yet implemented; see TODO in
+///    `e_best_better_by_topology_than_e_rbest`.
 pub(crate) struct BestMasterClockAlgorithm<'a> {
     local_candidate: &'a dyn LocalGrandMasterCandidate,
     foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
@@ -425,6 +545,10 @@ pub(crate) struct BestMasterClockAlgorithm<'a> {
 }
 
 impl<'a> BestMasterClockAlgorithm<'a> {
+    /// Create a new BMCA evaluator for `port_number`.
+    ///
+    /// `local_candidate` supplies the local data set snapshot (`D_0`).
+    /// `foreign_candidates` aggregates best foreign snapshots across ports. (`E_best`)
     pub fn new(
         local_candidate: &'a dyn LocalGrandMasterCandidate,
         foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
@@ -437,6 +561,7 @@ impl<'a> BestMasterClockAlgorithm<'a> {
         }
     }
 
+    /// Access the currently known grandmaster via the given closure.
     pub(crate) fn using_grandmaster<R>(&self, f: impl FnOnce(GrandMaster<'_>) -> R) -> R {
         // TODO: once multi-port is supported, this should return the grandmaster, whether local or
         // foreign. With only single port support atm, it's always local d_0.
@@ -444,6 +569,10 @@ impl<'a> BestMasterClockAlgorithm<'a> {
         f(GrandMaster::new(&d_0))
     }
 
+    /// Evaluate the BMCA decision for the current inputs.
+    ///
+    /// The argument `e_rbest` is the best qualified foreign candidate observed on the current
+    /// port (if any).
     pub(crate) fn decision(&self, e_rbest: BestForeignDataset) -> BmcaDecision {
         self.foreign_candidates.remember(e_rbest.snapshot());
 
@@ -464,7 +593,7 @@ impl<'a> BestMasterClockAlgorithm<'a> {
         if d_0.better_than_foreign(e_rbest) {
             BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M1,
-                StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
+                StepsRemoved::new(0), // IEEE 1588-2019 §3.9.5; Tbl. 30 (stepsRemoved=0 when acting as GM)
                 *d_0.identity(),
             ))
         } else {
@@ -481,13 +610,13 @@ impl<'a> BestMasterClockAlgorithm<'a> {
         if d_0.better_than_foreign(e_best) {
             BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M2,
-                StepsRemoved::new(0), // steps removed to zero as per IEEE 1588-2019 Section 9.3.5, Table 13
+                StepsRemoved::new(0), // IEEE 1588-2019 §3.9.5; Tbl. 30 (stepsRemoved=0 when acting as master)
                 *d_0.identity(),
             ))
         } else if let Some(parent) = e_best.parent_if_received_on_port(self.port_number) {
             BmcaDecision::Slave(parent) // Slave decision point S1
         } else {
-            // Only a qualified e_best can reach this point, see IEEE 1588-2019 Section 9.3.3., figure 26.
+            // Only a qualified e_best can reach this point (IEEE 1588-2019 §9.3.3; Fig. 33).
             debug_assert!(matches!(e_best, BestForeignDataset::Qualified { .. }));
             Self::e_best_better_by_topology_than_e_rbest(e_best, e_rbest)
         }
@@ -498,12 +627,13 @@ impl<'a> BestMasterClockAlgorithm<'a> {
         e_rbest: BestForeignDataset,
     ) -> BmcaDecision {
         // TODO: this comparison shall be topology-only, as the method name suggests.
+        // See IEEE 1588-2019 §9.3.3; Fig. 33, diamond for decision point P2 vs M3.
         if e_best.better_than(&e_rbest) {
             BmcaDecision::Passive // Passive decision point P2
         } else {
             BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M3,
-                StepsRemoved::new(0),
+                StepsRemoved::new(0), // TODO: use currently used steps removed field here
                 // unwrap is safe here, because only a qualified e_best can win against d_0, see above.
                 e_best.grandmaster_id().copied().unwrap(),
             ))
@@ -511,6 +641,9 @@ impl<'a> BestMasterClockAlgorithm<'a> {
     }
 }
 
+/// A BMCA implementation that never produces decisions.
+///
+/// Useful as a placeholder in early experiments, testing or partially wired port states.
 #[allow(dead_code)]
 pub(crate) struct NoopBmca;
 
@@ -529,26 +662,29 @@ impl Bmca for NoopBmca {
     }
 }
 
-/// Master decision point as defined in IEEE 1588-2019 Section 9.3.1 (Figure 26).
+/// Master decision points used by the BMCA as defined in IEEE 1588-2019.
+///
+/// See:
+/// - IEEE 1588-2019 §9.3.1
+/// - IEEE 1588-2019 §9.3.3; Fig. 33
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BmcaMasterDecisionPoint {
-    /// Decision point M1.
     M1,
-    /// Decision point M2.
     M2,
-    /// Decision point M3.
-    #[allow(dead_code)]
     M3,
 }
 
 /// High‑level BMCA outcome for a given port.
+///
+/// This is the “so what?” result that the port state machine can act upon, matching the state
+/// transition annotations in IEEE 1588-2019 §9.2.5; Fig. 30 & 31.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BmcaDecision {
-    /// The port should act as a master.
+pub(crate) enum BmcaDecision {
+    /// The port should act as a master. (BMC_MASTER as to IEEE 1588-2019)
     Master(BmcaMasterDecision),
-    /// The port should act as a slave, following the given parent.
+    /// The port should act as a slave, following the given parent. (BMC_SLAVE as to IEEE 1588-2019)
     Slave(ParentPortIdentity),
-    /// The port should be passive.
+    /// The port should be passive. (BMC_PASSIVE as to IEEE 1588-2019)
     Passive,
 }
 
@@ -563,8 +699,13 @@ impl BmcaDecision {
 }
 
 /// BMCA decision for entering a master/pre‑master state.
+///
+/// The master decision includes:
+/// - the decision point (useful for qualification timing rules),
+/// - the `stepsRemoved` value to apply, and
+/// - the selected grandmaster identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BmcaMasterDecision {
+pub(crate) struct BmcaMasterDecision {
     decision_point: BmcaMasterDecisionPoint,
     steps_removed: StepsRemoved,
     grandmaster_id: ClockIdentity,
@@ -589,8 +730,8 @@ impl BmcaMasterDecision {
         self.grandmaster_id
     }
 
-    /// Apply this master decision to a [`Port`], producing a new
-    /// [`PortState`] in the pre‑master state.
+    /// Apply this master decision to a [`Port`], producing a new [`PortState`] using the given
+    /// `new_port_state` constructor closure that caller provide to choose the new state.
     pub(crate) fn apply<'a, F, P, S>(&self, new_port_state: F) -> PortState<'a, P, S>
     where
         P: Port,
@@ -604,7 +745,10 @@ impl BmcaMasterDecision {
     }
 }
 
-/// Qualification timeout policy as defined in IEEE 1588-2019 Section 9.2.6.10.
+/// Qualification timeout policy.
+///
+/// Policy for determining the master qualification timeout interval to be used when
+/// entering pre-master state as per IEEE 1588-2019 §9.2.6.11.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QualificationTimeoutPolicy {
     master_decision_point: BmcaMasterDecisionPoint,
@@ -622,6 +766,7 @@ impl QualificationTimeoutPolicy {
         }
     }
 
+    /// Return the qualification timeout duration based on the given `log_announce_interval`.
     pub fn duration(&self, log_announce_interval: LogInterval) -> Duration {
         match self.master_decision_point {
             BmcaMasterDecisionPoint::M1 => Duration::from_secs(0),
@@ -634,9 +779,13 @@ impl QualificationTimeoutPolicy {
     }
 }
 
-/// A single foreign clock record tracked by the BMCA. Represents a foreign master clock
-/// candidate discovered via Announce messages along with its source port identity and
-/// qualification state.
+/// A single foreign clock record tracked by BestForeignRecord and stored in
+/// `ForeignClockRecords`. It represents a foreign master clock candidate discovered via
+/// Announce messages along with its source port identity and qualification state.
+///
+/// A record becomes *qualified* once enough Announce messages have been received within the
+/// `ForeignMasterTimeWindow`. Until qualified, the record is retained but not considered for
+/// `best_qualified` selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ForeignClockRecord {
     source_port_identity: PortIdentity,
@@ -694,6 +843,12 @@ impl ForeignClockRecord {
         self.foreign_clock_ds.better_than(&other.foreign_clock_ds)
     }
 
+    /// Update this record from a newly observed record of the same source.
+    ///
+    /// This potentially:
+    /// - advances the qualification window,
+    /// - changes qualification status, and/or
+    /// - updates the underlying data set.
     pub(crate) fn update_from(&mut self, record: &ForeignClockRecord) -> ForeignClockStatus {
         debug_assert!(self.source_port_identity == record.source_port_identity);
 
@@ -780,6 +935,12 @@ pub enum ForeignClockStatus {
     Updated,
 }
 
+/// The `ForeignMasterTimeWindow` derived from a port's announce interval.
+///
+/// The window defines how tightly spaced Announce messages must be to qualify a foreign record and
+/// how long a record can remain silent before being considered stale.
+///
+/// See IEEE 1588-2019 §9.3.2.4.5
 struct ForeignMasterTimeWindow {
     log_announce_interval: LogInterval,
 }
@@ -796,11 +957,19 @@ impl ForeignMasterTimeWindow {
     }
 }
 
-// Simple sliding‑window based qualification state machine for foreign clocks. It implies
-// FOREIGN_MASTER_THRESHOLD = 2 as per IEEE 1588-2019. Support for higher thresholds needs
-// a different implementation, but the surface of SlidingWindowQualification should be quite
-// stable and future proof, so that a different implementation shall not ripple into
-// ForeignClockRecord or into other BMCA code.
+/// Sliding window qualification policy for foreign master records. Encodes the logic to only
+/// consider an observed foreign clock as qualified once enough Announce messages have been received
+/// within a given time window.
+///
+/// This is intentionally a small and self-contained state machine that can later be replaced by a
+/// different strategy (e.g. higher thresholds) without rippling into the rest of the module.
+///
+/// Notes
+/// - Current behavior assumes a threshold of `2` Announce messages within the window. As defined in
+///   IEEE 1588-2019 §9.3.2.4.5 (FOREIGN_MASTER_THRESHOLD = 2).
+///
+/// See
+/// - IEEE 1588-2019 §9.3.2.4.5
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SlidingWindowQualification {
     last: Instant,
@@ -817,12 +986,14 @@ impl SlidingWindowQualification {
         }
     }
 
+    /// Try to qualify this record based on a newly observed announce at `now`.
     fn qualify(&mut self, now: Instant, window: Duration) {
         self.prev = Some(self.last);
         self.last = now;
         self.window = window;
     }
 
+    /// Return `true` if this record is currently qualified.
     fn is_qualified(&self) -> bool {
         let delta = match self.prev {
             Some(prev) => self.last.checked_sub(prev),
@@ -832,13 +1003,14 @@ impl SlidingWindowQualification {
         delta.is_some_and(|delta| delta <= self.window)
     }
 
+    /// Return `true` if this record is stale at the given time.
     fn is_stale(&self, now: Instant) -> bool {
         let delta = now.checked_sub(self.last);
         delta.is_none_or(|delta| delta > self.window)
     }
 }
 
-/// Data set describing a foreign master candidate.
+/// Data set describing a grandmaster candidate.
 ///
 /// This corresponds closely to the fields carried in Announce messages and
 /// used by the BMCA when comparing local and foreign clocks.
@@ -858,7 +1030,6 @@ impl ClockDS {
     const IDENTITY_RANGE: Range<usize> = 6..14;
     const STEPS_REMOVED_OFFSET: Range<usize> = 14..16;
 
-    /// Construct a new foreign clock data set from individual fields.
     pub fn new(
         identity: ClockIdentity,
         priority1: Priority1,
@@ -875,16 +1046,23 @@ impl ClockDS {
         }
     }
 
-    /// Return the clock identity of this foreign clock.
+    /// Return the clock identity of this dataset.
     pub fn identity(&self) -> &ClockIdentity {
         &self.identity
     }
 
+    /// Return `true` if this dataset represents an authoritative clock.
+    ///
+    /// A clock is authoritative when its clock class is 1 to 127 inclusive, as denoted in
+    /// the spec multiple times, but not named explicitly.
+    ///
+    /// See
+    /// - IEEE 1588-2019 §9.3.3; Fig. 33
     pub(crate) fn is_authoritative(&self) -> bool {
         self.quality.is_authoritative()
     }
 
-    /// Parse a `ForeignClockDS` from the binary representation used on the
+    /// Parse a `ClockDS` from the binary representation used on the
     /// wire (16‑byte BMCA comparison tuple).
     pub(crate) fn from_wire(buf: &[u8; 16]) -> Self {
         Self {
@@ -913,7 +1091,7 @@ impl ClockDS {
         }
     }
 
-    /// Return `true` if this foreign clock is strictly better than `other`
+    /// Return `true` if this dataset is strictly better than `other`
     /// according to BMCA ranking rules.
     pub(crate) fn better_than(&self, other: &ClockDS) -> bool {
         if self.identity == other.identity {
@@ -957,7 +1135,7 @@ impl ClockDS {
     }
 }
 
-/// `defaultDS.priority1` as defined in IEEE 1588.
+/// `defaultDS.priority1` as defined in IEEE 1588-2019.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Priority1(u8);
 
@@ -979,7 +1157,7 @@ impl From<u8> for Priority1 {
     }
 }
 
-/// `defaultDS.priority2` as defined in IEEE 1588.
+/// `defaultDS.priority2` as defined in IEEE 1588-2019.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Priority2(u8);
 

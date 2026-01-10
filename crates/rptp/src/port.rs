@@ -1,3 +1,21 @@
+//! Ports and domain ingress boundaries.
+//!
+//! This module defines the core port-facing adapter surfaces of `rptp`:
+//!
+//! - identity and addressing types ([`PortIdentity`], [`DomainNumber`], [`PortNumber`]),
+//! - the domain port boundary ([`Port`]) and its supporting infrastructure traits
+//!   ([`PhysicalPort`], [`TimerHost`], [`Timeout`], [`TxTimestamping`](crate::timestamping::TxTimestamping)),
+//! - the ingress surface that `MessageIngress` dispatches into ([`PortIngress`], [`PortMap`]), and
+//! - a default single-domain wiring helper ([`SingleDomainPortMap`]).
+//!
+//! ## Responsibilities
+//!
+//! - Infrastructure handles sockets, clock backends, and runtime timers.
+//! - The domain core handles message interpretation and state transitions.
+//!
+//! [`DomainPort`] is the bridge: it converts typed domain messages into wire buffers and delegates
+//! actual sending and timestamp feedback to infrastructure collaborators.
+
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
@@ -11,20 +29,40 @@ use crate::time::{Duration, Instant, TimeStamp};
 use crate::timestamping::TxTimestamping;
 use crate::wire::{MessageBuffer, PtpVersion, TransportSpecific};
 
+/// Error returned when a port fails to send a message.
+///
+/// `rptp` keeps send errors intentionally coarse-grained at the domain boundary; infrastructure
+/// can log richer error details on its side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SendError;
 
+/// Result type for port send operations.
 pub type SendResult = core::result::Result<(), SendError>;
 
+/// A schedulable timeout handle.
+///
+/// Timeouts are created by a [`TimerHost`] but must not be scheduled at creation time. Scheduling
+/// happens when the handle is restarted.
 pub trait Timeout {
+    /// Restart this timeout with the given delay.
     fn restart(&self, timeout: Duration);
 }
 
+/// Raw I/O surface for sending PTP datagrams.
+///
+/// Infrastructure implements this trait for a concrete networking backend (UDP multicast sockets,
+/// embedded UDP stack, loopback simulation, …).
 pub trait PhysicalPort {
+    /// Send an event message datagram (Sync/DelayReq/…).
     fn send_event(&self, buf: &[u8]) -> SendResult;
+    /// Send a general message datagram (Announce/FollowUp/DelayResp/…).
     fn send_general(&self, buf: &[u8]) -> SendResult;
 }
 
+/// Factory for domain timeouts.
+///
+/// Ports request timeouts using domain-level [`SystemMessage`] values. Infrastructure owns the
+/// mapping from those messages to concrete timer scheduling.
 pub trait TimerHost {
     type Timeout: Timeout + Drop;
 
@@ -34,24 +72,37 @@ pub trait TimerHost {
     fn timeout(&self, msg: SystemMessage) -> Self::Timeout;
 }
 
+/// Domain-facing port boundary.
+///
+/// Port state objects use this interface to:
+/// - send domain messages,
+/// - create timeouts,
+/// - access the local clock discipline boundary, and
+/// - emit logging events.
 pub trait Port {
     type Clock: SynchronizableClock;
     type Timeout: Timeout;
 
+    /// Access the local clock discipline boundary.
     fn local_clock(&self) -> &LocalClock<Self::Clock>;
+    /// Send a typed event message.
     fn send_event(&self, msg: EventMessage) -> SendResult;
+    /// Send a typed general message.
     fn send_general(&self, msg: GeneralMessage) -> SendResult;
     /// Create a timeout handle for a message.
     ///
     /// Creating a timeout must not schedule it; scheduling happens when the handle is restarted.
     fn timeout(&self, msg: SystemMessage) -> Self::Timeout;
+    /// Emit a port-level log event.
     fn log(&self, event: PortEvent);
 }
 
+/// PTP `portNumber` value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PortNumber(u16);
 
 impl PortNumber {
+    /// Create a port number from its raw value.
     pub const fn new(n: u16) -> Self {
         Self(n)
     }
@@ -77,10 +128,12 @@ impl From<PortNumber> for u16 {
     }
 }
 
+/// PTP `domainNumber` value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DomainNumber(u8);
 
 impl DomainNumber {
+    /// Create a domain number from its raw value.
     pub const fn new(n: u8) -> Self {
         Self(n)
     }
@@ -102,6 +155,11 @@ impl From<DomainNumber> for u8 {
     }
 }
 
+/// PTP `PortIdentity` (clock identity + port number).
+///
+/// This identifies the source port of a message and is carried in the PTP header. It is used for:
+/// - parent tracking (filtering messages to the currently selected parent), and
+/// - logging/debugging.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PortIdentity {
     clock_identity: ClockIdentity,
@@ -152,12 +210,17 @@ impl Display for PortIdentity {
     }
 }
 
+/// Wrapper around a `PortIdentity` representing the currently selected parent.
+///
+/// This is used by parent-tracking BMCA roles and slave/uncalibrated ports to gate message
+/// acceptance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ParentPortIdentity {
     parent_port_identity: PortIdentity,
 }
 
 impl ParentPortIdentity {
+    /// Wrap a `PortIdentity` as the selected parent.
     pub fn new(parent_port_identity: PortIdentity) -> Self {
         Self {
             parent_port_identity,
@@ -175,6 +238,16 @@ impl Display for ParentPortIdentity {
     }
 }
 
+/// Default `Port` implementation used by most `rptp` integrations.
+///
+/// `DomainPort` is literally “a port in a domain”: it knows its domain and port number and is able
+/// to serialize typed domain messages into wire buffers for sending.
+///
+/// It delegates:
+/// - actual byte I/O to a [`PhysicalPort`],
+/// - timeout creation to a [`TimerHost`],
+/// - event egress timestamp feedback to [`TxTimestamping`], and
+/// - logging to a [`PortLog`] implementation.
 pub struct DomainPort<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> {
     local_clock: &'a LocalClock<C>,
     physical_port: &'a dyn PhysicalPort,
@@ -188,6 +261,7 @@ pub struct DomainPort<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestampi
 impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog>
     DomainPort<'a, C, T, TS, L>
 {
+    /// Create a new `DomainPort` wired to the given infrastructure collaborators.
     pub fn new(
         local_clock: &'a LocalClock<C>,
         physical_port: &'a dyn PhysicalPort,
@@ -254,16 +328,25 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> P
     }
 }
 
+/// Mapping from PTP domain numbers to ports.
+///
+/// Infrastructure supplies an implementation of this trait to allow [`MessageIngress`](crate::message::MessageIngress)
+/// to dispatch messages based on their domain number.
 pub trait PortMap {
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress>;
 }
 
+/// A `PortMap` implementation for a single-domain setup.
+///
+/// This is the common wiring for current single-domain / single-port topologies used by
+/// `rptp-daemon` and many tests.
 pub struct SingleDomainPortMap<'a, P: Port, S: ForeignClockRecords> {
     domain_number: DomainNumber,
     port_state: Option<PortState<'a, P, S>>,
 }
 
 impl<'a, P: Port, S: ForeignClockRecords> SingleDomainPortMap<'a, P, S> {
+    /// Create a map for `domain_number` that dispatches into the given port state machine.
     pub fn new(domain_number: DomainNumber, port_state: PortState<'a, P, S>) -> Self {
         Self {
             domain_number,
@@ -282,22 +365,35 @@ impl<'a, P: Port, S: ForeignClockRecords> PortMap for SingleDomainPortMap<'a, P,
     }
 }
 
+/// Ingress surface for delivering messages into a port state machine.
+///
+/// `MessageIngress` calls these methods after parsing network datagrams into typed message values.
+/// `SystemMessage` values are delivered by infrastructure (timeouts, timestamp feedback, init).
 pub trait PortIngress {
+    /// Deliver an event message along with the receiver-observed ingress timestamp.
     fn process_event_message(
         &mut self,
         source_port_identity: PortIdentity,
         msg: EventMessage,
         timestamp: TimeStamp,
     );
+    /// Deliver a general message along with a monotonic local instant for time-window logic.
     fn process_general_message(
         &mut self,
         source_port_identity: PortIdentity,
         msg: GeneralMessage,
         now: Instant,
     );
+    /// Deliver a system/internal message (timeouts, timestamps, init).
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
+/// Default ingress implementation that connects parsing and the port state machine.
+///
+/// The state machine is held as an `Option<PortState<...>>` so that transitions can move ownership
+/// of the current state value (take/apply/replace pattern). The `Option` itself is never expected
+/// to remain `None` in normal operation; the representation exists to express transitions as
+/// by-value moves without requiring interior mutability.
 impl<'a, P: Port, S: ForeignClockRecords> PortIngress for Option<PortState<'a, P, S>> {
     fn process_event_message(
         &mut self,
@@ -334,16 +430,22 @@ impl<'a, P: Port, S: ForeignClockRecords> PortIngress for Option<PortState<'a, P
     }
 }
 
+/// Convenience wrapper for the Announce receipt timeout.
+///
+/// Port roles restart this timeout on each received Announce. When the timeout fires,
+/// infrastructure delivers `SystemMessage::AnnounceReceiptTimeout` into the state machine.
 pub(crate) struct AnnounceReceiptTimeout<T: Timeout> {
     timeout: T,
     interval: Duration,
 }
 
 impl<T: Timeout> AnnounceReceiptTimeout<T> {
+    /// Create a new announce receipt timeout wrapper.
     pub fn new(timeout: T, interval: Duration) -> Self {
         Self { timeout, interval }
     }
 
+    /// Restart the underlying timeout using the configured interval.
     pub fn restart(&self) {
         self.timeout.restart(self.interval);
     }

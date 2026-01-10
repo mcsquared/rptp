@@ -1,3 +1,29 @@
+//! PTP message ingress, parsing, and domain message representations.
+//!
+//! This module is the domain boundary between *raw bytes on the wire* and *typed domain messages*
+//! dispatched into ports.
+//!
+//! ## Ingress flow
+//!
+//! [`MessageIngress`] performs minimal validation (PTPv2 header checks, length checks) and then:
+//! - parses the header to determine the PTP domain number and source port identity, and
+//! - parses the payload into an [`EventMessage`] or [`GeneralMessage`],
+//! - dispatches the result into a [`PortMap`] (infrastructure-provided domain → port mapping).
+//!
+//! ## Event vs. general messages and time inputs
+//!
+//! PTP distinguishes between:
+//! - **event messages** (e.g. Sync, DelayReq) that are timestamped at ingress/egress, and
+//! - **general messages** (e.g. Announce, FollowUp, DelayResp) that are not.
+//!
+//! `rptp` mirrors that separation in its ingress API:
+//! - [`MessageIngress::receive_event`] requires an ingress [`TimeStamp`] provided by infrastructure.
+//! - [`MessageIngress::receive_general`] requires a local monotonic [`Instant`] used for
+//!   qualification windows (e.g. Announce-based BMCA tracking).
+//!
+//! This module currently covers a subset of PTPv2 message types used by the core model; unsupported
+//! message types are reported as [`ProtocolError`].
+
 use crate::{
     bmca::{Bmca, ClockDS},
     clock::TimeScale,
@@ -11,26 +37,50 @@ use crate::{
     },
 };
 
+/// Entry point for ingesting received PTP datagrams into the domain.
+///
+/// Infrastructure owns socket I/O and timestamping. It delivers received datagram bytes to this
+/// type, which parses them into domain messages and dispatches them into the appropriate port via
+/// a [`PortMap`].
+///
+/// Use [`receive_event`](Self::receive_event) for event messages (Sync/DelayReq/…) and
+/// [`receive_general`](Self::receive_general) for general messages (Announce/FollowUp/DelayResp/…).
 pub struct MessageIngress<'a, PM: PortMap> {
     ports: &'a mut PM,
 }
 
 impl<'a, PM: PortMap> MessageIngress<'a, PM> {
+    /// Create a new ingress wrapper that dispatches to `ports`.
     pub fn new(ports: &'a mut PM) -> Self {
         Self { ports }
     }
 
+    /// Parse and dispatch a received event message.
+    ///
+    /// `timestamp` is the ingress PTP timestamp provided by infrastructure for this datagram.
     pub fn receive_event(&mut self, buf: &[u8], timestamp: TimeStamp) -> Result<()> {
         let length_checked = UnvalidatedMessage::new(buf).length_checked_v2()?;
         DomainMessage::new(length_checked).dispatch_event(self.ports, timestamp)
     }
 
+    /// Parse and dispatch a received general message.
+    ///
+    /// `now` is a local monotonic time instant used by the domain for time-window logic (e.g.
+    /// foreign master qualification).
     pub fn receive_general(&mut self, buf: &[u8], now: Instant) -> Result<()> {
         let length_checked = UnvalidatedMessage::new(buf).length_checked_v2()?;
         DomainMessage::new(length_checked).dispatch_general(self.ports, now)
     }
 }
 
+/// A message wrapper that carries domain context for dispatch.
+///
+/// This type is deliberately named *DomainMessage* because it literally represents
+/// “a message in a domain”: it is a parsed PTP message header plus the ability to dispatch the
+/// message to the correct in-domain port via a [`PortMap`].
+///
+/// The mapping from domain number → port is provided by infrastructure; the domain core only
+/// depends on the [`PortMap`] interface.
 struct DomainMessage<'a> {
     header: MessageHeader<'a>,
 }
@@ -75,6 +125,10 @@ impl<'a> DomainMessage<'a> {
     }
 }
 
+/// A parsed event message (timestamped message class).
+///
+/// This represents the subset of PTPv2 event messages that the core currently processes.
+/// Unknown/unsupported message types are rejected during parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventMessage {
     DelayReq(DelayRequestMessage),
@@ -82,8 +136,10 @@ pub enum EventMessage {
     TwoStepSync(TwoStepSyncMessage),
 }
 
-impl EventMessage {}
-
+/// A parsed general message (non-timestamped message class).
+///
+/// This represents the subset of PTPv2 general messages that the core currently processes.
+/// Unknown/unsupported message types are rejected during parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneralMessage {
     Announce(AnnounceMessage),
@@ -91,8 +147,12 @@ pub enum GeneralMessage {
     FollowUp(FollowUpMessage),
 }
 
-impl GeneralMessage {}
-
+/// A system/internal message delivered to ports by infrastructure.
+///
+/// These messages are not received from the network. They represent:
+/// - scheduled timeouts (Announce send/receipt, DelayReq cycle, Sync cycle, qualification timeout),
+/// - initialization completion (`Initialized`), and
+/// - timestamp feedback (`Timestamp`) for previously sent event messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemMessage {
     AnnounceSendTimeout,
@@ -190,6 +250,10 @@ impl GeneralMessage {
     }
 }
 
+/// Sequence identifier used to match related messages (e.g. Sync ↔ FollowUp, DelayReq ↔ DelayResp).
+///
+/// PTP sequence ids are 16-bit values that wrap on overflow. The domain uses this wrapper to keep
+/// that behaviour explicit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SequenceId {
     id: u16,
@@ -244,6 +308,10 @@ impl TryFrom<&[u8]> for SequenceId {
     }
 }
 
+/// An Announce message, as used for BMCA input.
+///
+/// `rptp` models Announce primarily as a carrier of the foreign clock dataset (`ClockDS`) and the
+/// sender's announced interval. Port states feed Announce messages into BMCA via [`feed_bmca`](Self::feed_bmca).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnnounceMessage {
     sequence_id: SequenceId,
@@ -303,6 +371,18 @@ impl AnnounceMessage {
     }
 }
 
+/// A one-step Sync message.
+///
+/// In one-step mode, the origin timestamp is carried directly in the Sync payload.
+///
+/// ## Behaviour and collaboration
+///
+/// This type is not treated as a passive DTO. It provides behaviour that higher-level domain
+/// objects collaborate with:
+/// - [`master_slave_offset`](Self::master_slave_offset) derives the master→slave offset estimate
+///   when paired with an ingress timestamp provided by the receiver.
+/// - [`EndToEndDelayMechanism`](crate::e2e::EndToEndDelayMechanism) uses that estimate as one half
+///   of a servo sample.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OneStepSyncMessage {
     sequence_id: SequenceId,
@@ -323,6 +403,11 @@ impl OneStepSyncMessage {
         }
     }
 
+    /// Derive the master→slave offset estimate for this Sync.
+    ///
+    /// `ingress_timestamp` is the event ingress timestamp observed by the receiver for this Sync.
+    /// The result is used as the Sync-side contribution to a servo sample (see
+    /// `crate::e2e::EndToEndDelayMechanism`).
     pub(crate) fn master_slave_offset(&self, ingress_timestamp: TimeStamp) -> TimeInterval {
         ingress_timestamp - self.origin_timestamp
     }
@@ -342,6 +427,19 @@ impl OneStepSyncMessage {
     }
 }
 
+/// A two-step Sync message.
+///
+/// In two-step mode, the Sync message is followed by a matching [`FollowUpMessage`] carrying the
+/// precise origin timestamp. The two are matched by [`SequenceId`].
+///
+/// ## Behaviour and collaboration
+///
+/// This message is one half of a two-step exchange:
+/// - `TwoStepSyncMessage` is the event message (timestamped at ingress by the receiver).
+/// - [`FollowUpMessage`] is the general message that carries the origin timestamp.
+///
+/// The two are combined to derive the master→slave offset estimate via
+/// [`FollowUpMessage::master_slave_offset`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TwoStepSyncMessage {
     sequence_id: SequenceId,
@@ -356,6 +454,11 @@ impl TwoStepSyncMessage {
         }
     }
 
+    /// Create the matching FollowUp message for this Sync.
+    ///
+    /// On the master side, infrastructure typically provides the precise origin timestamp (often
+    /// derived from the Sync egress timestamp). The returned FollowUp carries the same
+    /// [`SequenceId`] so that receivers can match it to the corresponding two-step Sync.
     pub(crate) fn follow_up(self, precise_origin_timestamp: TimeStamp) -> FollowUpMessage {
         FollowUpMessage::new(
             self.sequence_id,
@@ -376,6 +479,15 @@ impl TwoStepSyncMessage {
     }
 }
 
+/// A FollowUp message carrying the precise origin timestamp for a two-step Sync.
+///
+/// ## Behaviour and collaboration
+///
+/// This type is designed for collaboration with [`TwoStepSyncMessage`]:
+/// - [`master_slave_offset`](Self::master_slave_offset) matches by [`SequenceId`] and derives the
+///   master→slave offset estimate when paired with the receiver-observed Sync ingress timestamp.
+///
+/// `crate::e2e::EndToEndDelayMechanism` uses that offset estimate as one half of a servo sample.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FollowUpMessage {
     sequence_id: SequenceId,
@@ -396,6 +508,10 @@ impl FollowUpMessage {
         }
     }
 
+    /// Derive the master→slave offset estimate for a two-step Sync/FollowUp pair.
+    ///
+    /// Returns `None` if `sync` and `self` do not belong to the same two-step exchange (sequence id
+    /// mismatch).
     pub(crate) fn master_slave_offset(
         &self,
         sync: TwoStepSyncMessage,
@@ -423,6 +539,19 @@ impl FollowUpMessage {
     }
 }
 
+/// A DelayReq event message.
+///
+/// The slave sends DelayReq and later records its egress timestamp (provided by infrastructure) to
+/// compute the slave→master offset when a matching [`DelayResponseMessage`] arrives.
+///
+/// ## Behaviour and collaboration
+///
+/// This type participates in the delay measurement exchange:
+/// - On the master side, [`response`](Self::response) generates the corresponding
+///   [`DelayResponseMessage`].
+/// - On the slave side, the egress timestamp of this message (reported via
+///   [`SystemMessage::Timestamp`]) is paired with a matching [`DelayResponseMessage`] via
+///   [`DelayResponseMessage::slave_master_offset`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayRequestMessage {
     sequence_id: SequenceId,
@@ -433,6 +562,11 @@ impl DelayRequestMessage {
         Self { sequence_id }
     }
 
+    /// Generate the corresponding DelayResp for this DelayReq.
+    ///
+    /// This models the master-side collaboration: given the master's receive timestamp for the
+    /// DelayReq (`receive_timestamp`) and the requester's identity, produce the matching response
+    /// message carrying the same [`SequenceId`].
     pub(crate) fn response(
         self,
         log_message_interval: LogMessageInterval,
@@ -459,6 +593,17 @@ impl DelayRequestMessage {
     }
 }
 
+/// A DelayResp general message.
+///
+/// Carries the master's receive timestamp for a previously sent DelayReq and the identity of the
+/// requesting port.
+///
+/// ## Behaviour and collaboration
+///
+/// This type is designed to collaborate with [`DelayRequestMessage`] and the receiver-provided
+/// DelayReq egress timestamp:
+/// - [`slave_master_offset`](Self::slave_master_offset) matches by [`SequenceId`] and derives the
+///   slave→master offset estimate for the delay exchange.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelayResponseMessage {
     sequence_id: SequenceId,
@@ -482,6 +627,13 @@ impl DelayResponseMessage {
         }
     }
 
+    /// Derive the slave→master offset estimate for a DelayReq/DelayResp pair.
+    ///
+    /// Returns `None` if `delay_req` and `self` do not belong to the same exchange (sequence id
+    /// mismatch).
+    ///
+    /// `delay_req_egress_timestamp` is the event egress timestamp for the DelayReq as observed by
+    /// the sender (slave) and reported back by infrastructure.
     pub(crate) fn slave_master_offset(
         &self,
         delay_req: DelayRequestMessage,
@@ -510,6 +662,10 @@ impl DelayResponseMessage {
     }
 }
 
+/// Timestamp feedback for a previously sent event message.
+///
+/// Infrastructure emits this as a [`SystemMessage::Timestamp`] once an egress timestamp is known
+/// for an event transmission (two-step Sync, DelayReq).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimestampMessage {
     pub event_msg: EventMessage,
@@ -517,6 +673,7 @@ pub struct TimestampMessage {
 }
 
 impl TimestampMessage {
+    /// Create a new timestamp feedback message.
     pub fn new(event_msg: EventMessage, egress_timestamp: TimeStamp) -> Self {
         Self {
             event_msg,

@@ -1,22 +1,56 @@
+//! Clock servo (discipline controller).
+//!
+//! A servo turns timestamp-derived measurements (offset samples) into actions applied to a
+//! [`SynchronizableClock`]. In `rptp`, a servo is fed with [`ServoSample`] values produced by the
+//! message processing pipeline (see [`crate::e2e`]) and returns a coarse [`ServoState`] that is
+//! used by the port state machine.
+//!
+//! The `SynchronizableClock` boundary supports two kinds of actuation:
+//! - **step**: set the clock to a specific [`TimeStamp`], and
+//! - **rate adjust**: apply a multiplicative rate factor (see [`SynchronizableClock::adjust`]).
+//!
+//! This module currently provides two strategies:
+//! - [`SteppingServo`]: always steps to the latest master time estimate (useful for tests and
+//!   bring-up).
+//! - [`PiServo`]: a more realistic discipline controller combining a configurable step policy, a
+//!   simple drift calibration phase, and a PI loop while locked.
+
 use core::cell::Cell;
 
 use crate::clock::SynchronizableClock;
 use crate::log::ClockMetrics;
 use crate::time::{TimeInterval, TimeStamp};
 
+/// Coarse lock state reported by a servo.
+///
+/// `rptp` uses this as an input to state decisions (e.g. transition from `UNCALIBRATED` to `SLAVE`
+/// once the servo is locked).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServoState {
+    /// The servo has (recently) performed a step or has not started calibration yet.
     Unlocked,
+    /// The servo is collecting baseline information (e.g. drift) before considering itself locked.
     Calibrating,
+    /// The servo considers itself locked and is applying continuous rate adjustments.
     Locked,
 }
 
+/// Servo strategy selection.
+///
+/// This is stored inside [`crate::clock::LocalClock`] and called by port roles to discipline the
+/// local clock.
 pub enum Servo {
+    /// A servo that always steps to the estimated master time.
     Stepping(SteppingServo),
+    /// A PI-based servo with optional stepping policy.
     PI(PiServo),
 }
 
 impl Servo {
+    /// Feed a new measurement sample into the servo and apply any required clock action.
+    ///
+    /// The returned [`ServoState`] describes the servo's current coarse lock state after handling
+    /// the sample.
     pub(crate) fn feed<C: SynchronizableClock>(
         &self,
         clock: &C,
@@ -29,15 +63,22 @@ impl Servo {
     }
 }
 
+/// A servo that always performs a discontinuous clock step.
+///
+/// This strategy is intentionally simple: every sample causes a step to the master time estimate
+/// (`ingress - offset`). It is useful for tests, simulations, and early integration, but typically
+/// not suitable for production systems where frequent steps are undesirable.
 pub struct SteppingServo {
     metrics: &'static dyn ClockMetrics,
 }
 
 impl SteppingServo {
+    /// Create a stepping servo that reports measurements to `metrics`.
     pub fn new(metrics: &'static dyn ClockMetrics) -> Self {
         Self { metrics }
     }
 
+    /// Apply the sample by stepping to the master time estimate and report metrics.
     pub(crate) fn feed<C: SynchronizableClock>(
         &self,
         clock: &C,
@@ -54,6 +95,20 @@ impl SteppingServo {
     }
 }
 
+/// A PI-based servo with optional stepping and a drift-calibration phase.
+///
+/// Processing order for each sample:
+/// 1. Check [`StepPolicy`]. If it requests a step, step the clock, reset internal state, and
+///    return [`ServoState::Unlocked`].
+/// 2. If not stepping:
+///    - while [`ServoState::Unlocked`] / [`ServoState::Calibrating`], attempt a drift estimate via
+///      [`ServoDriftEstimate`] and apply a one-shot rate adjustment once enough information is
+///      available, transitioning to [`ServoState::Locked`];
+///    - while [`ServoState::Locked`], feed the offset error into the [`PiLoop`] and continuously
+///      adjust the clock rate.
+///
+/// The internal state uses `Cell` so the servo can be shared by reference (`&self`) through
+/// [`crate::clock::LocalClock`].
 pub struct PiServo {
     step_policy: StepPolicy,
     drift_estimate: ServoDriftEstimate,
@@ -63,6 +118,13 @@ pub struct PiServo {
 }
 
 impl PiServo {
+    /// Create a new PI servo.
+    ///
+    /// - `step_policy` controls when the servo performs discontinuous steps.
+    /// - `drift_estimate` defines how drift is estimated during calibration and how it is clamped.
+    /// - `pi_loop` contains the PI gains used once locked.
+    /// - `initial_state` sets the starting [`ServoState`] (typically `Unlocked`).
+    /// - `metrics` receives offset measurements as samples are processed.
     pub fn new(
         step_policy: StepPolicy,
         drift_estimate: ServoDriftEstimate,
@@ -123,6 +185,15 @@ impl PiServo {
     }
 }
 
+/// A proportional-integral controller for clock rate adjustments.
+///
+/// The controller is fed with an offset error in seconds and produces a multiplicative rate
+/// correction:
+///
+/// `rate = 1.0 - kp * error - ki * integral(error)`
+///
+/// With this sign convention, a positive offset (local clock ahead of master) yields a rate below
+/// `1.0` (slow down).
 pub struct PiLoop {
     kp: f64,
     ki: f64,
@@ -130,6 +201,7 @@ pub struct PiLoop {
 }
 
 impl PiLoop {
+    /// Create a PI loop with proportional gain `kp` and integral gain `ki`.
     pub fn new(kp: f64, ki: f64) -> Self {
         Self {
             kp,
@@ -151,18 +223,26 @@ impl PiLoop {
     }
 }
 
+/// Relative frequency error (dimensionless drift).
+///
+/// A value of `0.0` represents nominal frequency. Positive values represent a clock that runs
+/// faster than nominal, negative values slower than nominal.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Drift {
     drift: f64,
 }
 
 impl Drift {
+    /// Construct a drift value from parts-per-billion.
+    ///
+    /// `ppb=1` corresponds to a relative frequency error of `1e-9`.
     pub fn from_ppb(pbb: i32) -> Self {
         Self {
             drift: pbb as f64 * 1e-9,
         }
     }
 
+    /// Construct a drift value from a raw dimensionless ratio.
     pub fn new(drift: f64) -> Self {
         Self { drift }
     }
@@ -178,6 +258,15 @@ impl Drift {
     }
 }
 
+/// Drift estimator used during servo calibration.
+///
+/// The estimator observes two offset samples spaced by at least `min_delta` (based on their
+/// ingress timestamps) and estimates drift as:
+///
+/// `drift ≈ Δoffset / Δingress`
+///
+/// The resulting drift is clamped to the `[min, max]` range and then converted to a multiplicative
+/// rate factor via [`Drift::as_rate`].
 pub struct ServoDriftEstimate {
     sample: Cell<Option<ServoSample>>,
     min: Drift,
@@ -186,6 +275,7 @@ pub struct ServoDriftEstimate {
 }
 
 impl ServoDriftEstimate {
+    /// Create a drift estimator with clamping and minimum sample spacing.
     pub fn new(min: Drift, max: Drift, min_delta: TimeInterval) -> Self {
         Self {
             sample: Cell::new(None),
@@ -226,16 +316,23 @@ pub(crate) enum ServoStepDecision {
     NoStep,
 }
 
+/// Optional threshold used by [`StepPolicy`] to decide whether to step the clock.
+///
+/// When enabled, the threshold compares the absolute offset magnitude against a [`TimeInterval`].
 pub enum ServoThreshold {
+    /// Threshold comparison is disabled.
     Disabled,
+    /// Threshold comparison is enabled with the given limit.
     Enabled(TimeInterval),
 }
 
 impl ServoThreshold {
+    /// Enable a step threshold.
     pub fn new(threshold: TimeInterval) -> Self {
         ServoThreshold::Enabled(threshold)
     }
 
+    /// Disable stepping based on this threshold.
     pub fn disabled() -> Self {
         ServoThreshold::Disabled
     }
@@ -248,12 +345,21 @@ impl ServoThreshold {
     }
 }
 
+/// Stepping decision policy for [`PiServo`].
+///
+/// The policy supports two thresholds:
+/// - an `initial_threshold` that is evaluated at most once (the first sample only), and
+/// - a steady-state `threshold` that is evaluated for every subsequent sample.
+///
+/// Both thresholds compare absolute offset magnitude; if exceeded, the servo steps to the master
+/// time estimate derived from the sample.
 pub struct StepPolicy {
     initial_threshold: Cell<Option<ServoThreshold>>,
     threshold: ServoThreshold,
 }
 
 impl StepPolicy {
+    /// Create a stepping policy with an initial and a steady-state threshold.
     pub fn new(initial: ServoThreshold, threshold: ServoThreshold) -> Self {
         Self {
             initial_threshold: Cell::new(Some(initial)),
@@ -289,6 +395,11 @@ enum ServoSampleOrdering {
     OutOfOrder,
 }
 
+/// A timestamped offset measurement used as input to the servo.
+///
+/// - `ingress` is the local timestamp at which the relevant Sync message was received.
+/// - `offset` is the estimated `offsetFromMaster` at that time (positive means the local clock is
+///   ahead of the master).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ServoSample {
     ingress: TimeStamp,
@@ -296,6 +407,7 @@ pub(crate) struct ServoSample {
 }
 
 impl ServoSample {
+    /// Construct a new servo sample from an ingress timestamp and an offset estimate.
     pub(crate) fn new(ingress: TimeStamp, offset: TimeInterval) -> Self {
         Self { ingress, offset }
     }

@@ -1,3 +1,23 @@
+//! End-to-end delay mechanism and message exchanges.
+//!
+//! This module implements the core “clock discipline input” pipeline for the end-to-end (E2E)
+//! delay mechanism:
+//!
+//! - observe message exchanges (Sync + FollowUp, DelayReq + DelayResp),
+//! - derive an offset estimate, and
+//! - expose it as a [`ServoSample`] that port roles can feed into [`crate::clock::LocalClock`].
+//!
+//! ## Exchange model
+//!
+//! - [`SyncExchange`] tracks either:
+//!   - a one-step Sync (origin timestamp carried in the Sync message), or
+//!   - a two-step Sync + FollowUp pair (origin timestamp carried in FollowUp).
+//! - [`DelayExchange`] tracks DelayReq + DelayResp pairs.
+//! - [`MessageWindow`] is a minimal “latest matching pair” helper used by both exchanges to deal
+//!   with out-of-order arrivals. It is intentionally simple at the moment and subject to future
+//!   extension for more complex and robust strategies (loss/reordering strategies, multiple
+//!   outstanding requests, etc.).
+
 use crate::message::{
     DelayRequestMessage, DelayResponseMessage, FollowUpMessage, OneStepSyncMessage, SequenceId,
     TwoStepSyncMessage,
@@ -6,6 +26,21 @@ use crate::port::Timeout;
 use crate::servo::ServoSample;
 use crate::time::{LogInterval, TimeInterval, TimeStamp};
 
+/// End-to-end (E2E) delay mechanism state for producing [`ServoSample`]s.
+///
+/// This object is owned by port roles (e.g. slave/uncalibrated) and fed by message reception:
+///
+/// - `record_*` methods retain the latest relevant message fragments (and timestamps).
+/// - [`sample`](Self::sample) attempts to combine the currently known fragments into an offset
+///   estimate.
+/// - [`delay_request`](Self::delay_request) produces the next DelayReq message to send and advances
+///   its scheduling/sequence state.
+///
+/// ### One-step vs two-step Sync precedence
+///
+/// - Recording a **two-step** Sync invalidates any previously recorded **one-step** Sync.
+/// - Recording a **one-step** Sync takes precedence over any currently stored two-step fragments
+///   until a two-step Sync is recorded again.
 pub struct EndToEndDelayMechanism<T: Timeout> {
     delay_cycle: DelayCycle<T>,
     sync_exchange: SyncExchange,
@@ -14,6 +49,7 @@ pub struct EndToEndDelayMechanism<T: Timeout> {
 }
 
 impl<T: Timeout> EndToEndDelayMechanism<T> {
+    /// Create a new E2E delay mechanism with the given DelayReq scheduling cycle.
     pub fn new(delay_cycle: DelayCycle<T>) -> Self {
         Self {
             delay_cycle,
@@ -23,34 +59,47 @@ impl<T: Timeout> EndToEndDelayMechanism<T> {
         }
     }
 
+    /// Produce the next DelayReq message to send and advance the delay-request cycle.
     pub(crate) fn delay_request(&mut self) -> DelayRequestMessage {
         let delay_request = self.delay_cycle.delay_request();
         self.delay_cycle.next();
         delay_request
     }
 
+    /// Record a received one-step Sync and its ingress timestamp.
     pub(crate) fn record_one_step_sync(&mut self, sync: OneStepSyncMessage, timestamp: TimeStamp) {
         self.sync_exchange.record_one_step_sync(sync, timestamp);
         self.sync_ingress_timestamp.replace(timestamp);
     }
 
+    /// Record a received two-step Sync and its ingress timestamp.
     pub(crate) fn record_two_step_sync(&mut self, sync: TwoStepSyncMessage, timestamp: TimeStamp) {
         self.sync_exchange.record_two_step_sync(sync, timestamp);
         self.sync_ingress_timestamp.replace(timestamp);
     }
 
+    /// Record a received FollowUp message.
     pub(crate) fn record_follow_up(&mut self, follow_up: FollowUpMessage) {
         self.sync_exchange.record_follow_up(follow_up);
     }
 
+    /// Record a sent DelayReq and its egress timestamp.
     pub(crate) fn record_delay_request(&mut self, req: DelayRequestMessage, timestamp: TimeStamp) {
         self.delay_exchange.record_delay_request(req, timestamp);
     }
 
+    /// Record a received DelayResp message.
     pub(crate) fn record_delay_response(&mut self, resp: DelayResponseMessage) {
         self.delay_exchange.record_delay_response(resp);
     }
 
+    /// Attempt to produce a [`ServoSample`] from the currently known message fragments.
+    ///
+    /// This returns `None` until both:
+    /// - the Sync side yields a master→slave offset estimate, and
+    /// - the Delay side yields a slave→master offset estimate.
+    ///
+    /// The resulting sample uses the latest Sync ingress timestamp as its “sample time”.
     pub(crate) fn sample(&self) -> Option<ServoSample> {
         let ms_offset = self.sync_exchange.master_slave_offset()?;
         let sm_offset = self.delay_exchange.slave_master_offset()?;
@@ -64,6 +113,10 @@ impl<T: Timeout> EndToEndDelayMechanism<T> {
     }
 }
 
+/// Tracks the most recent Sync observation(s) and yields a master→slave offset estimate.
+///
+/// - One-step Sync carries the origin timestamp directly.
+/// - Two-step Sync requires a matching FollowUp for the same sequence id.
 struct SyncExchange {
     one_step_sync: Option<(OneStepSyncMessage, TimeStamp)>,
     two_step_sync_window: MessageWindow<(TwoStepSyncMessage, TimeStamp)>,
@@ -92,6 +145,7 @@ impl SyncExchange {
         self.follow_up_window.record(follow_up);
     }
 
+    /// Yield the current master→slave offset estimate, if available.
     fn master_slave_offset(&self) -> Option<TimeInterval> {
         if let Some((sync, ts)) = &self.one_step_sync {
             return Some(sync.master_slave_offset(*ts));
@@ -104,6 +158,7 @@ impl SyncExchange {
     }
 }
 
+/// Tracks the most recent DelayReq/DelayResp observations and yields a slave→master offset estimate.
 struct DelayExchange {
     delay_request_window: MessageWindow<(DelayRequestMessage, TimeStamp)>,
     delay_response_window: MessageWindow<DelayResponseMessage>,
@@ -125,6 +180,7 @@ impl DelayExchange {
         self.delay_response_window.record(resp);
     }
 
+    /// Yield the current slave→master offset estimate, if available.
     fn slave_master_offset(&self) -> Option<TimeInterval> {
         self.delay_response_window
             .combine_latest(&self.delay_request_window, |resp, &(req, ts)| {
@@ -133,6 +189,10 @@ impl DelayExchange {
     }
 }
 
+/// DelayReq production and scheduling state.
+///
+/// This owns the DelayReq sequence counter and a timeout handle. Calling [`next`](Self::next)
+/// schedules the next request and advances the sequence id.
 #[derive(Debug, PartialEq, Eq)]
 pub struct DelayCycle<T: Timeout> {
     sequence_id: SequenceId,
@@ -141,6 +201,11 @@ pub struct DelayCycle<T: Timeout> {
 }
 
 impl<T: Timeout> DelayCycle<T> {
+    /// Create a new delay-request cycle.
+    ///
+    /// - `start` is the first DelayReq sequence id to use.
+    /// - `delay_request_timeout` is restarted on each [`next`](Self::next).
+    /// - `log_interval` controls the request spacing.
     pub fn new(start: SequenceId, delay_request_timeout: T, log_interval: LogInterval) -> Self {
         Self {
             sequence_id: start,
@@ -149,30 +214,42 @@ impl<T: Timeout> DelayCycle<T> {
         }
     }
 
+    /// Schedule the next DelayReq and advance the sequence id.
     pub(crate) fn next(&mut self) {
         self.timeout.restart(self.log_interval.duration());
         self.sequence_id = self.sequence_id.next();
     }
 
+    /// Build a DelayReq message for the current sequence id.
     pub(crate) fn delay_request(&self) -> DelayRequestMessage {
         DelayRequestMessage::new(self.sequence_id)
     }
 }
 
+/// “Latest message wins” cache with an optional combiner.
+///
+/// This is a deliberately tiny helper to model the behaviour needed by the message exchanges: keep
+/// the latest message of a kind and attempt to combine it with the latest message of another kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MessageWindow<M> {
     current: Option<M>,
 }
 
 impl<M> MessageWindow<M> {
+    /// Create an empty window.
     fn new() -> Self {
         Self { current: None }
     }
 
+    /// Record a new message, replacing any previously stored value.
     fn record(&mut self, msg: M) {
         self.current.replace(msg);
     }
 
+    /// Combine the latest message in `self` with the latest message in `other`.
+    ///
+    /// The `combine` closure can decide whether the pair “matches” (e.g. by comparing sequence ids)
+    /// by returning `Some(T)` for matching pairs and `None` otherwise.
     fn combine_latest<N, F, T>(&self, other: &MessageWindow<N>, combine: F) -> Option<T>
     where
         F: Fn(&M, &N) -> Option<T>,

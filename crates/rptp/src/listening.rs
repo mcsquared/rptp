@@ -1,3 +1,25 @@
+//! Port state: Listening.
+//!
+//! This module implements the `LISTENING` state of the IEEE 1588 port state machine
+//! (IEEE 1588-2019 §9.2.5).
+//!
+//! In `rptp`, a port in `Listening`:
+//! - receives and evaluates Announce messages,
+//! - maintains the Announce receipt timeout, and
+//! - drives BMCA via [`ListeningBmca`] until it can recommend a transition.
+//!
+//! ## Transitions
+//!
+//! - On [`StateDecision::RecommendedSlave`], transition to `UNCALIBRATED` with parent tracking
+//!   enabled (see [`ListeningPort::recommended_slave`]).
+//! - On [`StateDecision::RecommendedMaster`], transition to `PRE_MASTER` with grandmaster tracking
+//!   enabled and a qualification timeout (see [`ListeningPort::recommended_master`]).
+//! - On Announce receipt timeout expiry, transition to `MASTER` (see
+//!   [`ListeningPort::announce_receipt_timeout_expired`]).
+//!
+//! Announce reception is the only message-processing responsibility of this state; event message
+//! processing (Sync/DelayReq/…) is handled in other states.
+
 use crate::bmca::{Bmca, BmcaMasterDecision, ForeignClockRecords, ListeningBmca};
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
@@ -6,6 +28,15 @@ use crate::portstate::{PortState, StateDecision};
 use crate::profile::PortProfile;
 use crate::time::Instant;
 
+/// Port role for the `LISTENING` state.
+///
+/// The state is entered from `INITIALIZING` once infrastructure signals readiness and is typically
+/// constructed by [`PortProfile::listening`].
+///
+/// This type owns:
+/// - the `Port` boundary (send, timers, logging),
+/// - a [`ListeningBmca`] instance for Announce-driven recommendation, and
+/// - an [`AnnounceReceiptTimeout`] that is restarted on each received Announce.
 pub struct ListeningPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: ListeningBmca<'a, S>,
@@ -14,6 +45,11 @@ pub struct ListeningPort<'a, P: Port, S: ForeignClockRecords> {
 }
 
 impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
+    /// Create a new `ListeningPort`.
+    ///
+    /// `announce_receipt_timeout` is expected to be configured with the profile’s
+    /// AnnounceReceiptTimeout interval and typically started by the profile before entering this
+    /// state.
     pub(crate) fn new(
         port: P,
         bmca: ListeningBmca<'a, S>,
@@ -30,6 +66,10 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
         }
     }
 
+    /// Apply a BMCA recommendation to become a slave of `parent`.
+    ///
+    /// This transitions into `UNCALIBRATED` and switches the BMCA wrapper to parent tracking so
+    /// that subsequent decisions and message acceptance can be gated by the selected parent.
     pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
@@ -38,6 +78,11 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
         self.profile.uncalibrated(self.port, parent_tracking_bmca)
     }
 
+    /// Apply a BMCA recommendation to become (pre-)master.
+    ///
+    /// This transitions into `PRE_MASTER` and switches the BMCA wrapper to grandmaster tracking.
+    /// The `BmcaMasterDecision` carries the qualification timeout policy that determines how long
+    /// the port must remain in `PRE_MASTER` before becoming `MASTER`.
     pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
@@ -49,12 +94,22 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
         })
     }
 
+    /// Handle Announce receipt timeout expiry while in `LISTENING`.
+    ///
+    /// This transitions to `MASTER` using “current grandmaster tracking”, which (in current
+    /// single-port setups) resolves to the local grandmaster identity.
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
 
+    /// Process an incoming Announce message.
+    ///
+    /// This:
+    /// - restarts the Announce receipt timeout,
+    /// - feeds the message into BMCA, and
+    /// - returns a [`StateDecision`] if BMCA recommends a transition.
     pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,

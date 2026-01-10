@@ -1,3 +1,17 @@
+//! Clock-related domain concepts.
+//!
+//! This module models the “clock” vocabulary used throughout the `rptp` domain core:
+//!
+//! - **Identity**: [`ClockIdentity`] is the 8-byte identity used in PTP datasets and port identities.
+//! - **Quality**: [`ClockClass`], [`ClockAccuracy`], and [`ClockQuality`] represent the fields used
+//!   by BMCA comparisons.
+//! - **Discipline boundary**: [`LocalClock`] composes a platform clock backend ([`SynchronizableClock`])
+//!   with a [`Servo`] strategy. Port roles feed samples into that boundary and observe the resulting
+//!   [`ServoState`] (locked/calibrating/unlocked).
+//!
+//! The traits in this module are intentionally small adapter surfaces: infrastructure can implement
+//! them for system clocks, virtual clocks used in tests, or embedded clock backends.
+
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
@@ -6,12 +20,18 @@ use crate::{
     time::TimeStamp,
 };
 
+/// A PTP clock identity (IEEE 1588-2019 `clockIdentity`).
+///
+/// In PTP, clocks are identified by an 8-byte identity that appears in datasets and message
+/// headers. `rptp` treats it as an opaque identifier with a stable ordering for comparisons and
+/// map keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ClockIdentity {
     id: [u8; 8],
 }
 
 impl ClockIdentity {
+    /// Create a new clock identity from its raw 8 bytes.
     pub const fn new(id: &[u8; 8]) -> Self {
         Self { id: *id }
     }
@@ -45,6 +65,11 @@ pub(crate) enum TimeScalePolicy {
     Any,
 }
 
+/// PTP clock class (`clockClass`).
+///
+/// This is a domain representation of the IEEE 1588-2019 clock class enumeration. Unknown or
+/// reserved values are preserved as `Reserved(u8)` so they can round-trip and still participate in
+/// deterministic ordering for BMCA comparisons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClockClass {
     Reserved(u8),
@@ -63,6 +88,7 @@ pub enum ClockClass {
 }
 
 impl ClockClass {
+    /// Interpret a raw IEEE 1588 `clockClass` value.
     pub const fn new(value: u8) -> Self {
         match value {
             6 => Self::PrimaryReference,
@@ -100,10 +126,21 @@ impl ClockClass {
         }
     }
 
+    /// Return true if this clock class represents an authoritative clock. The spec talks a lot
+    /// about this implicitly, but never names it explicitly, keeps it underdetermined in a way.
+    ///
+    /// So we introduce the term "authoritative" here to mean a clock class in the range 1..=127,
+    /// which represents clocks that represent external time sources, primary references, or
+    /// holdover states, clocks representing an atomic clock, GPS receivers, or other high-quality,
+    /// high-authority time sources.
+    ///
+    /// See IEEE 1588-2019 §9.3.3; Fig. 33, where autoritative clocks are implicitly defined in the
+    /// path to decision points M1 and P1 (D_0 is class 1..127).
     pub(crate) fn is_authoritative(&self) -> bool {
         (1..=127).contains(&self.as_u8())
     }
 
+    /// Return the raw IEEE 1588 `clockClass` value.
     pub(crate) const fn as_u8(&self) -> u8 {
         match self {
             Self::Reserved(v) | Self::AlternateProfile(v) => *v,
@@ -136,6 +173,10 @@ impl PartialOrd for ClockClass {
     }
 }
 
+/// PTP clock accuracy (`clockAccuracy`).
+///
+/// This is a domain representation of the IEEE 1588 clock accuracy enumeration. Unknown or
+/// reserved values are preserved to keep ordering and round-tripping predictable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClockAccuracy {
     Reserved(u8),
@@ -162,6 +203,7 @@ pub enum ClockAccuracy {
 }
 
 impl ClockAccuracy {
+    /// Interpret a raw IEEE 1588 `clockAccuracy` value.
     pub const fn new(value: u8) -> Self {
         match value {
             0x00..=0x1F => Self::Reserved(value),
@@ -190,6 +232,7 @@ impl ClockAccuracy {
         }
     }
 
+    /// Return the raw IEEE 1588 `clockAccuracy` value.
     pub(crate) const fn as_u8(&self) -> u8 {
         match self {
             ClockAccuracy::Reserved(v) | ClockAccuracy::AlternateProfile(v) => *v,
@@ -230,6 +273,10 @@ impl PartialOrd for ClockAccuracy {
     }
 }
 
+/// PTP clock quality (`clockQuality`).
+///
+/// BMCA compares clocks based on `(clockClass, clockAccuracy, offsetScaledLogVariance)` and then
+/// additional dataset fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClockQuality {
     clock_class: ClockClass,
@@ -242,6 +289,10 @@ impl ClockQuality {
     const CLOCK_ACCURACY_OFFSET: usize = 1;
     const OFFSET_SCALED_LOG_VARIANCE_OFFSET: Range<usize> = 2..4;
 
+    /// Create a new clock quality tuple.
+    ///
+    /// `offset_scaled_log_variance` is the raw IEEE 1588 field. `rptp` currently treats it as an
+    /// ordered scalar for BMCA comparisons.
     pub const fn new(
         clock_class: ClockClass,
         clock_accuracy: ClockAccuracy,
@@ -302,16 +353,41 @@ impl PartialOrd for ClockQuality {
     }
 }
 
+/// A read-only view of a clock.
+///
+/// Infrastructure implements this trait for clocks that can provide the current PTP time and its
+/// [`TimeScale`]. Ingress timestamping uses [`TimeStamp`] throughout the domain core.
 pub trait Clock {
+    /// Return the current clock time in its [`TimeScale`].
     fn now(&self) -> TimeStamp;
+    /// Return the clock's time scale (PTP vs. arbitrary/application-defined).
     fn time_scale(&self) -> TimeScale;
 }
 
+/// A clock that can be disciplined (stepped or rate-adjusted).
+///
+/// This is the infrastructure boundary that servos operate against. A servo may:
+/// - **step** the clock to a specific [`TimeStamp`], or
+/// - **adjust** the clock rate by a multiplicative factor (`1.0` means “nominal rate”).
 pub trait SynchronizableClock: Clock {
+    /// Step (discontinuously set) the clock to `to`.
     fn step(&self, to: TimeStamp);
+    /// Adjust the clock rate by a multiplicative factor.
+    ///
+    /// Implementations are expected to interpret `rate=1.0` as “no adjustment”, values greater than
+    /// `1.0` as “run faster”, and values less than `1.0` as “run slower”.
     fn adjust(&self, rate: f64);
 }
 
+/// The local clock in a PTP node: identity + backend + servo.
+///
+/// `LocalClock` composes:
+/// - a platform clock backend (`C: [`SynchronizableClock`]),
+/// - a stable [`ClockIdentity`], and
+/// - a [`Servo`] strategy that turns observed offset samples into clock actions.
+///
+/// Port roles feed samples into the clock discipline boundary via `discipline()` and then use the
+/// returned [`ServoState`] in their state machine decisions.
 pub struct LocalClock<C: SynchronizableClock> {
     clock: C,
     identity: ClockIdentity,
@@ -319,6 +395,7 @@ pub struct LocalClock<C: SynchronizableClock> {
 }
 
 impl<C: SynchronizableClock> LocalClock<C> {
+    /// Create a new local clock wrapper around a backend clock and a servo strategy.
     pub fn new(clock: C, identity: ClockIdentity, servo: Servo) -> Self {
         Self {
             clock,
@@ -331,23 +408,31 @@ impl<C: SynchronizableClock> LocalClock<C> {
         &self.identity
     }
 
+    /// Return the current time reported by the backend clock.
     pub fn now(&self) -> TimeStamp {
         self.clock.now()
     }
 
+    /// Return the time scale used by the backend clock.
     pub fn time_scale(&self) -> TimeScale {
         self.clock.time_scale()
     }
 
+    /// Feed a new servo sample into the discipline pipeline.
     pub(crate) fn discipline(&self, sample: ServoSample) -> ServoState {
         self.servo.feed(&self.clock, sample)
     }
 }
 
+/// The PTP `stepsRemoved` dataset field.
+///
+/// This counts the number of communication paths between the local clock and the grandmaster. It
+/// participates in BMCA comparisons and is carried in Announce messages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StepsRemoved(u16);
 
 impl StepsRemoved {
+    /// Create a `StepsRemoved` value from the raw counter.
     pub fn new(steps_removed: u16) -> Self {
         Self(steps_removed)
     }
@@ -361,6 +446,10 @@ impl StepsRemoved {
     }
 }
 
+/// The time scale used by a clock.
+///
+/// PTP distinguishes between the PTP timescale and an arbitrary/application-defined timescale.
+/// `rptp` carries this flag through Announce messages and clock backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimeScale {
     Ptp,

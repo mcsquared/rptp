@@ -1,3 +1,38 @@
+//! Port state machine glue.
+//!
+//! This module defines the `rptp` port state machine as:
+//! - a sum type [`PortState`] of behaviour-rich state implementations, and
+//! - a small set of state transition inputs ([`StateDecision`]).
+//!
+//! Port states are modeled as distinct types (`InitializingPort`, `ListeningPort`, `MasterPort`,
+//! `SlavePort`, …). Each state type owns its state-specific collaborators (timeouts, BMCA wrappers,
+//! delay mechanism, etc.) and exposes message handlers.
+//!
+//! [`PortState`] provides the “routing layer”:
+//! - `dispatch_*` selects the correct state-specific handler for an incoming message, and
+//! - `apply` applies a [`StateDecision`] by performing an explicit state transition.
+//!
+//! ## Ingress integration
+//!
+//! `MessageIngress` parses datagrams into typed messages and dispatches them into a `PortMap`.
+//! `PortIngress for Option<PortState<...>>` (see `crate::port`) then uses these methods to drive
+//! the state machine: `dispatch_*` → `StateDecision` → `apply`.
+//!
+//! ## Illegal transitions
+//!
+//! Some state transitions are illegal by construction. `apply` will `panic!` if asked to apply a
+//! decision to a state where it cannot occur (these are internal invariants guarded by tests).
+//!
+//! ## Fail-fast note
+//!
+//! At the moment, `rptp` follows a fail-fast approach for internal invariants: if the state
+//! machine is driven in a way that violates its transition contract, we prefer to crash loudly
+//! during early-stage development rather than silently recover into an faulty state.
+//!
+//! This is a deliberate choice and not carved in stone. As the integration boundaries mature,
+//! these panics may be replaced by structured error handling. For broader context, see
+//! `docs/architecture-overview.md`.
+
 use core::panic;
 
 use crate::bmca::{BmcaMasterDecision, ForeignClockRecords};
@@ -12,21 +47,37 @@ use crate::slave::SlavePort;
 use crate::time::{Instant, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 
-// Possible decisions that move the port state machine from one state
-// to another as defined in IEEE 1588 Section 9.2.5, figure 24
+/// Transition inputs for the port state machine.
+///
+/// These values are produced by state-specific message handlers (`process_*`) and by
+/// `dispatch_system` when it interprets [`SystemMessage`]s.
+///
+/// The decision set follows the IEEE 1588 state chart terminology closely, but it is intentionally
+/// expressed in terms of domain meaning (e.g. “recommended slave of this parent”).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StateDecision {
+    /// Infrastructure signaled that initialization completed (`INITIALIZING → LISTENING`).
     Initialized,
+    /// The servo reported that the master clock has been selected (used for `UNCALIBRATED → SLAVE`).
     MasterClockSelected(ParentPortIdentity),
+    /// BMCA recommended transitioning toward slave with the selected parent.
     RecommendedSlave(ParentPortIdentity),
+    /// BMCA recommended transitioning toward master/pre-master.
     RecommendedMaster(BmcaMasterDecision),
+    /// A fault was detected (send failure, explicit fault condition, …).
     FaultDetected,
+    /// Qualification timeout expired (`PRE_MASTER → MASTER`).
     QualificationTimeoutExpired,
+    /// Announce receipt timeout expired (used to leave listening/slave/uncalibrated).
     AnnounceReceiptTimeoutExpired,
+    /// Servo reported a synchronization fault while in slave mode (`SLAVE → UNCALIBRATED`).
     SynchronizationFault,
 }
 
-// Port states as defined in IEEE 1588 Section 9.2.5, figure 24
+/// Port state machine states (IEEE 1588-2019 §9.2.5).
+///
+/// Each variant wraps a concrete state type that owns its collaborators and implements
+/// state-specific message handling.
 #[allow(clippy::large_enum_variant)]
 pub enum PortState<'a, P: Port, S: ForeignClockRecords> {
     Initializing(InitializingPort<'a, P, S>),
@@ -39,6 +90,10 @@ pub enum PortState<'a, P: Port, S: ForeignClockRecords> {
 }
 
 impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
+    /// Apply a transition decision, producing the next port state.
+    ///
+    /// This is the only place where cross-state transition rules are centralized. Most decisions
+    /// are only legal in a subset of states; applying an illegal decision will `panic!`.
     pub(crate) fn apply(self, decision: StateDecision) -> Self {
         match decision {
             StateDecision::AnnounceReceiptTimeoutExpired => match self {
@@ -72,7 +127,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
                 PortState::Slave(slave) => slave.recommended_master(decision),
                 PortState::PreMaster(pre_master) => pre_master.recommended_master(decision),
                 _ => panic!(
-                    "RecommendedMaster can only be applied in Listening, Uncalibrated, Master, or Slave states"
+                    "RecommendedMaster can only be applied in Listening, Uncalibrated, Master, PreMaster, or Slave states"
                 ),
             },
             StateDecision::Initialized => match self {
@@ -91,6 +146,10 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
         }
     }
 
+    /// Dispatch a parsed event message (timestamped message class) to the current state.
+    ///
+    /// `ingress_timestamp` is the receiver-observed event timestamp provided by infrastructure.
+    /// Returning `Some(StateDecision)` indicates that the state machine should apply a transition.
     pub(crate) fn dispatch_event(
         &mut self,
         msg: EventMessage,
@@ -123,6 +182,10 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
         }
     }
 
+    /// Dispatch a parsed general message (non-timestamped message class) to the current state.
+    ///
+    /// `now` is a local monotonic time instant used by the domain for time-window logic (e.g.
+    /// foreign master qualification / staleness).
     pub(crate) fn dispatch_general(
         &mut self,
         msg: GeneralMessage,
@@ -156,6 +219,12 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
         }
     }
 
+    /// Dispatch a system/internal message (timeouts, timestamp feedback, initialization signal).
+    ///
+    /// These messages are not received from the network. They are delivered by infrastructure and
+    /// interpreted here as either:
+    /// - an instruction to perform an action (e.g. send Announce/Sync/DelayReq), or
+    /// - a transition decision (e.g. `AnnounceReceiptTimeoutExpired`, `QualificationTimeoutExpired`).
     pub(crate) fn dispatch_system(&mut self, msg: SystemMessage) -> Option<StateDecision> {
         use PortState::*;
         use SystemMessage::*;
@@ -307,9 +376,7 @@ mod tests {
             )
         }
 
-        fn slave_port(
-            &self,
-        ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+        fn slave_port(&self) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
             PortProfile::default().slave(
                 self.domain_port(),
                 ParentTrackingBmca::new(

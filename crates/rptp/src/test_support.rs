@@ -1,3 +1,19 @@
+//! Test fixtures and fakes for the `rptp` domain core.
+//!
+//! This module provides small, deterministic implementations of the infrastructure boundary
+//! traits used by the port state machine:
+//! - clocks ([`FakeClock`]),
+//! - physical ports ([`FakePort`], [`FailingPort`]),
+//! - timeouts and timer hosts ([`FakeTimeout`], [`FakeTimerHost`]), and
+//! - egress timestamping hooks ([`FakeTimestamping`]).
+//!
+//! It also contains helpers for constructing pre-wired port states for tests
+//! ([`master_test_port`], [`slave_test_port`]) and for parsing serialized messages that were
+//! captured by a `FakePort` ([`TestMessage`]).
+//!
+//! This module is intended for unit tests and examples; it is not a stability commitment for the
+//! public API surface.
+
 use std::cell::Cell;
 
 use crate::bmca::{
@@ -31,6 +47,10 @@ use crate::port::{ParentPortIdentity, Port};
 use crate::portstate::PortState;
 use crate::profile::PortProfile;
 
+/// Common clock datasets used in unit tests.
+///
+/// The methods on this type return consistent identities and dataset values, allowing tests to
+/// express intent (“high grade default”, “slave-only low grade”) without repeating raw fields.
 pub struct TestClockCatalog {
     clock_identity: ClockIdentity,
     clock_class: ClockClass,
@@ -40,6 +60,7 @@ pub struct TestClockCatalog {
 }
 
 impl TestClockCatalog {
+    /// A high-quality clock suitable as an “atomic grandmaster” fixture.
     pub fn atomic_grandmaster() -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[0x00, 0x1A, 0xC2, 0xFF, 0xFE, 0x12, 0x34, 0x56]),
@@ -50,6 +71,7 @@ impl TestClockCatalog {
         }
     }
 
+    /// A high-quality clock suitable as a “GPS grandmaster” fixture.
     pub fn gps_grandmaster() -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[0x00, 0x1B, 0xC3, 0xFF, 0xFE, 0x65, 0x43, 0x21]),
@@ -60,6 +82,7 @@ impl TestClockCatalog {
         }
     }
 
+    /// A moderate-quality clock suitable as an “NTP grandmaster” fixture.
     pub fn ntp_grandmaster() -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[0x00, 0x1C, 0xC4, 0xFF, 0xFE, 0x78, 0x56, 0x34]),
@@ -70,6 +93,7 @@ impl TestClockCatalog {
         }
     }
 
+    /// A clock in the application-specific class range.
     pub fn application_specific_grandmaster() -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[0x00, 0x1D, 0xC5, 0xFF, 0xFE, 0x89, 0x67, 0x45]),
@@ -80,6 +104,7 @@ impl TestClockCatalog {
         }
     }
 
+    /// A “high grade” default clock dataset fixture.
     pub fn default_high_grade() -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[0x00, 0x1E, 0xC6, 0xFF, 0xFE, 0x90, 0x78, 0x56]),
@@ -90,6 +115,7 @@ impl TestClockCatalog {
         }
     }
 
+    /// A “mid grade” default clock dataset fixture.
     pub fn default_mid_grade() -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[0x00, 0x1F, 0xC7, 0xFF, 0xFE, 0x91, 0x89, 0x67]),
@@ -100,6 +126,7 @@ impl TestClockCatalog {
         }
     }
 
+    /// A “low grade” default clock dataset fixture.
     pub fn default_low_grade() -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[0x00, 0x20, 0xC8, 0xFF, 0xFE, 0x92, 0x90, 0x78]),
@@ -110,6 +137,7 @@ impl TestClockCatalog {
         }
     }
 
+    /// A low-grade clock dataset marked as slave-only.
     pub fn default_low_grade_slave_only() -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[0x00, 0x21, 0xC9, 0xFF, 0xFE, 0x93, 0x91, 0x89]),
@@ -120,10 +148,12 @@ impl TestClockCatalog {
         }
     }
 
+    /// Return the configured clock identity.
     pub fn clock_identity(&self) -> ClockIdentity {
         self.clock_identity
     }
 
+    /// Return the configured clock quality fields.
     pub fn clock_quality(&self) -> ClockQuality {
         ClockQuality::new(
             self.clock_class,
@@ -132,6 +162,7 @@ impl TestClockCatalog {
         )
     }
 
+    /// Construct a `ClockDS` suitable for the local clock datasets in tests.
     pub fn default_ds(&self) -> ClockDS {
         ClockDS::new(
             self.clock_identity,
@@ -142,6 +173,7 @@ impl TestClockCatalog {
         )
     }
 
+    /// Construct a `ClockDS` for a foreign dataset, allowing `steps_removed` to be varied.
     pub fn foreign_ds(&self, steps_removed: StepsRemoved) -> ClockDS {
         ClockDS::new(
             self.clock_identity,
@@ -152,6 +184,7 @@ impl TestClockCatalog {
         )
     }
 
+    /// Return a new catalog with the identity overridden.
     pub fn with_clock_identity(self, clock_identity: ClockIdentity) -> Self {
         Self {
             clock_identity,
@@ -159,6 +192,7 @@ impl TestClockCatalog {
         }
     }
 
+    /// Return a new catalog with the clock accuracy overridden.
     pub fn with_accuracy(self, accuracy: ClockAccuracy) -> Self {
         Self {
             clock_accuracy: accuracy,
@@ -166,15 +200,21 @@ impl TestClockCatalog {
         }
     }
 
+    /// Return a new catalog with `priority1` overridden.
     pub fn with_priority1(self, priority1: Priority1) -> Self {
         Self { priority1, ..self }
     }
 
+    /// Return a new catalog with `priority2` overridden.
     pub fn with_priority2(self, priority2: Priority2) -> Self {
         Self { priority2, ..self }
     }
 }
 
+/// A deterministic clock implementation for tests.
+///
+/// - `step()` sets the current time (`now`) directly.
+/// - `adjust()` records the last rate factor so tests can assert servo behaviour.
 pub struct FakeClock {
     now: Cell<TimeStamp>,
     time_scale: TimeScale,
@@ -182,6 +222,7 @@ pub struct FakeClock {
 }
 
 impl FakeClock {
+    /// Create a fake clock with an initial time and a fixed [`TimeScale`].
     pub fn new(now: TimeStamp, time_scale: TimeScale) -> Self {
         Self {
             now: Cell::new(now),
@@ -190,12 +231,14 @@ impl FakeClock {
         }
     }
 
+    /// Return the last adjustment rate applied via [`SynchronizableClock::adjust`].
     pub fn last_adjust(&self) -> Option<f64> {
         self.last_adjust.get()
     }
 }
 
 impl Default for FakeClock {
+    /// Create a `FakeClock` starting at `0s` in PTP time scale.
     fn default() -> Self {
         Self::new(TimeStamp::new(0, 0), TimeScale::Ptp)
     }
@@ -231,6 +274,10 @@ impl SynchronizableClock for FakeClock {
     }
 }
 
+/// Construct a `MASTER` port state suitable for unit tests.
+///
+/// This wires a [`GrandMasterTrackingBmca`] with an initial `BestForeignRecord` and returns a
+/// [`PortState::Master`] built via the provided [`PortProfile`].
 pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
     port: P,
     local_candidate: &'a dyn LocalGrandMasterCandidate,
@@ -247,6 +294,10 @@ pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
     profile.master(port, bmca)
 }
 
+/// Construct a `SLAVE` port state suitable for unit tests.
+///
+/// This wires a [`ParentTrackingBmca`] and a default end-to-end delay mechanism. The delay request
+/// timeout is started immediately so tests can drive `DelayRequestTimeout` behaviour.
 pub fn slave_test_port<'a, P: Port, S: ForeignClockRecords>(
     port: P,
     local_candidate: &'a dyn LocalGrandMasterCandidate,
@@ -287,9 +338,14 @@ impl Clock for Rc<FakeClock> {
     }
 }
 
+/// No-op egress timestamping implementation for tests.
+///
+/// Tests that do not exercise two-step Sync follow-up generation or DelayReq timestamp feedback
+/// can use this implementation to satisfy the [`TxTimestamping`] boundary.
 pub struct FakeTimestamping;
 
 impl FakeTimestamping {
+    /// Create a new no-op timestamping hook.
     pub fn new() -> Self {
         Self {}
     }
@@ -307,6 +363,10 @@ impl TxTimestamping for FakeTimestamping {
     }
 }
 
+/// A timeout handle used by tests to record scheduled [`SystemMessage`] values.
+///
+/// `restart()` records the currently configured system message into a shared vector so tests can
+/// assert which timeouts were scheduled. The timeout does not track real time.
 #[derive(Debug)]
 pub struct FakeTimeout {
     msg: RefCell<SystemMessage>,
@@ -314,6 +374,7 @@ pub struct FakeTimeout {
 }
 
 impl FakeTimeout {
+    /// Create a timeout that will record the given system message when restarted.
     pub fn new(msg: SystemMessage) -> Self {
         Self {
             msg: RefCell::new(msg),
@@ -321,6 +382,7 @@ impl FakeTimeout {
         }
     }
 
+    /// Create a timeout that records into `system_messages`.
     pub fn from_system_message(
         system_messages: Rc<RefCell<Vec<SystemMessage>>>,
         msg: SystemMessage,
@@ -350,17 +412,23 @@ impl PartialEq for FakeTimeout {
     }
 }
 
+/// Timer host that records restarted timeouts as scheduled system messages.
+///
+/// This provides the scheduling surface used by port states (`AnnounceReceiptTimeout`, `SyncTimeout`,
+/// etc.) without requiring a real async runtime.
 pub struct FakeTimerHost {
     system_messages: Rc<RefCell<Vec<SystemMessage>>>,
 }
 
 impl FakeTimerHost {
+    /// Create a new empty timer host.
     pub fn new() -> Self {
         Self {
             system_messages: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
+    /// Drain and return all recorded system messages.
     pub fn take_system_messages(&self) -> Vec<SystemMessage> {
         self.system_messages.borrow_mut().drain(..).collect()
     }
@@ -395,6 +463,7 @@ impl Drop for FakeTimeout {
 }
 
 impl PortIdentity {
+    /// Construct a deterministic fake port identity for tests.
     pub fn fake() -> Self {
         PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
@@ -403,15 +472,21 @@ impl PortIdentity {
     }
 }
 
+/// Helper for parsing test message buffers into domain message types.
+///
+/// This is primarily used by [`FakePort`] to decode captured transmit buffers back into
+/// [`EventMessage`] and [`GeneralMessage`] values.
 pub struct TestMessage<'a> {
     buf: &'a [u8],
 }
 
 impl<'a> TestMessage<'a> {
+    /// Wrap a raw serialized datagram.
     pub fn new(buf: &'a [u8]) -> Self {
         Self { buf }
     }
 
+    /// Decode the buffer as an [`EventMessage`].
     pub fn event(&self) -> Result<EventMessage> {
         let length_checked = UnvalidatedMessage::new(self.buf).length_checked_v2()?;
         let header = MessageHeader::new(length_checked);
@@ -424,6 +499,7 @@ impl<'a> TestMessage<'a> {
         )
     }
 
+    /// Decode the buffer as a [`GeneralMessage`].
     pub fn general(&self) -> Result<GeneralMessage> {
         let length_checked = UnvalidatedMessage::new(self.buf).length_checked_v2()?;
         let header = MessageHeader::new(length_checked);
@@ -437,12 +513,18 @@ impl<'a> TestMessage<'a> {
     }
 }
 
+/// In-memory `PhysicalPort` implementation that captures transmitted message bytes.
+///
+/// - `send_event` / `send_general` append the provided bytes to internal buffers and return `Ok(())`.
+/// - `contains_*` helpers decode the captured buffers and compare them against expected domain
+///   messages (panicking if a captured buffer cannot be decoded).
 pub struct FakePort {
     event_messages: Rc<RefCell<Vec<Vec<u8>>>>,
     general_messages: Rc<RefCell<Vec<Vec<u8>>>>,
 }
 
 impl FakePort {
+    /// Create an empty capturing port.
     pub fn new() -> Self {
         Self {
             event_messages: Rc::new(RefCell::new(Vec::new())),
@@ -450,6 +532,7 @@ impl FakePort {
         }
     }
 
+    /// Return true if an equivalent event message was sent.
     pub fn contains_event_message(&self, expected: &EventMessage) -> bool {
         let messages = self.event_messages.borrow().clone();
         messages.iter().enumerate().any(|(index, buf)| {
@@ -462,6 +545,7 @@ impl FakePort {
         })
     }
 
+    /// Return true if an equivalent general message was sent.
     pub fn contains_general_message(&self, expected: &GeneralMessage) -> bool {
         let messages = self.general_messages.borrow().clone();
         messages.iter().enumerate().any(|(index, buf)| {
@@ -474,6 +558,7 @@ impl FakePort {
         })
     }
 
+    /// Return true if no messages have been captured.
     pub fn is_empty(&self) -> bool {
         self.event_messages.borrow().is_empty() && self.general_messages.borrow().is_empty()
     }
@@ -507,6 +592,9 @@ impl PhysicalPort for &FakePort {
     }
 }
 
+/// `PhysicalPort` implementation that fails all sends.
+///
+/// Useful for tests that validate fault handling on send failure paths.
 pub struct FailingPort;
 
 impl PhysicalPort for FailingPort {

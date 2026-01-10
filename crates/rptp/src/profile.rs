@@ -1,3 +1,16 @@
+//! Port profile configuration and state assembly.
+//!
+//! A [`PortProfile`] bundles timing- and interval-related configuration for a PTP port and
+//! provides convenience constructors for building the initial [`PortState`] variants with the
+//! corresponding timeouts/cycles set up.
+//!
+//! The profile is *consumed* (`self`) when building a state. Each concrete port state owns a copy
+//! of the profile so it can use the same configuration consistently across transitions.
+//!
+//! This module is intentionally narrow in scope: it does not implement the state machine itself
+//! (see [`crate::portstate`]); it only wires together collaborators and starts the required
+//! timers.
+
 use crate::bmca::{
     BestForeignRecord, BestMasterClockAlgorithm, GrandMasterTrackingBmca, ListeningBmca,
     ForeignClockRecords, ParentTrackingBmca, QualificationTimeoutPolicy,
@@ -14,6 +27,19 @@ use crate::slave::SlavePort;
 use crate::time::{Duration, LogInterval};
 use crate::uncalibrated::UncalibratedPort;
 
+/// Port timing configuration used by the domain state machine.
+///
+/// The profile controls how often the port sends periodic messages and how long it waits for
+/// incoming Announce messages before timing out.
+///
+/// - `announce_receipt_timeout_interval`: wall-clock [`Duration`] used by the announce receipt
+///   timer (the “announce receipt timeout interval” in IEEE 1588 terminology).
+/// - `log_announce_interval`: log2 interval used to schedule Announce transmissions when acting
+///   as master (`logAnnounceInterval`).
+/// - `log_sync_interval`: log2 interval used to schedule Sync transmissions when acting as master
+///   (`logSyncInterval`).
+/// - `log_min_delay_request_interval`: log2 interval used to schedule DelayReq transmissions when
+///   acting as slave (`logMinDelayReqInterval`).
 pub struct PortProfile {
     announce_receipt_timeout_interval: Duration,
     log_announce_interval: LogInterval,
@@ -22,6 +48,11 @@ pub struct PortProfile {
 }
 
 impl PortProfile {
+    /// Create a profile with explicit timing/interval values.
+    ///
+    /// This constructor is the primary way to configure a port’s periodic schedules and receipt
+    /// timeouts from the outside. The values are later applied when constructing concrete port
+    /// states via [`PortProfile::listening`], [`PortProfile::master`], [`PortProfile::slave`], etc.
     pub fn new(
         announce_receipt_timeout_interval: Duration,
         log_announce_interval: LogInterval,
@@ -38,6 +69,10 @@ impl PortProfile {
 }
 
 impl Default for PortProfile {
+    /// Default timing values suitable for tests and early bring-up.
+    ///
+    /// - announce receipt timeout: 5 seconds
+    /// - announce/sync/delay request intervals: `LogInterval::new(0)` (1 second)
     fn default() -> Self {
         Self {
             announce_receipt_timeout_interval: Duration::from_secs(5),
@@ -49,10 +84,17 @@ impl Default for PortProfile {
 }
 
 impl PortProfile {
+    /// Return the configured `logMinDelayReqInterval`.
+    ///
+    /// This is commonly embedded into outgoing Announce messages so other nodes can understand
+    /// the slave’s expected delay-request pacing.
     pub(crate) fn log_min_delay_request_interval(&self) -> LogInterval {
         self.log_min_delay_request_interval
     }
 
+    /// Construct the `INITIALIZING` state.
+    ///
+    /// This variant is used while infrastructure and BMCA bookkeeping are being brought up.
     pub(crate) fn initializing<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
@@ -67,6 +109,10 @@ impl PortProfile {
         ))
     }
 
+    /// Construct the `LISTENING` state and start the announce receipt timeout.
+    ///
+    /// The announce receipt timer is restarted immediately so the port can transition away from
+    /// listening if no Announce messages arrive within the configured interval.
     pub(crate) fn listening<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
@@ -86,6 +132,10 @@ impl PortProfile {
         ))
     }
 
+    /// Construct the `MASTER` state and start the periodic Announce/Sync schedules.
+    ///
+    /// Both cycles are started with an initial “send immediately” timeout (`0s`) so a newly
+    /// elected master begins announcing and synchronizing without waiting for a full interval.
     pub(crate) fn master<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
@@ -108,6 +158,10 @@ impl PortProfile {
         ))
     }
 
+    /// Construct the `SLAVE` state and start the announce receipt timeout.
+    ///
+    /// The provided delay mechanism defines how DelayReq/DelayResp exchanges are scheduled and
+    /// combined with Sync/FollowUp to yield offset measurements for the servo.
     pub(crate) fn slave<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
@@ -129,6 +183,10 @@ impl PortProfile {
         ))
     }
 
+    /// Construct the `PRE_MASTER` state and start the qualification timeout.
+    ///
+    /// The qualification timeout duration is derived from the profile’s announce interval and
+    /// the provided [`QualificationTimeoutPolicy`].
     pub(crate) fn pre_master<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
@@ -142,6 +200,12 @@ impl PortProfile {
         PortState::PreMaster(PreMasterPort::new(port, bmca, qualification_timeout, self))
     }
 
+    /// Construct the `UNCALIBRATED` state.
+    ///
+    /// This state participates in offset measurement while the servo is not yet “locked”.
+    /// It starts both:
+    /// - the announce receipt timeout (to detect loss of announces), and
+    /// - the delay-request schedule (initially immediate) to begin collecting delay samples.
     pub(crate) fn uncalibrated<P: Port, S: ForeignClockRecords>(
         self,
         port: P,

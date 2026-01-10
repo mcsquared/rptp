@@ -1,3 +1,18 @@
+//! Port state: Master.
+//!
+//! This module implements the `MASTER` and related “master-side” behaviour in the IEEE 1588 port
+//! state machine (IEEE 1588-2019 §9.2.5).
+//!
+//! In `rptp`, a port in `Master` is responsible for:
+//! - periodically sending Announce messages,
+//! - periodically sending Sync messages (currently: two-step Sync),
+//! - answering incoming DelayReq messages with DelayResp, and
+//! - continuing to evaluate Announce messages via BMCA to detect when a transition is required
+//!   (e.g. a better master appears).
+//!
+//! Timing and sequencing for periodic traffic is encapsulated in [`AnnounceCycle`] and
+//! [`SyncCycle`]. Both schedule their next activation by restarting a `Timeout` handle.
+
 use crate::bmca::{
     Bmca, BmcaMasterDecision, ForeignClockRecords, GrandMaster, GrandMasterTrackingBmca,
 };
@@ -12,6 +27,20 @@ use crate::portstate::{PortState, StateDecision};
 use crate::profile::PortProfile;
 use crate::time::{Instant, LogInterval, TimeStamp};
 
+/// Port role for the `MASTER` state.
+///
+/// This state is typically assembled by [`PortProfile::master`]. It owns:
+/// - the `Port` boundary (I/O + timers + logging),
+/// - a [`GrandMasterTrackingBmca`] instance to keep BMCA decisions stable while tracking a specific
+///   grandmaster,
+/// - an [`AnnounceCycle`] and [`SyncCycle`] that drive periodic transmissions, and
+/// - the [`PortProfile`] used for follow-on state transitions.
+///
+/// ## Two-step Sync and follow-up handling
+///
+/// `send_sync()` transmits a two-step Sync as an event message. The corresponding FollowUp is sent
+/// later when infrastructure reports the egress timestamp via `SystemMessage::Timestamp` (see
+/// `PortState::dispatch_system`). `send_follow_up()` performs that second step.
 pub struct MasterPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: GrandMasterTrackingBmca<'a, S>,
@@ -21,6 +50,7 @@ pub struct MasterPort<'a, P: Port, S: ForeignClockRecords> {
 }
 
 impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
+    /// Create a new `MasterPort`.
     pub(crate) fn new(
         port: P,
         bmca: GrandMasterTrackingBmca<'a, S>,
@@ -39,6 +69,9 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
         }
     }
 
+    /// Send an Announce message and schedule the next Announce timeout.
+    ///
+    /// The announce payload is produced from the currently tracked grandmaster dataset.
     pub(crate) fn send_announce(&mut self) -> SendResult {
         let local_clock = self.port.local_clock();
         let announce_cycle = &mut self.announce_cycle;
@@ -52,6 +85,10 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
         Ok(())
     }
 
+    /// Process an incoming Announce message while in `MASTER`.
+    ///
+    /// This feeds the Announce into BMCA. If BMCA produces a recommendation (e.g. “become slave”),
+    /// it is returned as a [`StateDecision`] for the port state machine to apply.
     pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
@@ -68,6 +105,11 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
         }
     }
 
+    /// Process an incoming DelayReq and respond with a DelayResp.
+    ///
+    /// `ingress_timestamp` is the event ingress timestamp of the DelayReq (as observed by the
+    /// receiver). `requesting_port_identity` identifies the requester and is copied into the
+    /// response.
     pub(crate) fn process_delay_request(
         &mut self,
         req: DelayRequestMessage,
@@ -91,6 +133,7 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
         result
     }
 
+    /// Send a two-step Sync message and schedule the next Sync timeout.
     pub(crate) fn send_sync(&mut self) -> SendResult {
         let sync_message = self.sync_cycle.two_step_sync();
         self.port
@@ -100,6 +143,10 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
         Ok(())
     }
 
+    /// Send the FollowUp corresponding to a previously sent two-step Sync.
+    ///
+    /// `egress_timestamp` is provided by infrastructure and represents the event egress time of the
+    /// Sync message. It is embedded into the FollowUp payload.
     pub(crate) fn send_follow_up(
         &mut self,
         sync: TwoStepSyncMessage,
@@ -111,6 +158,10 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
         Ok(())
     }
 
+    /// Apply a BMCA recommendation to become (pre-)master.
+    ///
+    /// This transitions into `PRE_MASTER` and updates the tracked grandmaster identity according to
+    /// `decision`.
     pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
@@ -122,6 +173,10 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
         })
     }
 
+    /// Apply a BMCA recommendation to become a slave of `parent`.
+    ///
+    /// This transitions into `UNCALIBRATED` and switches the BMCA wrapper to parent tracking so
+    /// that message acceptance and subsequent decisions can be gated by the selected parent.
     pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
@@ -131,6 +186,12 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
     }
 }
 
+/// Announce message sequencing and scheduling.
+///
+/// This object:
+/// - holds the Announce sequence counter,
+/// - provides [`announce`](Self::announce) to build an Announce message, and
+/// - schedules the next send time via [`next`](Self::next).
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct AnnounceCycle<T: Timeout> {
     sequence_id: SequenceId,
@@ -139,6 +200,7 @@ pub(crate) struct AnnounceCycle<T: Timeout> {
 }
 
 impl<T: Timeout> AnnounceCycle<T> {
+    /// Create a new announce cycle starting at `start`.
     pub fn new(start: SequenceId, timeout: T, log_interval: LogInterval) -> Self {
         Self {
             sequence_id: start,
@@ -147,11 +209,17 @@ impl<T: Timeout> AnnounceCycle<T> {
         }
     }
 
+    /// Restart the timeout for the next Announce and advance the sequence id.
     pub fn next(&mut self) {
         self.timeout.restart(self.log_interval.duration());
         self.sequence_id = self.sequence_id.next();
     }
 
+    /// Build an Announce message for the current sequence id.
+    ///
+    /// The message reflects:
+    /// - the grandmaster dataset (local or foreign) provided by `grandmaster`, and
+    /// - the current time scale of the local clock.
     pub fn announce<C: SynchronizableClock>(
         &self,
         local_clock: &LocalClock<C>,
@@ -165,6 +233,9 @@ impl<T: Timeout> AnnounceCycle<T> {
     }
 }
 
+/// Sync message sequencing and scheduling.
+///
+/// `rptp` currently models master-side synchronization using two-step Sync.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct SyncCycle<T: Timeout> {
     sequence_id: SequenceId,
@@ -173,6 +244,7 @@ pub(crate) struct SyncCycle<T: Timeout> {
 }
 
 impl<T: Timeout> SyncCycle<T> {
+    /// Create a new sync cycle starting at `start`.
     pub fn new(start: SequenceId, timeout: T, log_interval: LogInterval) -> Self {
         Self {
             sequence_id: start,
@@ -181,11 +253,13 @@ impl<T: Timeout> SyncCycle<T> {
         }
     }
 
+    /// Restart the timeout for the next Sync and advance the sequence id.
     pub fn next(&mut self) {
         self.timeout.restart(self.log_interval.duration());
         self.sequence_id = self.sequence_id.next();
     }
 
+    /// Build a two-step Sync message for the current sequence id.
     pub fn two_step_sync(&self) -> TwoStepSyncMessage {
         TwoStepSyncMessage::new(self.sequence_id, self.log_interval.log_message_interval())
     }

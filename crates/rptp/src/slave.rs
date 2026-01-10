@@ -1,3 +1,20 @@
+//! Port state: Slave.
+//!
+//! This module implements the `SLAVE` state of the IEEE 1588 port state machine
+//! (IEEE 1588-2019 §9.2.5).
+//!
+//! In `rptp`, a port in `Slave` is responsible for:
+//! - processing Announce messages and running BMCA while tracking a selected parent,
+//! - accepting and processing Sync/FollowUp/DelayResp only from the currently tracked parent,
+//! - driving the end-to-end delay mechanism ([`EndToEndDelayMechanism`]) to produce
+//!   [`crate::servo::ServoSample`]s, and
+//! - feeding samples into the local clock discipline boundary (`LocalClock::discipline`).
+//!
+//! Periodic DelayReq transmission is triggered by `SystemMessage::DelayRequestTimeout` as handled
+//! by `PortState::dispatch_system`, which calls [`SlavePort::send_delay_request`]. The egress
+//! timestamp of that DelayReq is later reported back via `SystemMessage::Timestamp` and recorded
+//! using [`SlavePort::process_delay_request`].
+
 use crate::bmca::{Bmca, BmcaMasterDecision, ForeignClockRecords, ParentTrackingBmca};
 use crate::e2e::EndToEndDelayMechanism;
 use crate::log::PortEvent;
@@ -12,6 +29,26 @@ use crate::servo::ServoState;
 use crate::time::{Instant, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 
+/// Port role for the `SLAVE` state.
+///
+/// This state is typically assembled by [`PortProfile::slave`] (via `UNCALIBRATED` once the port
+/// has observed a Sync from the selected parent).
+///
+/// ## Parent tracking and message acceptance
+///
+/// The slave tracks a [`ParentPortIdentity`] via [`ParentTrackingBmca`]. Event/general messages that
+/// affect synchronization (Sync/FollowUp/DelayResp) are ignored unless they originate from the
+/// currently tracked parent.
+///
+/// Announce messages are still processed to keep BMCA updated; if BMCA recommends a different
+/// state (new parent, become master, etc.), the state machine applies the returned
+/// [`StateDecision`].
+///
+/// ## Clock discipline
+///
+/// The E2E delay mechanism combines the Sync-side and Delay-side exchanges into a [`ServoSample`].
+/// Once a sample becomes available, it is fed into `LocalClock::discipline`. If the servo reports a
+/// non-locked state, a [`StateDecision::SynchronizationFault`] is produced.
 pub struct SlavePort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: ParentTrackingBmca<'a, S>,
@@ -21,6 +58,10 @@ pub struct SlavePort<'a, P: Port, S: ForeignClockRecords> {
 }
 
 impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
+    /// Create a new `SlavePort`.
+    ///
+    /// `announce_receipt_timeout` is expected to be configured with the profile’s
+    /// AnnounceReceiptTimeout interval and started by the profile before entering this state.
     pub(crate) fn new(
         port: P,
         bmca: ParentTrackingBmca<'a, S>,
@@ -39,6 +80,10 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         }
     }
 
+    /// Process an incoming Announce message while in `SLAVE`.
+    ///
+    /// This restarts the Announce receipt timeout, feeds the message into BMCA, and returns a
+    /// [`StateDecision`] if BMCA recommends a transition.
     pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
@@ -56,6 +101,11 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         }
     }
 
+    /// Process a received one-step Sync event message.
+    ///
+    /// The message is ignored unless it originates from the currently tracked parent. When the E2E
+    /// delay mechanism yields a complete sample, it is fed into the local clock discipline
+    /// pipeline.
     pub(crate) fn process_one_step_sync(
         &mut self,
         sync: OneStepSyncMessage,
@@ -80,6 +130,10 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         }
     }
 
+    /// Process a received two-step Sync event message.
+    ///
+    /// The message is ignored unless it originates from the currently tracked parent. This records
+    /// the Sync half of the two-step exchange; the corresponding FollowUp is handled separately.
     pub(crate) fn process_two_step_sync(
         &mut self,
         sync: TwoStepSyncMessage,
@@ -97,6 +151,11 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         None
     }
 
+    /// Process a received FollowUp general message for a previously received two-step Sync.
+    ///
+    /// The message is ignored unless it originates from the currently tracked parent. If the E2E
+    /// delay mechanism yields a complete sample after recording the FollowUp, it is fed into the
+    /// local clock discipline pipeline.
     pub(crate) fn process_follow_up(
         &mut self,
         follow_up: FollowUpMessage,
@@ -119,6 +178,11 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         }
     }
 
+    /// Record the egress timestamp for a locally sent DelayReq.
+    ///
+    /// This is invoked via `SystemMessage::Timestamp` after [`send_delay_request`](Self::send_delay_request)
+    /// has successfully sent an event DelayReq and infrastructure has associated an egress
+    /// timestamp with that message.
     pub(crate) fn process_delay_request(
         &mut self,
         req: DelayRequestMessage,
@@ -131,6 +195,9 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         None
     }
 
+    /// Process a received DelayResp general message.
+    ///
+    /// The message is ignored unless it originates from the currently tracked parent.
     pub(crate) fn process_delay_response(
         &mut self,
         resp: DelayResponseMessage,
@@ -146,6 +213,10 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         None
     }
 
+    /// Send a DelayReq event message.
+    ///
+    /// The delay-request sequencing and scheduling is owned by the E2E delay mechanism. The egress
+    /// timestamp for the sent message is later recorded via [`process_delay_request`](Self::process_delay_request).
     pub(crate) fn send_delay_request(&mut self) -> SendResult {
         let delay_request = self.delay_mechanism.delay_request();
         self.port
@@ -154,12 +225,19 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         Ok(())
     }
 
+    /// Handle Announce receipt timeout expiry while in `SLAVE`.
+    ///
+    /// This transitions to `MASTER` using “current grandmaster tracking”, which (in current
+    /// single-port setups) resolves to the local grandmaster identity.
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
 
+    /// Apply a BMCA recommendation to become a slave of `parent`.
+    ///
+    /// This transitions into `UNCALIBRATED` while keeping parent tracking enabled.
     pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
@@ -168,6 +246,9 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         self.profile.uncalibrated(self.port, bmca)
     }
 
+    /// Apply a BMCA recommendation to become (pre-)master.
+    ///
+    /// This transitions into `PRE_MASTER` and switches the BMCA wrapper to grandmaster tracking.
     pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
@@ -179,6 +260,10 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         })
     }
 
+    /// Handle a synchronization fault reported by the servo.
+    ///
+    /// This transitions from `SLAVE` to `UNCALIBRATED` while preserving the currently tracked
+    /// parent, the announce receipt timeout, and the delay mechanism state.
     pub(crate) fn synchronization_fault(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::SynchronizationFault);
         PortState::Uncalibrated(UncalibratedPort::new(

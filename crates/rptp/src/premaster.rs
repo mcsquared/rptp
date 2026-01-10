@@ -1,3 +1,16 @@
+//! Port state: PreMaster.
+//!
+//! This module implements the `PRE_MASTER` state of the IEEE 1588 port state machine
+//! (IEEE 1588-2019 §9.2.5).
+//!
+//! `PRE_MASTER` is an intermediate state on the path to `MASTER`. It exists to model the
+//! spec-defined “qualification” delay: after BMCA recommends that the port should act as master,
+//! the port waits for a (profile-defined) qualification timeout before entering `MASTER`.
+//!
+//! While waiting, the port continues to process Announce messages and runs BMCA. If a better
+//! master is detected during that window, the port can still transition away (e.g. to
+//! `UNCALIBRATED`).
+
 use crate::bmca::{Bmca, BmcaMasterDecision, ForeignClockRecords, GrandMasterTrackingBmca};
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
@@ -6,6 +19,20 @@ use crate::portstate::{PortState, StateDecision};
 use crate::profile::PortProfile;
 use crate::time::Instant;
 
+/// Port role for the `PRE_MASTER` state.
+///
+/// This state is typically assembled by [`PortProfile::pre_master`] after a
+/// [`StateDecision::RecommendedMaster`] transition from `LISTENING`, `MASTER`, `SLAVE`, or
+/// `UNCALIBRATED`.
+///
+/// ## Qualification timeout
+///
+/// The `PRE_MASTER → MASTER` transition is driven by `SystemMessage::QualificationTimeout` as
+/// handled by `PortState::dispatch_system`. `PortProfile::pre_master` configures and starts that
+/// timeout when constructing this state.
+///
+/// The `_qualification_timeout` field is intentionally stored (even if not read directly) so the
+/// underlying timeout handle is kept alive for the lifetime of the state.
 pub struct PreMasterPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: GrandMasterTrackingBmca<'a, S>,
@@ -14,6 +41,10 @@ pub struct PreMasterPort<'a, P: Port, S: ForeignClockRecords> {
 }
 
 impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
+    /// Create a new `PreMasterPort`.
+    ///
+    /// `PortProfile::pre_master` is the usual constructor call site; it is responsible for
+    /// restarting `_qualification_timeout` according to the active qualification policy.
     pub(crate) fn new(
         port: P,
         bmca: GrandMasterTrackingBmca<'a, S>,
@@ -30,6 +61,10 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
         }
     }
 
+    /// Process an incoming Announce message while in `PRE_MASTER`.
+    ///
+    /// This feeds the Announce into BMCA. If BMCA produces a recommendation (e.g. “become slave”),
+    /// it is returned as a [`StateDecision`] for the port state machine to apply.
     pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
@@ -46,11 +81,16 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
         }
     }
 
+    /// Transition from `PRE_MASTER` to `MASTER` after the qualification timeout expires.
     pub(crate) fn qualified(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::QualifiedMaster);
         self.profile.master(self.port, self.bmca)
     }
 
+    /// Apply a BMCA recommendation to become (pre-)master.
+    ///
+    /// This remains in `PRE_MASTER`, but updates the tracked grandmaster identity and (via the
+    /// profile) restarts the qualification timeout according to the decision policy.
     pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedMaster);
 
@@ -62,6 +102,10 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
         })
     }
 
+    /// Apply a BMCA recommendation to become a slave of `parent`.
+    ///
+    /// This transitions into `UNCALIBRATED` and switches the BMCA wrapper to parent tracking so
+    /// that message acceptance and subsequent decisions can be gated by the selected parent.
     pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
