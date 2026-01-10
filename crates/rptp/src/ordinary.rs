@@ -1,7 +1,7 @@
 use core::cell::Cell;
 
 use crate::bmca::{
-    BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS, SortedForeignClockRecords,
+    BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS, SortedForeignClockRecords,
 };
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
@@ -78,6 +78,8 @@ impl<C: SynchronizableClock> OrdinaryClock<C> {
             self.port_number,
         );
 
-        PortProfile::default().initializing(domain_port, bmca, sorted_foreign_clock_records)
+        let best_foreign = BestForeignRecord::new(self.port_number, sorted_foreign_clock_records);
+
+        PortProfile::default().initializing(domain_port, bmca, best_foreign)
     }
 }

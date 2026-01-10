@@ -151,7 +151,7 @@ mod tests {
                         &self.foreign_candidates,
                         PortNumber::new(1),
                     ),
-                    BestForeignRecord::new(SortedForeignClockRecordsVec::new()),
+                    BestForeignRecord::new(PortNumber::new(1), SortedForeignClockRecordsVec::new()),
                 ),
                 announce_receipt_timeout,
                 PortProfile::default(),

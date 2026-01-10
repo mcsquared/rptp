@@ -241,7 +241,7 @@ pub fn master_test_port<'a, P: Port, S: SortedForeignClockRecords>(
     let grandmaster_id = *port.local_clock().identity();
     let bmca = GrandMasterTrackingBmca::new(
         BestMasterClockAlgorithm::new(local_candidate, foreign_candidates, PortNumber::new(1)),
-        BestForeignRecord::new(sorted_foreign_clock_records),
+        BestForeignRecord::new(PortNumber::new(1), sorted_foreign_clock_records),
         grandmaster_id,
     );
     profile.master(port, bmca)
@@ -257,7 +257,7 @@ pub fn slave_test_port<'a, P: Port, S: SortedForeignClockRecords>(
 ) -> PortState<'a, P, S> {
     let bmca = ParentTrackingBmca::new(
         BestMasterClockAlgorithm::new(local_candidate, foreign_candidates, PortNumber::new(1)),
-        BestForeignRecord::new(sorted_foreign_clock_records),
+        BestForeignRecord::new(PortNumber::new(1), sorted_foreign_clock_records),
         parent_port_identity,
     );
     let delay_timeout = port.timeout(SystemMessage::DelayRequestTimeout);

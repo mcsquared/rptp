@@ -145,7 +145,10 @@ mod tests {
                         &self.foreign_candidates,
                         PortNumber::new(1),
                     ),
-                    BestForeignRecord::new(SortedForeignClockRecordsVec::from_records(records)),
+                    BestForeignRecord::new(
+                        PortNumber::new(1),
+                        SortedForeignClockRecordsVec::from_records(records),
+                    ),
                     grandmaster_id,
                 ),
                 qualification_timeout,

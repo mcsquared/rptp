@@ -1,6 +1,6 @@
 use crate::bmca::{
-    BestMasterClockAlgorithm, GrandMasterTrackingBmca, ListeningBmca, ParentTrackingBmca,
-    QualificationTimeoutPolicy, SortedForeignClockRecords,
+    BestForeignRecord, BestMasterClockAlgorithm, GrandMasterTrackingBmca, ListeningBmca,
+    ParentTrackingBmca, QualificationTimeoutPolicy, SortedForeignClockRecords,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::initializing::InitializingPort;
@@ -57,12 +57,12 @@ impl PortProfile {
         self,
         port: P,
         bmca: BestMasterClockAlgorithm,
-        sorted_foreign_clock_records: S,
+        best_foreign: BestForeignRecord<S>,
     ) -> PortState<P, S> {
         PortState::Initializing(InitializingPort::new(
             port,
             bmca,
-            sorted_foreign_clock_records,
+            best_foreign,
             self,
         ))
     }
