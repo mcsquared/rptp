@@ -44,22 +44,17 @@ impl TimeStamp {
 
         TimeStamp::try_new_i64(seconds, nanos)
     }
-}
 
-impl core::ops::Sub<TimeInterval> for TimeStamp {
-    type Output = TimeStamp;
-
-    fn sub(self, rhs: TimeInterval) -> Self::Output {
-        let mut seconds = self.seconds as i64 - rhs.seconds;
+    pub fn checked_sub(self, rhs: TimeInterval) -> Option<Self> {
+        let mut seconds = (self.seconds as i64).checked_sub(rhs.seconds)?;
         let mut nanos = self.nanos as i32 - rhs.nanos as i32;
 
         if nanos < 0 {
-            seconds -= 1;
+            seconds = seconds.checked_sub(1)?;
             nanos += 1_000_000_000;
         }
 
-        assert!(seconds >= 0);
-        TimeStamp::new(seconds as u64, nanos as u32)
+        TimeStamp::try_new_i64(seconds, nanos as u32)
     }
 }
 
@@ -397,6 +392,42 @@ mod tests {
         let interval = TimeInterval::new(-2, 0);
 
         let result = ts.checked_add(interval);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn timestamp_checked_sub_simple() {
+        let ts = TimeStamp::new(3, 750_000_000);
+        let interval = TimeInterval::new(2, 250_000_000);
+
+        let result = ts.checked_sub(interval).unwrap();
+        assert_eq!(result, TimeStamp::new(1, 500_000_000));
+    }
+
+    #[test]
+    fn timestamp_checked_sub_with_nanos_borrow() {
+        let ts = TimeStamp::new(2, 100_000_000);
+        let interval = TimeInterval::new(0, 200_000_000);
+
+        let result = ts.checked_sub(interval).unwrap();
+        assert_eq!(result, TimeStamp::new(1, 900_000_000));
+    }
+
+    #[test]
+    fn timestamp_checked_sub_below_zero_returns_none() {
+        let ts = TimeStamp::new(1, 0);
+        let interval = TimeInterval::new(2, 0);
+
+        let result = ts.checked_sub(interval);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn timestamp_checked_sub_negative_interval_overflows_upper_bound_returns_none() {
+        let ts = TimeStamp::new((1 << 48) - 1, 0);
+        let interval = TimeInterval::new(-1, 0);
+
+        let result = ts.checked_sub(interval);
         assert!(result.is_none());
     }
 

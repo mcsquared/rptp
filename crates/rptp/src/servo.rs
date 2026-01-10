@@ -43,9 +43,14 @@ impl SteppingServo {
         clock: &C,
         sample: ServoSample,
     ) -> ServoState {
-        clock.step(sample.master_estimate());
         sample.log(self.metrics);
-        ServoState::Locked
+
+        if let Some(ts) = sample.master_estimate() {
+            clock.step(ts);
+            ServoState::Locked
+        } else {
+            ServoState::Unlocked
+        }
     }
 }
 
@@ -262,11 +267,15 @@ impl StepPolicy {
             .take()
             .is_some_and(|t| t.exceeded_by(sample))
         {
-            return ServoStepDecision::StepTo(sample.master_estimate());
+            return sample
+                .master_estimate()
+                .map_or(ServoStepDecision::NoStep, ServoStepDecision::StepTo);
         }
 
         if self.threshold.exceeded_by(sample) {
-            ServoStepDecision::StepTo(sample.master_estimate())
+            sample
+                .master_estimate()
+                .map_or(ServoStepDecision::NoStep, ServoStepDecision::StepTo)
         } else {
             ServoStepDecision::NoStep
         }
@@ -291,8 +300,8 @@ impl ServoSample {
         Self { ingress, offset }
     }
 
-    fn master_estimate(&self) -> TimeStamp {
-        self.ingress - self.offset
+    fn master_estimate(&self) -> Option<TimeStamp> {
+        self.ingress.checked_sub(self.offset)
     }
 
     fn log(&self, metrics: &dyn ClockMetrics) {
@@ -353,7 +362,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            ServoStepDecision::StepTo(sample.master_estimate())
+            ServoStepDecision::StepTo(sample.master_estimate().unwrap())
         );
     }
 
@@ -369,7 +378,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            ServoStepDecision::StepTo(sample.master_estimate())
+            ServoStepDecision::StepTo(sample.master_estimate().unwrap())
         );
     }
 
@@ -390,7 +399,7 @@ mod tests {
         let decision = step_policy.should_step(&second);
         assert_eq!(
             decision,
-            ServoStepDecision::StepTo(second.master_estimate())
+            ServoStepDecision::StepTo(second.master_estimate().unwrap())
         );
     }
 
@@ -408,6 +417,16 @@ mod tests {
         // Second sample would have exceeded steady threshold if it were enabled; zero disables it.
         let second = ServoSample::new(TimeStamp::new(10, 0), TimeInterval::new(3, 0));
         assert_eq!(step_policy.should_step(&second), ServoStepDecision::NoStep);
+    }
+
+    #[test]
+    fn step_policy_does_not_step_on_master_estimate_underflow() {
+        let step_policy = StepPolicy::new(
+            ServoThreshold::new(TimeInterval::new(1, 0)),
+            ServoThreshold::new(TimeInterval::new(1, 0)),
+        );
+        let sample = ServoSample::new(TimeStamp::new(0, 0), TimeInterval::new(5, 0));
+        assert_eq!(step_policy.should_step(&sample), ServoStepDecision::NoStep);
     }
 
     #[test]
