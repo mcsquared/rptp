@@ -1,4 +1,4 @@
-use crate::bmca::{Bmca, BmcaMasterDecision, ListeningBmca, SortedForeignClockRecords};
+use crate::bmca::{Bmca, BmcaMasterDecision, ForeignClockRecords, ListeningBmca};
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity};
@@ -6,14 +6,14 @@ use crate::portstate::{PortState, StateDecision};
 use crate::profile::PortProfile;
 use crate::time::Instant;
 
-pub struct ListeningPort<'a, P: Port, S: SortedForeignClockRecords> {
+pub struct ListeningPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: ListeningBmca<'a, S>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     profile: PortProfile,
 }
 
-impl<'a, P: Port, S: SortedForeignClockRecords> ListeningPort<'a, P, S> {
+impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
     pub(crate) fn new(
         port: P,
         bmca: ListeningBmca<'a, S>,
@@ -84,7 +84,7 @@ mod tests {
         ClockDS, ListeningBmca,
     };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
-    use crate::infra::infra_support::SortedForeignClockRecordsVec;
+    use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, PortNumber};
@@ -98,7 +98,7 @@ mod tests {
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type ListeningTestPort<'a> =
-        ListeningPort<'a, ListeningTestDomainPort<'a>, SortedForeignClockRecordsVec>;
+        ListeningPort<'a, ListeningTestDomainPort<'a>, ForeignClockRecordsVec>;
 
     struct ListeningPortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -151,7 +151,7 @@ mod tests {
                         &self.foreign_candidates,
                         PortNumber::new(1),
                     ),
-                    BestForeignRecord::new(PortNumber::new(1), SortedForeignClockRecordsVec::new()),
+                    BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
                 ),
                 announce_receipt_timeout,
                 PortProfile::default(),

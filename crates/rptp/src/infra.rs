@@ -2,7 +2,7 @@
 pub mod infra_support {
     use std::rc::Rc;
 
-    use crate::bmca::{ForeignClockRecord, ForeignClockStatus, SortedForeignClockRecords};
+    use crate::bmca::{ForeignClockRecord, ForeignClockStatus, ForeignClockRecords};
     use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
     use crate::log::PortEvent;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
@@ -44,17 +44,17 @@ pub mod infra_support {
         }
     }
 
-    pub struct SortedForeignClockRecordsVec {
+    pub struct ForeignClockRecordsVec {
         records: Vec<ForeignClockRecord>,
     }
 
-    impl Default for SortedForeignClockRecordsVec {
+    impl Default for ForeignClockRecordsVec {
         fn default() -> Self {
             Self::new()
         }
     }
 
-    impl SortedForeignClockRecordsVec {
+    impl ForeignClockRecordsVec {
         pub fn new() -> Self {
             Self {
                 records: Vec::new(),
@@ -85,7 +85,7 @@ pub mod infra_support {
         }
     }
 
-    impl SortedForeignClockRecords for SortedForeignClockRecordsVec {
+    impl ForeignClockRecords for ForeignClockRecordsVec {
         fn remember(&mut self, record: ForeignClockRecord) {
             if let Some(existing) = self
                 .records
@@ -114,7 +114,7 @@ pub mod infra_support {
         }
     }
 
-    impl<S: SortedForeignClockRecords> SortedForeignClockRecords for &mut S {
+    impl<S: ForeignClockRecords> ForeignClockRecords for &mut S {
         fn remember(&mut self, record: ForeignClockRecord) {
             (*self).remember(record);
         }
@@ -138,8 +138,8 @@ pub mod infra_support {
         use crate::time::{Instant, LogInterval};
 
         #[test]
-        fn sorted_foreign_vec_maintains_best_record_first() {
-            let mut records = SortedForeignClockRecordsVec::new();
+        fn foreign_vec_maintains_best_record_first() {
+            let mut records = ForeignClockRecordsVec::new();
 
             let high_clock =
                 TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
@@ -206,7 +206,7 @@ pub mod infra_support {
         }
 
         #[test]
-        fn sorted_foreign_vec_prune_stale_returns_true_when_records_removed() {
+        fn foreign_vec_prune_stale_returns_true_when_records_removed() {
             let high_clock =
                 TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
             let high_port_id = PortIdentity::new(
@@ -214,7 +214,7 @@ pub mod infra_support {
                 PortNumber::new(1),
             );
 
-            let mut records = SortedForeignClockRecordsVec::new();
+            let mut records = ForeignClockRecordsVec::new();
             records.remember(ForeignClockRecord::new(
                 high_port_id,
                 high_clock,
@@ -230,7 +230,7 @@ pub mod infra_support {
         }
 
         #[test]
-        fn sorted_foreign_vec_prune_stale_returns_false_when_no_records_are_stale() {
+        fn foreign_vec_prune_stale_returns_false_when_no_records_are_stale() {
             let high_clock =
                 TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
             let high_port_id = PortIdentity::new(
@@ -238,7 +238,7 @@ pub mod infra_support {
                 PortNumber::new(1),
             );
 
-            let mut records = SortedForeignClockRecordsVec::new();
+            let mut records = ForeignClockRecordsVec::new();
             records.remember(ForeignClockRecord::new(
                 high_port_id,
                 high_clock,

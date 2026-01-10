@@ -1,19 +1,19 @@
 use crate::bmca::{
-    BestForeignRecord, BestMasterClockAlgorithm, ListeningBmca, SortedForeignClockRecords,
+    BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, ListeningBmca,
 };
 use crate::log::PortEvent;
 use crate::port::Port;
 use crate::portstate::PortState;
 use crate::profile::PortProfile;
 
-pub struct InitializingPort<'a, P: Port, S: SortedForeignClockRecords> {
+pub struct InitializingPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: BestMasterClockAlgorithm<'a>,
     best_foreign: BestForeignRecord<S>,
     profile: PortProfile,
 }
 
-impl<'a, P: Port, S: SortedForeignClockRecords> InitializingPort<'a, P, S> {
+impl<'a, P: Port, S: ForeignClockRecords> InitializingPort<'a, P, S> {
     pub(crate) fn new(
         port: P,
         bmca: BestMasterClockAlgorithm<'a>,
@@ -46,7 +46,7 @@ mod tests {
     use core::cell::Cell;
 
     use crate::clock::LocalClock;
-    use crate::infra::infra_support::SortedForeignClockRecordsVec;
+    use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
@@ -76,7 +76,7 @@ mod tests {
                 PortNumber::new(1),
             ),
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
-            BestForeignRecord::new(PortNumber::new(1), SortedForeignClockRecordsVec::new()),
+            BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
             PortProfile::default(),
         );
 

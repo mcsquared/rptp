@@ -25,7 +25,7 @@ use crate::time::Duration;
 
 use crate::bmca::{
     BestForeignRecord, BestMasterClockAlgorithm, LocalGrandMasterCandidate,
-    SortedForeignClockRecords,
+    ForeignClockRecords,
 };
 use crate::port::{ParentPortIdentity, Port};
 use crate::portstate::PortState;
@@ -231,33 +231,33 @@ impl SynchronizableClock for FakeClock {
     }
 }
 
-pub fn master_test_port<'a, P: Port, S: SortedForeignClockRecords>(
+pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
     port: P,
     local_candidate: &'a dyn LocalGrandMasterCandidate,
-    sorted_foreign_clock_records: S,
+    foreign_clock_records: S,
     foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
     profile: PortProfile,
 ) -> PortState<'a, P, S> {
     let grandmaster_id = *port.local_clock().identity();
     let bmca = GrandMasterTrackingBmca::new(
         BestMasterClockAlgorithm::new(local_candidate, foreign_candidates, PortNumber::new(1)),
-        BestForeignRecord::new(PortNumber::new(1), sorted_foreign_clock_records),
+        BestForeignRecord::new(PortNumber::new(1), foreign_clock_records),
         grandmaster_id,
     );
     profile.master(port, bmca)
 }
 
-pub fn slave_test_port<'a, P: Port, S: SortedForeignClockRecords>(
+pub fn slave_test_port<'a, P: Port, S: ForeignClockRecords>(
     port: P,
     local_candidate: &'a dyn LocalGrandMasterCandidate,
-    sorted_foreign_clock_records: S,
+    foreign_clock_records: S,
     foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
     parent_port_identity: ParentPortIdentity,
     profile: PortProfile,
 ) -> PortState<'a, P, S> {
     let bmca = ParentTrackingBmca::new(
         BestMasterClockAlgorithm::new(local_candidate, foreign_candidates, PortNumber::new(1)),
-        BestForeignRecord::new(PortNumber::new(1), sorted_foreign_clock_records),
+        BestForeignRecord::new(PortNumber::new(1), foreign_clock_records),
         parent_port_identity,
     );
     let delay_timeout = port.timeout(SystemMessage::DelayRequestTimeout);

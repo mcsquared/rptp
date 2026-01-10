@@ -319,7 +319,7 @@ mod tests {
             ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
             SynchronizableClock, TimeScale,
         },
-        infra::infra_support::SortedForeignClockRecordsVec,
+        infra::infra_support::ForeignClockRecordsVec,
         log::NOOP_CLOCK_METRICS,
         message::{EventMessage, GeneralMessage},
         port::{DomainPort, ParentPortIdentity, PortIdentity, PortNumber, SingleDomainPortMap},
@@ -345,7 +345,7 @@ mod tests {
     type TestPortMap<'a, C> = SingleDomainPortMap<
         'a,
         Box<DomainPort<'a, C, TokioTimerHost, FakeTimestamping, TracingPortLog>>,
-        SortedForeignClockRecordsVec,
+        ForeignClockRecordsVec,
     >;
 
     type TestPortsLoop<'a, C, N> = TokioPortsLoop<TestPortMap<'a, C>, N, FakeTimestamping>;
@@ -409,7 +409,7 @@ mod tests {
             let port_state = master_test_port(
                 domain_port,
                 default_ds,
-                SortedForeignClockRecordsVec::new(),
+                ForeignClockRecordsVec::new(),
                 foreign_candidates,
                 PortProfile::default(),
             );
@@ -451,7 +451,7 @@ mod tests {
                         TracingPortLog,
                     >,
                 >,
-                SortedForeignClockRecordsVec,
+                ForeignClockRecordsVec,
             >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
@@ -547,7 +547,7 @@ mod tests {
         let port_state = master_test_port(
             domain_port,
             &default_ds,
-            SortedForeignClockRecordsVec::new(),
+            ForeignClockRecordsVec::new(),
             &foreign_candidates,
             PortProfile::default(),
         );
@@ -646,7 +646,7 @@ mod tests {
         let port_state = slave_test_port(
             domain_port,
             &default_ds,
-            SortedForeignClockRecordsVec::new(),
+            ForeignClockRecordsVec::new(),
             &foreign_candidates,
             parent_port_identity,
             PortProfile::new(

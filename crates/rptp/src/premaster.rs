@@ -1,4 +1,4 @@
-use crate::bmca::{Bmca, BmcaMasterDecision, GrandMasterTrackingBmca, SortedForeignClockRecords};
+use crate::bmca::{Bmca, BmcaMasterDecision, ForeignClockRecords, GrandMasterTrackingBmca};
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{ParentPortIdentity, Port, PortIdentity};
@@ -6,14 +6,14 @@ use crate::portstate::{PortState, StateDecision};
 use crate::profile::PortProfile;
 use crate::time::Instant;
 
-pub struct PreMasterPort<'a, P: Port, S: SortedForeignClockRecords> {
+pub struct PreMasterPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: GrandMasterTrackingBmca<'a, S>,
     _qualification_timeout: P::Timeout,
     profile: PortProfile,
 }
 
-impl<'a, P: Port, S: SortedForeignClockRecords> PreMasterPort<'a, P, S> {
+impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
     pub(crate) fn new(
         port: P,
         bmca: GrandMasterTrackingBmca<'a, S>,
@@ -82,7 +82,7 @@ mod tests {
         ForeignClockRecord, GrandMasterTrackingBmca,
     };
     use crate::clock::{LocalClock, StepsRemoved, TimeScale};
-    use crate::infra::infra_support::SortedForeignClockRecordsVec;
+    use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, PortNumber};
@@ -98,7 +98,7 @@ mod tests {
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type PreMasterTestPort<'a> =
-        PreMasterPort<'a, PreMasterTestDomainPort<'a>, SortedForeignClockRecordsVec>;
+        PreMasterPort<'a, PreMasterTestDomainPort<'a>, ForeignClockRecordsVec>;
 
     struct PreMasterPortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -145,10 +145,7 @@ mod tests {
                         &self.foreign_candidates,
                         PortNumber::new(1),
                     ),
-                    BestForeignRecord::new(
-                        PortNumber::new(1),
-                        SortedForeignClockRecordsVec::from_records(records),
-                    ),
+                    BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::from_records(records)),
                     grandmaster_id,
                 ),
                 qualification_timeout,

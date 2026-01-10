@@ -1,5 +1,5 @@
 use crate::bmca::{
-    Bmca, BmcaMasterDecision, GrandMaster, GrandMasterTrackingBmca, SortedForeignClockRecords,
+    Bmca, BmcaMasterDecision, ForeignClockRecords, GrandMaster, GrandMasterTrackingBmca,
 };
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortEvent;
@@ -12,7 +12,7 @@ use crate::portstate::{PortState, StateDecision};
 use crate::profile::PortProfile;
 use crate::time::{Instant, LogInterval, TimeStamp};
 
-pub struct MasterPort<'a, P: Port, S: SortedForeignClockRecords> {
+pub struct MasterPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: GrandMasterTrackingBmca<'a, S>,
     announce_cycle: AnnounceCycle<P::Timeout>,
@@ -20,7 +20,7 @@ pub struct MasterPort<'a, P: Port, S: SortedForeignClockRecords> {
     profile: PortProfile,
 }
 
-impl<'a, P: Port, S: SortedForeignClockRecords> MasterPort<'a, P, S> {
+impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
     pub(crate) fn new(
         port: P,
         bmca: GrandMasterTrackingBmca<'a, S>,
@@ -202,7 +202,7 @@ mod tests {
         ForeignClockRecord, GrandMasterTrackingBmca,
     };
     use crate::clock::{LocalClock, StepsRemoved, TimeScale};
-    use crate::infra::infra_support::SortedForeignClockRecordsVec;
+    use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{
         DelayResponseMessage, EventMessage, FollowUpMessage, GeneralMessage, SystemMessage,
@@ -219,7 +219,7 @@ mod tests {
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type MasterTestPort<'a> =
-        MasterPort<'a, MasterTestDomainPort<'a>, SortedForeignClockRecordsVec>;
+        MasterPort<'a, MasterTestDomainPort<'a>, ForeignClockRecordsVec>;
 
     struct MasterPortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -278,10 +278,7 @@ mod tests {
                         &self.foreign_candidates,
                         PortNumber::new(1),
                     ),
-                    BestForeignRecord::new(
-                        PortNumber::new(1),
-                        SortedForeignClockRecordsVec::from_records(records),
-                    ),
+                    BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::from_records(records)),
                     grandmaster_id,
                 ),
                 announce_cycle,

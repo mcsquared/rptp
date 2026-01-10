@@ -16,7 +16,7 @@ use rptp::{
         Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
         SynchronizableClock, TimeScale,
     },
-    heapless::HeaplessSortedForeignClockRecords,
+    heapless::HeaplessForeignClockRecords,
     log::{NOOP_CLOCK_METRICS, PortEvent, PortLog},
     message::{EventMessage, MessageIngress, SystemMessage, TimestampMessage},
     ordinary::OrdinaryClock,
@@ -503,7 +503,7 @@ fn main() -> ! {
         DemoTimerHost::new(&instant_clock),
         DemoTimestamping::new(&demo_clock),
         DemoPortLog,
-        HeaplessSortedForeignClockRecords::<4>::new(),
+        HeaplessForeignClockRecords::<4>::new(),
     );
     let mut port_map = SingleDomainPortMap::new(ordinary_clock.domain_number(), port);
     port_map

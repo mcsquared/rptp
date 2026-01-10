@@ -1,19 +1,19 @@
 use heapless::Vec;
 
-use crate::bmca::{ForeignClockRecord, ForeignClockStatus, SortedForeignClockRecords};
+use crate::bmca::{ForeignClockRecord, ForeignClockStatus, ForeignClockRecords};
 
-/// Heapless implementation of [`SortedForeignClockRecords`] backed by a bounded
+/// Heapless implementation of [`ForeignClockRecords`] backed by a bounded
 /// `heapless::Vec`.
 ///
 /// This type is intended for embedded adopters that want a ready‑made fixed‑capacity
 /// foreign clock store. Applications that prefer to supply their own storage can
-/// ignore this type and implement [`SortedForeignClockRecords`] on their own.
-pub struct HeaplessSortedForeignClockRecords<const N: usize> {
+/// ignore this type and implement [`ForeignClockRecords`] on their own.
+pub struct HeaplessForeignClockRecords<const N: usize> {
     records: Vec<ForeignClockRecord, N>,
     removal_policy: RemovalPolicy,
 }
 
-impl<const N: usize> HeaplessSortedForeignClockRecords<N> {
+impl<const N: usize> HeaplessForeignClockRecords<N> {
     pub fn new() -> Self {
         Self {
             records: Vec::new(),
@@ -33,13 +33,13 @@ impl<const N: usize> HeaplessSortedForeignClockRecords<N> {
     }
 }
 
-impl Default for HeaplessSortedForeignClockRecords<0> {
+impl Default for HeaplessForeignClockRecords<0> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const N: usize> SortedForeignClockRecords for HeaplessSortedForeignClockRecords<N> {
+impl<const N: usize> ForeignClockRecords for HeaplessForeignClockRecords<N> {
     fn remember(&mut self, record: ForeignClockRecord) {
         if let Some(existing) = self
             .records
@@ -130,7 +130,7 @@ mod tests {
         let mid_port_id = new_port_identity(2);
         let low_port_id = new_port_identity(3);
 
-        let records = HeaplessSortedForeignClockRecords::<4>::from_records(&[
+        let records = HeaplessForeignClockRecords::<4>::from_records(&[
             ForeignClockRecord::qualified(
                 high_port_id,
                 high_clock,
@@ -173,7 +173,7 @@ mod tests {
         let low_port_id = new_port_identity(3);
 
         // Start with mid and low, both qualified.
-        let mut records = HeaplessSortedForeignClockRecords::<2>::from_records(&[
+        let mut records = HeaplessForeignClockRecords::<2>::from_records(&[
             ForeignClockRecord::qualified(
                 mid_port_id,
                 mid_clock,
@@ -247,7 +247,7 @@ mod tests {
         let low_port_id = new_port_identity(3);
 
         // Start with high and mid, both qualified.
-        let mut records = HeaplessSortedForeignClockRecords::<2>::from_records(&[
+        let mut records = HeaplessForeignClockRecords::<2>::from_records(&[
             ForeignClockRecord::qualified(
                 high_port_id,
                 high_clock,
@@ -314,7 +314,7 @@ mod tests {
         let high_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
         let high_port_id = new_port_identity(1);
 
-        let mut records = HeaplessSortedForeignClockRecords::<4>::new();
+        let mut records = HeaplessForeignClockRecords::<4>::new();
         records.remember(ForeignClockRecord::new(
             high_port_id,
             high_clock,
@@ -338,7 +338,7 @@ mod tests {
         let high_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
         let high_port_id = new_port_identity(1);
 
-        let mut records = HeaplessSortedForeignClockRecords::<4>::new();
+        let mut records = HeaplessForeignClockRecords::<4>::new();
         records.remember(ForeignClockRecord::new(
             high_port_id,
             high_clock,

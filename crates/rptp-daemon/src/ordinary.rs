@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use rptp::{
     bmca::ClockDS,
     clock::{LocalClock, SynchronizableClock},
-    infra::infra_support::SortedForeignClockRecordsVec,
+    infra::infra_support::ForeignClockRecordsVec,
     message::SystemMessage,
     ordinary::OrdinaryClock,
     port::{DomainNumber, DomainPort, PortIdentity, PortNumber},
@@ -18,7 +18,7 @@ use crate::node::{TokioPhysicalPort, TokioTimerHost};
 pub type TokioPort<'a, C, TS> = PortState<
     'a,
     DomainPort<'a, C, TokioTimerHost, TS, TracingPortLog>,
-    SortedForeignClockRecordsVec,
+    ForeignClockRecordsVec,
 >;
 
 pub struct OrdinaryTokioClock<C: SynchronizableClock> {
@@ -63,7 +63,7 @@ impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
                 *self.ordinary_clock.local_clock().identity(),
                 self.ordinary_clock.port_number(),
             )),
-            SortedForeignClockRecordsVec::new(),
+            ForeignClockRecordsVec::new(),
         )
     }
 }

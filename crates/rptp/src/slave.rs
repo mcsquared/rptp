@@ -1,4 +1,4 @@
-use crate::bmca::{Bmca, BmcaMasterDecision, ParentTrackingBmca, SortedForeignClockRecords};
+use crate::bmca::{Bmca, BmcaMasterDecision, ForeignClockRecords, ParentTrackingBmca};
 use crate::e2e::EndToEndDelayMechanism;
 use crate::log::PortEvent;
 use crate::message::{
@@ -12,7 +12,7 @@ use crate::servo::ServoState;
 use crate::time::{Instant, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 
-pub struct SlavePort<'a, P: Port, S: SortedForeignClockRecords> {
+pub struct SlavePort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: ParentTrackingBmca<'a, S>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
@@ -20,7 +20,7 @@ pub struct SlavePort<'a, P: Port, S: SortedForeignClockRecords> {
     profile: PortProfile,
 }
 
-impl<'a, P: Port, S: SortedForeignClockRecords> SlavePort<'a, P, S> {
+impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
     pub(crate) fn new(
         port: P,
         bmca: ParentTrackingBmca<'a, S>,
@@ -203,7 +203,7 @@ mod tests {
     };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::e2e::DelayCycle;
-    use crate::infra::infra_support::SortedForeignClockRecordsVec;
+    use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
@@ -216,7 +216,7 @@ mod tests {
     type SlaveTestDomainPort<'a> =
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type SlaveTestPort<'a> = SlavePort<'a, SlaveTestDomainPort<'a>, SortedForeignClockRecordsVec>;
+    type SlaveTestPort<'a> = SlavePort<'a, SlaveTestDomainPort<'a>, ForeignClockRecordsVec>;
 
     struct SlavePortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -270,10 +270,7 @@ mod tests {
                         &self.foreign_candidates,
                         PortNumber::new(1),
                     ),
-                    BestForeignRecord::new(
-                        PortNumber::new(1),
-                        SortedForeignClockRecordsVec::from_records(records),
-                    ),
+                    BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::from_records(records)),
                     ParentPortIdentity::new(parent),
                 ),
                 AnnounceReceiptTimeout::new(

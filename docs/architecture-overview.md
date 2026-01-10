@@ -132,7 +132,7 @@ BMCA (Best Master Clock Algorithm) is expressed as a collaboration of small obje
 #### Inputs: Announce messages, accumulated over time
 
 - An incoming `AnnounceMessage` carries a foreign clock dataset (`ClockDS`), which it feeds (`feed_bmca()`) into objects implementing the `Bmca` trait.
-- `Bmca` objects keep records of foreign clocks seen through announce messages in a store behind `SortedForeignClockRecords` (chosen by the infrastructure: `Vec`, heapless, etc.).
+- `Bmca` objects keep records of foreign clocks seen through announce messages in a store behind `ForeignClockRecords` (chosen by the infrastructure: `Vec`, heapless, etc.).
 - Records are qualified or considered stale by collaborating with `SlidingWindowQualification`, which encodes the time window-based qualification rules.
 
 #### Core decision: local candidate vs. foreign candidates

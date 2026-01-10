@@ -1,6 +1,6 @@
 use crate::bmca::{
     BestForeignRecord, BestMasterClockAlgorithm, GrandMasterTrackingBmca, ListeningBmca,
-    ParentTrackingBmca, QualificationTimeoutPolicy, SortedForeignClockRecords,
+    ForeignClockRecords, ParentTrackingBmca, QualificationTimeoutPolicy,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::initializing::InitializingPort;
@@ -53,7 +53,7 @@ impl PortProfile {
         self.log_min_delay_request_interval
     }
 
-    pub(crate) fn initializing<P: Port, S: SortedForeignClockRecords>(
+    pub(crate) fn initializing<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
         bmca: BestMasterClockAlgorithm,
@@ -67,7 +67,7 @@ impl PortProfile {
         ))
     }
 
-    pub(crate) fn listening<P: Port, S: SortedForeignClockRecords>(
+    pub(crate) fn listening<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
         bmca: ListeningBmca<S>,
@@ -86,7 +86,7 @@ impl PortProfile {
         ))
     }
 
-    pub(crate) fn master<P: Port, S: SortedForeignClockRecords>(
+    pub(crate) fn master<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
         bmca: GrandMasterTrackingBmca<S>,
@@ -108,7 +108,7 @@ impl PortProfile {
         ))
     }
 
-    pub(crate) fn slave<P: Port, S: SortedForeignClockRecords>(
+    pub(crate) fn slave<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
         bmca: ParentTrackingBmca<S>,
@@ -129,7 +129,7 @@ impl PortProfile {
         ))
     }
 
-    pub(crate) fn pre_master<P: Port, S: SortedForeignClockRecords>(
+    pub(crate) fn pre_master<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
         bmca: GrandMasterTrackingBmca<S>,
@@ -142,7 +142,7 @@ impl PortProfile {
         PortState::PreMaster(PreMasterPort::new(port, bmca, qualification_timeout, self))
     }
 
-    pub(crate) fn uncalibrated<P: Port, S: SortedForeignClockRecords>(
+    pub(crate) fn uncalibrated<P: Port, S: ForeignClockRecords>(
         self,
         port: P,
         bmca: ParentTrackingBmca<S>,
