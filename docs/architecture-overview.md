@@ -77,6 +77,13 @@ state object behaviour (Listening/Master/Slave/...) (crates/rptp/src/[master|sla
   * Port states modeled as distinct types.
     So port state is not a variable, not data, not a mutable integer field, but more like a role an inner `Port` object steps out and into, see the "Ports as Roles" section below.
 
+#### `PortProfile`: policy + assembly (early PTP profile hook)
+
+Port states aim to stay focused on protocol behaviour and avoid turning into configuration carriers.
+The `PortProfile` object (`crates/rptp/src/profile.rs`) holds port-level timing policies (log intervals, timeout intervals) and performs the trivial assembly work to produce fully wired port role instances (timeouts, cycles, delay mechanism) as a `PortState`.
+
+This is an early design hook for later support of PTP profiles: a profile can become the single place where profile-specific timing and policy decisions live, while the individual port state types remain cohesive and primarily concerned with behaviour.
+
 ### 2.2 Timestamping: where time enters
 
 Two different time inputs are used in the current design:
