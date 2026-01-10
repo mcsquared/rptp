@@ -87,7 +87,7 @@ These are some classics that shaped the project and its design philosophy.
 - **Elegant Objects (Vol. 1 & 2)** – Yegor Bugayenko  
   Opinionated — but all the better for it.
   A solid provocation against procedural, data-centric “OO”, with pressure toward small, focused, meaningful objects.
-  A core idea borrowed from this book: vertically stacking and composing behaviour with composable decorators.
+  Core ideas borrowed from this book: vertically stacking and composing behaviour with composable decorators, as well as the idea of code-free constructors.
 
 ---
 
