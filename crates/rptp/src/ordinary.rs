@@ -6,7 +6,8 @@ use crate::bmca::{
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::port::{DomainNumber, DomainPort, PhysicalPort, PortNumber, TimerHost};
-use crate::portstate::{PortProfile, PortState};
+use crate::portstate::PortState;
+use crate::profile::PortProfile;
 use crate::timestamping::TxTimestamping;
 
 pub struct OrdinaryClock<C: SynchronizableClock> {

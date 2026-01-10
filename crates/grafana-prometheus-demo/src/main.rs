@@ -4,10 +4,11 @@ mod node;
 
 use std::rc::Rc;
 
-use rptp::bmca::{Priority1, Priority2};
 use rptp::bmca::ClockDS;
+use rptp::bmca::{Priority1, Priority2};
 use rptp::clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved};
 use rptp::port::DomainNumber;
+use rptp::profile::PortProfile;
 use rptp::servo::{Drift, ServoThreshold};
 use rptp::time::{TimeInterval, TimeStamp};
 
@@ -40,7 +41,7 @@ async fn main() -> std::io::Result<()> {
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Unknown, 0xFFFF),
             StepsRemoved::new(0),
         ),
-        profile: rptp::portstate::PortProfile::default(),
+        profile: PortProfile::default(),
         servo: PiServoConfig {
             first_step_threshold: ServoThreshold::disabled(),
             step_threshold: ServoThreshold::disabled(),
@@ -73,7 +74,7 @@ async fn main() -> std::io::Result<()> {
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Unknown, 0xFFFF),
             StepsRemoved::new(0),
         ),
-        profile: rptp::portstate::PortProfile::default(),
+        profile: PortProfile::default(),
         servo: PiServoConfig {
             first_step_threshold: ServoThreshold::new(TimeInterval::new(1, 0)),
             step_threshold: ServoThreshold::new(TimeInterval::new(0, 500_000_000)),

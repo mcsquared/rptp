@@ -6,7 +6,8 @@ use crate::message::{
     OneStepSyncMessage, TwoStepSyncMessage,
 };
 use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity, SendResult};
-use crate::portstate::{PortProfile, PortState, StateDecision};
+use crate::portstate::{PortState, StateDecision};
+use crate::profile::PortProfile;
 use crate::servo::ServoState;
 use crate::time::{Instant, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;

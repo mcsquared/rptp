@@ -8,7 +8,8 @@ use crate::message::{
     TwoStepSyncMessage,
 };
 use crate::port::{ParentPortIdentity, Port, PortIdentity, SendResult, Timeout};
-use crate::portstate::{PortProfile, PortState, StateDecision};
+use crate::portstate::{PortState, StateDecision};
+use crate::profile::PortProfile;
 use crate::time::{Instant, LogInterval, TimeStamp};
 
 pub struct MasterPort<'a, P: Port, S: SortedForeignClockRecords> {

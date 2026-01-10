@@ -8,6 +8,7 @@ pub mod message;
 pub mod ordinary;
 pub mod port;
 pub mod portstate;
+pub mod profile;
 pub mod result;
 pub mod servo;
 pub mod time;

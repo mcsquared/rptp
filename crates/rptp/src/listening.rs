@@ -2,7 +2,8 @@ use crate::bmca::{Bmca, BmcaMasterDecision, ListeningBmca, SortedForeignClockRec
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity};
-use crate::portstate::{PortProfile, PortState, StateDecision};
+use crate::portstate::{PortState, StateDecision};
+use crate::profile::PortProfile;
 use crate::time::Instant;
 
 pub struct ListeningPort<'a, P: Port, S: SortedForeignClockRecords> {

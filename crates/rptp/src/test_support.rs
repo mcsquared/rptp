@@ -28,7 +28,8 @@ use crate::bmca::{
     SortedForeignClockRecords,
 };
 use crate::port::{ParentPortIdentity, Port};
-use crate::portstate::{PortProfile, PortState};
+use crate::portstate::PortState;
+use crate::profile::PortProfile;
 
 pub struct TestClockCatalog {
     clock_identity: ClockIdentity,

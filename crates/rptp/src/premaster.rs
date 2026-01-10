@@ -2,7 +2,8 @@ use crate::bmca::{Bmca, BmcaMasterDecision, GrandMasterTrackingBmca, SortedForei
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{ParentPortIdentity, Port, PortIdentity};
-use crate::portstate::{PortProfile, PortState, StateDecision};
+use crate::portstate::{PortState, StateDecision};
+use crate::profile::PortProfile;
 use crate::time::Instant;
 
 pub struct PreMasterPort<'a, P: Port, S: SortedForeignClockRecords> {

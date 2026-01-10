@@ -323,7 +323,8 @@ mod tests {
         log::NOOP_CLOCK_METRICS,
         message::{EventMessage, GeneralMessage},
         port::{DomainPort, ParentPortIdentity, PortIdentity, PortNumber, SingleDomainPortMap},
-        portstate::{PortProfile, PortState},
+        portstate::PortState,
+        profile::PortProfile,
         servo::{Servo, SteppingServo},
         test_support::{
             FakeClock, FakeTimestamping, TestMessage, master_test_port, slave_test_port,

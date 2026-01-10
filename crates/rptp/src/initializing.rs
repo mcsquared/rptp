@@ -3,7 +3,8 @@ use crate::bmca::{
 };
 use crate::log::PortEvent;
 use crate::port::Port;
-use crate::portstate::{PortProfile, PortState};
+use crate::portstate::PortState;
+use crate::profile::PortProfile;
 
 pub struct InitializingPort<'a, P: Port, S: SortedForeignClockRecords> {
     port: P,

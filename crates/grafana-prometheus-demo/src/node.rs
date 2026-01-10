@@ -9,7 +9,7 @@ use rptp::bmca::ClockDS;
 use rptp::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
 use rptp::log::ClockMetrics;
 use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
-use rptp::portstate::PortProfile;
+use rptp::profile::PortProfile;
 use rptp::servo::{
     Drift, PiLoop, PiServo, Servo, ServoDriftEstimate, ServoState, ServoThreshold, StepPolicy,
 };
@@ -129,8 +129,7 @@ impl<N: NetworkSocket> PrometheusNode<N> {
         let timestamping = ClockTxTimestamping::new(&*virtual_clock, system_tx.clone(), domain);
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let ordinary =
-            OrdinaryTokioClock::new(local_clock, default_ds, domain, port_number);
+        let ordinary = OrdinaryTokioClock::new(local_clock, default_ds, domain, port_number);
         let port_state = ordinary.port(&physical_port, system_tx, &timestamping);
         let portmap = SingleDomainPortMap::new(domain, port_state);
 
