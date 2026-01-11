@@ -1,3 +1,11 @@
+//! Tokio networking helpers used by the daemon runtime.
+//!
+//! The daemon’s transport is intentionally narrow: it mostly needs a UDP socket that can receive
+//! datagrams and send PTP event/general messages, plus a lightweight fake for unit tests.
+//!
+//! [`MulticastSocket`] binds UDP port 319 (event) or 320 (general) and joins the standard PTPv2
+//! IPv4 multicast group (`224.0.1.129`) with TTL 1 and multicast loopback disabled.
+
 use std::future::Future;
 use std::io::Result;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -5,16 +13,31 @@ use std::rc::Rc;
 
 use tokio::net::UdpSocket;
 
+/// Minimal async UDP socket interface used by the daemon IO loop.
+///
+/// Implementations are expected to be cheap to clone/share and to work in Tokio tasks.
 pub trait NetworkSocket {
+    /// Receive a datagram into `buf`, returning the number of bytes written and the sender address.
     fn recv<'a>(
         &'a self,
         buf: &'a mut [u8],
     ) -> impl Future<Output = Result<(usize, SocketAddr)>> + 'a;
 
+    /// Send a datagram to the socket’s configured destination.
     fn send<'a>(&'a self, bytes: &'a [u8]) -> impl Future<Output = Result<usize>> + 'a;
+
+    /// Best-effort, non-async send to the socket’s configured destination.
+    ///
+    /// This is used where the daemon wants to avoid `.await` in contexts that already hold locks
+    /// or are otherwise latency-sensitive. It uses the underlying `UdpSocket::try_send_to`.
     fn try_send(&self, bytes: &[u8]) -> Result<usize>;
 }
 
+/// A UDP socket bound to the PTP multicast group for event or general messages.
+///
+/// This socket:
+/// - binds to `0.0.0.0:<port>` (to receive multicast), and
+/// - sends to the configured PTP multicast destination.
 #[derive(Debug)]
 pub struct MulticastSocket {
     socket: UdpSocket,
@@ -22,12 +45,15 @@ pub struct MulticastSocket {
 }
 
 impl MulticastSocket {
+    /// PTPv2 IPv4 multicast group (IEEE 1588).
     const PTP_MCAST: Ipv4Addr = Ipv4Addr::new(224, 0, 1, 129);
 
+    /// Bind a socket for PTP event messages (UDP port 319).
     pub async fn event() -> Result<Self> {
         Self::bind_v4(Self::PTP_MCAST, 319).await
     }
 
+    /// Bind a socket for PTP general messages (UDP port 320).
     pub async fn general() -> Result<Self> {
         Self::bind_v4(Self::PTP_MCAST, 320).await
     }
@@ -59,11 +85,16 @@ impl NetworkSocket for MulticastSocket {
     }
 }
 
+/// Fake `NetworkSocket` implementation that captures transmitted bytes into a channel.
+///
+/// This is used by unit tests that want to assert what would have been sent without binding real
+/// UDP sockets. Receiving is not supported (it awaits forever).
 pub struct FakeNetworkSocket {
     tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
 }
 
 impl FakeNetworkSocket {
+    /// Create a fake socket plus the receiver that yields sent datagrams.
     pub fn new() -> (Self, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         (Self { tx }, rx)

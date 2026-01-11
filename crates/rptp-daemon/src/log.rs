@@ -1,11 +1,22 @@
+//! Daemon-side log sinks for `rptp` domain events.
+//!
+//! The `rptp` core crate emits structured domain events via [`rptp::log::PortLog`]. The daemon
+//! integrates this with the `tracing` ecosystem by providing a `PortLog` implementation that
+//! formats those events as tracing spans/events.
+
 use rptp::{log::PortEvent, log::PortLog, port::PortIdentity};
 
+/// [`PortLog`] implementation that forwards domain [`PortEvent`]s to `tracing`.
+///
+/// This is a simple “human readable” sink intended for the daemon binary and tests. It preserves
+/// the port identity as context and maps events to `info`/`warn`/`debug` levels.
 #[derive(Clone, Copy, Debug)]
 pub struct TracingPortLog {
     port_identity: PortIdentity,
 }
 
 impl TracingPortLog {
+    /// Create a tracing log sink for a specific port.
     pub fn new(port_identity: PortIdentity) -> Self {
         Self { port_identity }
     }

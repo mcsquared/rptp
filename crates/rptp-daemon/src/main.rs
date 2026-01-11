@@ -1,3 +1,20 @@
+//! `rptp-daemon` binary entrypoint.
+//!
+//! This is a small Tokio-based executable that wires together the `rptp` domain core with a UDP
+//! transport and a clock implementation.
+//!
+//! Current characteristics (intentionally minimal / experimental):
+//! - Uses a [`VirtualClock`](crate::virtualclock::VirtualClock) as the local time source.
+//! - Uses an [`OrdinaryTokioClock`](crate::ordinary::OrdinaryTokioClock) with a single domain/port
+//!   (`domain=0`, `port=1`).
+//! - Joins the standard PTP multicast groups via [`MulticastSocket`](crate::net::MulticastSocket)
+//!   and drives IO and timers through [`TokioPortsLoop`](crate::node::TokioPortsLoop).
+//! - Installs tracing configured via `RUST_LOG` (default `info`) through
+//!   [`rptp_daemon::init_tracing`].
+//!
+//! This wiring is expected to evolve into a configurable CLI; the hard-coded dataset and virtual
+//! clock are placeholders for early development and integration testing.
+
 pub mod log;
 pub mod net;
 pub mod node;
@@ -27,6 +44,14 @@ use crate::timestamping::{ClockRxTimestamping, ClockTxTimestamping};
 use crate::virtualclock::VirtualClock;
 
 #[tokio::main(flavor = "current_thread")]
+/// Run the daemon IO loop until an error occurs.
+///
+/// The binary currently:
+/// - configures tracing,
+/// - creates sockets and system message channels,
+/// - builds an ordinary clock and domain port,
+/// - installs timestamping hooks for ingress/egress, and
+/// - runs the `TokioPortsLoop`.
 async fn main() -> std::io::Result<()> {
     rptp_daemon::init_tracing();
 

@@ -1,3 +1,14 @@
+//! Tokio runtime glue for driving `rptp` ports.
+//!
+//! This module provides the daemon-side implementations of the `rptp` infrastructure boundaries:
+//! - [`TokioTimerHost`] / [`TokioTimeout`]: schedule [`SystemMessage`]s using Tokio tasks,
+//! - [`TokioPhysicalPort`]: send event/general datagrams over UDP sockets, and
+//! - [`TokioPortsLoop`]: the main IO loop that receives UDP datagrams, parses them through
+//!   [`MessageIngress`], and forwards timer/timestamp feedback into the port state machine.
+//!
+//! The goal of this layer is to keep the async/runtime concerns out of the domain core (`crates/rptp`)
+//! while still making it easy to assemble runnable nodes.
+
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant as StdInstant;
@@ -14,6 +25,14 @@ use rptp::{
 use crate::net::NetworkSocket;
 use crate::timestamping::RxTimestamping;
 
+/// Tokio-backed implementation of the `rptp` [`Timeout`] boundary.
+///
+/// Each timeout owns:
+/// - the [`SystemMessage`] it should emit when fired, and
+/// - a join handle for the currently scheduled Tokio sleep task.
+///
+/// Calling [`Timeout::restart`] cancels any previously scheduled task (if present) and schedules a
+/// new one.
 pub struct TokioTimeout {
     inner: Arc<TokioTimeoutInner>,
 }
@@ -41,6 +60,7 @@ impl TokioTimeout {
         Self { inner }
     }
 
+    /// Cancel the currently scheduled task (if any) and schedule a new one for `delay`.
     fn reset(&self, delay: Duration) {
         let msg = *self.inner.msg.lock().unwrap();
         let mut guard = self.inner.handle.lock().unwrap();
@@ -63,6 +83,7 @@ impl TokioTimeout {
         })
     }
 
+    /// Cancel the currently scheduled task (if any).
     fn cancel(&self) {
         if let Some(handle) = self.inner.handle.lock().unwrap().take() {
             handle.abort();
@@ -82,12 +103,17 @@ impl Drop for TokioTimeout {
     }
 }
 
+/// Tokio-backed implementation of the `rptp` [`TimerHost`] boundary.
+///
+/// The timer host provides per-port `Timeout` handles. When a timeout fires it sends a
+/// `(DomainNumber, SystemMessage)` into an unbounded channel consumed by [`TokioPortsLoop`].
 pub struct TokioTimerHost {
     domain_number: DomainNumber,
     tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
 }
 
 impl TokioTimerHost {
+    /// Create a new timer host for a specific domain.
     pub fn new(
         domain_number: DomainNumber,
         tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
@@ -104,12 +130,21 @@ impl TimerHost for TokioTimerHost {
     }
 }
 
+/// `rptp` [`PhysicalPort`] implementation backed by two UDP sockets.
+///
+/// IEEE 1588 uses two UDP ports:
+/// - 319 for **event** messages, and
+/// - 320 for **general** messages.
+///
+/// `TokioPhysicalPort` expects the sockets to already be configured and uses `try_send` to avoid
+/// awaiting in the domain send path. IO errors are mapped to [`SendError`] and logged.
 pub struct TokioPhysicalPort<N: NetworkSocket> {
     event_socket: Rc<N>,
     general_socket: Rc<N>,
 }
 
 impl<N: NetworkSocket> TokioPhysicalPort<N> {
+    /// Create a new physical port over the provided event and general sockets.
     pub fn new(event_socket: Rc<N>, general_socket: Rc<N>) -> Self {
         Self {
             event_socket,
@@ -153,6 +188,15 @@ enum RxKind {
     General,
 }
 
+/// Main Tokio loop that drives one or more domain ports.
+///
+/// The loop multiplexes:
+/// - event socket receives,
+/// - general socket receives, and
+/// - internally generated [`SystemMessage`]s (timeouts, egress timestamp feedback, etc.).
+///
+/// It parses incoming datagrams through [`MessageIngress`] which dispatches into the configured
+/// [`PortMap`].
 pub struct TokioPortsLoop<P, N: NetworkSocket, R: RxTimestamping> {
     portmap: P,
     event_socket: Rc<N>,
@@ -167,6 +211,7 @@ where
     N: NetworkSocket,
     R: RxTimestamping,
 {
+    /// Create a new ports loop over the provided port map and sockets.
     pub async fn new(
         portmap: P,
         event_socket: Rc<N>,
@@ -183,10 +228,14 @@ where
         })
     }
 
+    /// Run the loop until externally terminated (signals or fatal IO error).
     pub async fn run(self) -> std::io::Result<()> {
         self.run_until(std::future::pending::<()>()).await
     }
 
+    /// Run the loop until `shutdown` completes.
+    ///
+    /// This is primarily used by tests to stop the loop after some condition has been observed.
     pub async fn run_until<F>(mut self, shutdown: F) -> std::io::Result<()>
     where
         F: std::future::Future<Output = ()>,
@@ -198,6 +247,10 @@ where
 
         tokio::pin!(shutdown);
 
+        // Kick the state machine(s) into LISTENING once infrastructure is ready.
+        //
+        // Note: this is currently hard-coded to domain 0 and will likely evolve into a more
+        // general initialization mechanism as multi-domain support matures.
         let port = self
             .portmap
             .port_by_domain(DomainNumber::new(0))
@@ -244,6 +297,11 @@ where
         }
     }
 
+    /// Process a single received datagram by parsing and dispatching it into the port map.
+    ///
+    /// - For event messages, ingress timestamps are provided by `timestamping.ingress_stamp()`.
+    /// - For general messages, `now` is a monotonic [`Instant`] used for time-window logic in the
+    ///   domain.
     fn process_datagram(&mut self, kind: RxKind, buf: &[u8], size: usize, now: Instant) {
         let label = match kind {
             RxKind::Event => "event",

@@ -1,8 +1,26 @@
+//! Tokio-based daemon infrastructure for `rptp`.
+//!
+//! The `rptp` workspace separates the protocol/domain core (`crates/rptp`) from the
+//! host/IO-facing integration layer (`crates/rptp-daemon`).
+//!
+//! This crate provides a small set of building blocks typically used by:
+//! - the `rptp-daemon` binary (`src/main.rs`), and
+//! - other binaries/tests that want to embed the same components.
+//!
+//! Most of the domain behaviour lives in the `rptp` crate; this crate focuses on wiring:
+//! networking, timestamp feedback, virtual clocks, and an `OrdinaryClock` node runtime.
+
+/// Logging/tracing integration and log sinks for daemon components.
 pub mod log;
+/// UDP/network helpers used by the daemon runtime.
 pub mod net;
+/// High-level node runtime glue (wiring ports, tasks, and IO).
 pub mod node;
+/// Daemon-side assembly of the `rptp` ordinary clock.
 pub mod ordinary;
+/// Daemon-side egress timestamping integration.
 pub mod timestamping;
+/// Virtual clock implementations for experiments and tests.
 pub mod virtualclock;
 
 use std::fmt;
@@ -11,11 +29,15 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::time::FormatTime;
 
+/// Tracing `FormatTime` implementation that prints process uptime with millisecond precision.
+///
+/// Output format example: `rptp[12.034s]`.
 struct MillisecondUptime {
     start: Instant,
 }
 
 impl MillisecondUptime {
+    /// Start an uptime timer from “now”.
     fn new() -> Self {
         Self {
             start: Instant::now(),
