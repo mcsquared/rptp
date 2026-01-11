@@ -8,7 +8,7 @@
 
 ## Introduction
 
-`rptp` is a **work in progress**: an early, exploratory, domain-driven implementation of IEEE 1588‑2019 / PTP in Rust.
+`rptp` is a **work in progress**: an early, exploratory, object-oriented, and domain-driven approach on IEEE 1588-2019, better known as Precision Time Protocol.
 
 Expect incomplete protocol coverage, rough edges, and frequent refactors as domain knowledge and understanding deepens, the model matures and tests grow.
 
@@ -60,7 +60,7 @@ You **must not** treat `rptp` or `rptp-daemon` as a hardened, production-ready P
 ### Current Status
 
 - Core PTPv2 message flows: BMCA, port state machine, and end-to-end delay mechanism for a single-port, single-domain topology.  
-- A rich, **core-centered test suite**: 200+ unit and integration tests around the domain logic; a small Tokio/e2e layer that is just large enough to drive the core.  
+- A rich, **core-centered test suite: 200+** unit and integration tests around the domain logic; a small Tokio/e2e layer that is just large enough to drive the core.  
 - Virtual clocks and software timestamping for simulation & tests.  
 - A deliberately rough but effective **bare-metal QEMU demo harness** (`crates/rptp-embedded-demo`) that runs as grandmaster on a 12 MHz Cortex‑M target, still fits within a 64‑KiB MCU budget, and is exercised by Dockerized e2e tests against `ptp4l`. It exists to keep the embedded trajectory honest, not as production firmware yet.  
 - Thin, Tokio-driven integration that wires the core to UDP multicast sockets and system timers for tests and experiments.  
@@ -73,7 +73,7 @@ These are concrete areas of work planned for the near term, before the project c
   Improve evaluation of message fields, including coarse origin timestamps in Announce and two‑step Sync messages, and other currently underused fields.
 
 - **Timescale and UTC handling**  
-  Make the PTP timescale handling explicit and correct, including leap seconds, UTC offset fields, and related flags, and reflect this clearly in the servo and tests.
+  Make the PTP timescale handling explicit and correct, including leap seconds, UTC offset fields, and related flags.
 
 - **Multi-domain and multi-port setups**  
   Extend support beyond single-domain / single-port topologies to validate and exercise the `DomainMessage` ↔ `PortMap` collaboration in more realistic deployments, including multi-port configurations and BMCA behavior for boundary clock ports.
@@ -81,10 +81,10 @@ These are concrete areas of work planned for the near term, before the project c
 - **PI servo tuning and constraints**  
   Tune the PI servo (`kp`/`ki`) based on the Sync log message interval, clamp drift in the PI servo, and derive parameters such as `min_delta` from `ki` rather than ad‑hoc choices.
 
-- **FaultyPort transitions & better error handling and and fault recovery story**  
+- **FaultyPort transitions, error handling and recovery**  
   At the moment, FaultyPort is a dead end stub in the state machine. The implementation shall support graceful fault transitions, error logging and recovery paths soon.  
 
-- **Stronger acceptance tests vs. `ptp4l`**  
+- **Stronger acceptance tests criteria.**  
   Tighten interoperability and acceptance criteria against `ptp4l`, including timescale awareness and correctness, not just message flow compatibility.
 
 ### On the Agenda
@@ -131,7 +131,7 @@ cargo clippy --all-targets --all-features
 
 ### See it in Action
 
-There are two ways to run the code at the moment: to run the e2e acceptance tests, or to run the grafana-prometheus demo.
+There are currently two ways to run the code: to run the e2e acceptance tests, or to run the grafana-prometheus demo.
 
 #### End-to-End Acceptence ("Smoke") Tests
 
@@ -151,7 +151,7 @@ cargo test -p rptp-e2e-tests -- --nocapture --ignored
 #### Grafana & Prometheus Demo
 
 This demo was introduced as a fast and easy first way to provide a graphical live view of clock sync and servo behaviour.
-It sets up two ordinary clocks connected by an software loopback, everything in-process and in-memory. This demo can be seen as an early feedback tool too, besides the other tests.
+It sets up two ordinary clocks connected through a software loopback, everything in-process and in-memory. This demo can be seen as an early feedback tool too, besides the other tests.
 
 ```sh
 cd crates/grafana-prometheus-demo
@@ -229,7 +229,7 @@ If you’re excited about:
 
 - domain-driven, object-rich modeling,
 - test-guided design in systems / embedded contexts,
-- and clean, maintainable PTP implementation,
+- and a clean, maintainable PTP implementation,
 you’re very much invited to participate.
 
 ---
