@@ -40,26 +40,26 @@ use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::time::Duration;
 
 use crate::bmca::{
-    BestForeignRecord, BestMasterClockAlgorithm, LocalGrandMasterCandidate,
-    ForeignClockRecords,
+    BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, LocalGrandMasterCandidate,
 };
 use crate::port::{ParentPortIdentity, Port};
 use crate::portstate::PortState;
 use crate::profile::PortProfile;
 
-/// Common clock datasets used in unit tests.
+/// Common `ClockDS` fixtures used in unit tests.
 ///
 /// The methods on this type return consistent identities and dataset values, allowing tests to
 /// express intent (“high grade default”, “slave-only low grade”) without repeating raw fields.
-pub struct TestClockCatalog {
+pub struct TestClockDS {
     clock_identity: ClockIdentity,
     clock_class: ClockClass,
     clock_accuracy: ClockAccuracy,
     priority1: Priority1,
     priority2: Priority2,
+    steps_removed: StepsRemoved,
 }
 
-impl TestClockCatalog {
+impl TestClockDS {
     /// A high-quality clock suitable as an “atomic grandmaster” fixture.
     pub fn atomic_grandmaster() -> Self {
         Self {
@@ -68,6 +68,7 @@ impl TestClockCatalog {
             clock_accuracy: ClockAccuracy::Within25ns,
             priority1: Priority1::new(128),
             priority2: Priority2::new(128),
+            steps_removed: StepsRemoved::new(0),
         }
     }
 
@@ -79,6 +80,7 @@ impl TestClockCatalog {
             clock_accuracy: ClockAccuracy::Within100ns,
             priority1: Priority1::new(128),
             priority2: Priority2::new(128),
+            steps_removed: StepsRemoved::new(0),
         }
     }
 
@@ -90,6 +92,7 @@ impl TestClockCatalog {
             clock_accuracy: ClockAccuracy::Within1us,
             priority1: Priority1::new(128),
             priority2: Priority2::new(128),
+            steps_removed: StepsRemoved::new(0),
         }
     }
 
@@ -101,6 +104,7 @@ impl TestClockCatalog {
             clock_accuracy: ClockAccuracy::Unknown,
             priority1: Priority1::new(128),
             priority2: Priority2::new(128),
+            steps_removed: StepsRemoved::new(0),
         }
     }
 
@@ -112,6 +116,7 @@ impl TestClockCatalog {
             clock_accuracy: ClockAccuracy::Within100ns,
             priority1: Priority1::new(128),
             priority2: Priority2::new(128),
+            steps_removed: StepsRemoved::new(0),
         }
     }
 
@@ -123,6 +128,7 @@ impl TestClockCatalog {
             clock_accuracy: ClockAccuracy::Within10us,
             priority1: Priority1::new(128),
             priority2: Priority2::new(128),
+            steps_removed: StepsRemoved::new(0),
         }
     }
 
@@ -134,6 +140,7 @@ impl TestClockCatalog {
             clock_accuracy: ClockAccuracy::Within1ms,
             priority1: Priority1::new(128),
             priority2: Priority2::new(128),
+            steps_removed: StepsRemoved::new(0),
         }
     }
 
@@ -145,6 +152,7 @@ impl TestClockCatalog {
             clock_accuracy: ClockAccuracy::Within10ms,
             priority1: Priority1::new(128),
             priority2: Priority2::new(128),
+            steps_removed: StepsRemoved::new(0),
         }
     }
 
@@ -162,29 +170,18 @@ impl TestClockCatalog {
         )
     }
 
-    /// Construct a `ClockDS` suitable for the local clock datasets in tests.
-    pub fn default_ds(&self) -> ClockDS {
+    /// Construct a `ClockDS` for this fixture.
+    pub fn dataset(&self) -> ClockDS {
         ClockDS::new(
             self.clock_identity,
             self.priority1,
             self.priority2,
             self.clock_quality(),
-            StepsRemoved::new(0),
+            self.steps_removed,
         )
     }
 
-    /// Construct a `ClockDS` for a foreign dataset, allowing `steps_removed` to be varied.
-    pub fn foreign_ds(&self, steps_removed: StepsRemoved) -> ClockDS {
-        ClockDS::new(
-            self.clock_identity,
-            self.priority1,
-            self.priority2,
-            self.clock_quality(),
-            steps_removed,
-        )
-    }
-
-    /// Return a new catalog with the identity overridden.
+    /// Return a new fixture with the identity overridden.
     pub fn with_clock_identity(self, clock_identity: ClockIdentity) -> Self {
         Self {
             clock_identity,
@@ -192,7 +189,15 @@ impl TestClockCatalog {
         }
     }
 
-    /// Return a new catalog with the clock accuracy overridden.
+    /// Return a new fixture with `steps_removed` overridden.
+    pub fn with_steps_removed(self, steps_removed: StepsRemoved) -> Self {
+        Self {
+            steps_removed,
+            ..self
+        }
+    }
+
+    /// Return a new fixture with the clock accuracy overridden.
     pub fn with_accuracy(self, accuracy: ClockAccuracy) -> Self {
         Self {
             clock_accuracy: accuracy,
@@ -200,12 +205,12 @@ impl TestClockCatalog {
         }
     }
 
-    /// Return a new catalog with `priority1` overridden.
+    /// Return a new fixture with `priority1` overridden.
     pub fn with_priority1(self, priority1: Priority1) -> Self {
         Self { priority1, ..self }
     }
 
-    /// Return a new catalog with `priority2` overridden.
+    /// Return a new fixture with `priority2` overridden.
     pub fn with_priority2(self, priority2: Priority2) -> Self {
         Self { priority2, ..self }
     }

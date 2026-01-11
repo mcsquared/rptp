@@ -294,7 +294,7 @@ mod tests {
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{
-        FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping, TestClockCatalog,
+        FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping, TestClockDS,
     };
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
@@ -313,7 +313,7 @@ mod tests {
 
     impl SlavePortTestSetup {
         fn new() -> Self {
-            Self::new_with_ds(TestClockCatalog::default_mid_grade().default_ds())
+            Self::new_with_ds(TestClockDS::default_mid_grade().dataset())
         }
 
         fn new_with_ds(ds: ClockDS) -> Self {
@@ -355,7 +355,10 @@ mod tests {
                         &self.foreign_candidates,
                         PortNumber::new(1),
                     ),
-                    BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::from_records(records)),
+                    BestForeignRecord::new(
+                        PortNumber::new(1),
+                        ForeignClockRecordsVec::from_records(records),
+                    ),
                     ParentPortIdentity::new(parent),
                 ),
                 AnnounceReceiptTimeout::new(
@@ -626,15 +629,13 @@ mod tests {
 
     #[test]
     fn slave_port_produces_no_decision_on_updated_same_parent() {
-        let setup =
-            SlavePortTestSetup::new_with_ds(TestClockCatalog::default_low_grade().default_ds());
+        let setup = SlavePortTestSetup::new_with_ds(TestClockDS::default_low_grade().dataset());
 
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
         );
-        let foreign_clock_ds =
-            TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock_ds = TestClockDS::default_mid_grade().dataset();
         let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
@@ -649,7 +650,7 @@ mod tests {
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
+                TestClockDS::default_high_grade().dataset(),
                 TimeScale::Ptp,
             ),
             parent_port,
@@ -664,15 +665,13 @@ mod tests {
     fn slave_port_produces_slave_recommendation_with_new_parent() {
         use crate::bmca::ForeignClockRecord;
 
-        let setup =
-            SlavePortTestSetup::new_with_ds(TestClockCatalog::default_low_grade().default_ds());
+        let setup = SlavePortTestSetup::new_with_ds(TestClockDS::default_low_grade().dataset());
 
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
         );
-        let foreign_clock_ds =
-            TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock_ds = TestClockDS::default_mid_grade().dataset();
         let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
@@ -691,7 +690,7 @@ mod tests {
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
+                TestClockDS::default_high_grade().dataset(),
                 TimeScale::Ptp,
             ),
             new_parent,
@@ -703,7 +702,7 @@ mod tests {
             AnnounceMessage::new(
                 43.into(),
                 LogMessageInterval::new(0),
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
+                TestClockDS::default_high_grade().dataset(),
                 TimeScale::Ptp,
             ),
             new_parent,
@@ -721,15 +720,13 @@ mod tests {
 
     #[test]
     fn slave_port_produces_master_recommendation_on_worse_announces() {
-        let setup =
-            SlavePortTestSetup::new_with_ds(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = SlavePortTestSetup::new_with_ds(TestClockDS::default_mid_grade().dataset());
 
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
         );
-        let foreign_clock_ds =
-            TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock_ds = TestClockDS::default_high_grade().dataset();
         let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
@@ -744,7 +741,7 @@ mod tests {
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
-                TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0)),
+                TestClockDS::default_low_grade_slave_only().dataset(),
                 TimeScale::Ptp,
             ),
             parent_port,

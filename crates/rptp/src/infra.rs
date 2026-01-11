@@ -20,7 +20,7 @@ pub mod infra_support {
 
     use std::rc::Rc;
 
-    use crate::bmca::{ForeignClockRecord, ForeignClockStatus, ForeignClockRecords};
+    use crate::bmca::{ForeignClockRecord, ForeignClockRecords, ForeignClockStatus};
     use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
     use crate::log::PortEvent;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
@@ -167,20 +167,17 @@ pub mod infra_support {
     mod tests {
         use super::*;
         use crate::clock::ClockIdentity;
-        use crate::clock::StepsRemoved;
         use crate::port::{PortIdentity, PortNumber};
-        use crate::test_support::TestClockCatalog;
+        use crate::test_support::TestClockDS;
         use crate::time::{Instant, LogInterval};
 
         #[test]
         fn foreign_vec_maintains_best_record_first() {
             let mut records = ForeignClockRecordsVec::new();
 
-            let high_clock =
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
-            let mid_clock = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
-            let low_clock =
-                TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
+            let high_clock = TestClockDS::default_high_grade().dataset();
+            let mid_clock = TestClockDS::default_mid_grade().dataset();
+            let low_clock = TestClockDS::default_low_grade_slave_only().dataset();
 
             let high_port_id = PortIdentity::new(
                 ClockIdentity::new(&[0, 1, 2, 3, 4, 5, 6, 1]),
@@ -242,8 +239,7 @@ pub mod infra_support {
 
         #[test]
         fn foreign_vec_prune_stale_returns_true_when_records_removed() {
-            let high_clock =
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+            let high_clock = TestClockDS::default_high_grade().dataset();
             let high_port_id = PortIdentity::new(
                 ClockIdentity::new(&[0, 1, 2, 3, 4, 5, 6, 9]),
                 PortNumber::new(1),
@@ -266,8 +262,7 @@ pub mod infra_support {
 
         #[test]
         fn foreign_vec_prune_stale_returns_false_when_no_records_are_stale() {
-            let high_clock =
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+            let high_clock = TestClockDS::default_high_grade().dataset();
             let high_port_id = PortIdentity::new(
                 ClockIdentity::new(&[0, 1, 2, 3, 4, 5, 6, 10]),
                 PortNumber::new(1),

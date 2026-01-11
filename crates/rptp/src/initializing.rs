@@ -92,14 +92,12 @@ mod tests {
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{
-        FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockCatalog,
-    };
+    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockDS};
 
     #[test]
     fn initializing_port_to_listening_transition() {
         let foreign_candidates = Cell::new(crate::bmca::BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
+        let default_ds = TestClockDS::default_mid_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *default_ds.identity(),

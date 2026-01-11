@@ -125,7 +125,7 @@ mod tests {
         BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
         ForeignClockRecord, GrandMasterTrackingBmca,
     };
-    use crate::clock::{LocalClock, StepsRemoved, TimeScale};
+    use crate::clock::{LocalClock, TimeScale};
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::SystemMessage;
@@ -133,9 +133,7 @@ mod tests {
     use crate::portstate::PortState;
     use crate::portstate::StateDecision;
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{
-        FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockCatalog,
-    };
+    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockDS};
     use crate::time::{Instant, LogMessageInterval};
 
     type PreMasterTestDomainPort<'a> =
@@ -189,7 +187,10 @@ mod tests {
                         &self.foreign_candidates,
                         PortNumber::new(1),
                     ),
-                    BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::from_records(records)),
+                    BestForeignRecord::new(
+                        PortNumber::new(1),
+                        ForeignClockRecordsVec::from_records(records),
+                    ),
                     grandmaster_id,
                 ),
                 qualification_timeout,
@@ -200,7 +201,7 @@ mod tests {
 
     #[test]
     fn pre_master_port_test_setup_is_side_effect_free() {
-        let setup = PreMasterPortTestSetup::new(TestClockCatalog::default_low_grade().default_ds());
+        let setup = PreMasterPortTestSetup::new(TestClockDS::default_low_grade().dataset());
 
         let _pre_master = setup.port_under_test(&[]);
 
@@ -210,8 +211,7 @@ mod tests {
 
     #[test]
     fn pre_master_port_to_master_on_qualified() {
-        let setup =
-            PreMasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PreMasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let pre_master = setup.port_under_test(&[]);
 
@@ -225,11 +225,11 @@ mod tests {
         use crate::message::AnnounceMessage;
         use crate::port::{ParentPortIdentity, PortIdentity, PortNumber};
 
-        let setup = PreMasterPortTestSetup::new(TestClockCatalog::default_low_grade().default_ds());
+        let setup = PreMasterPortTestSetup::new(TestClockDS::default_low_grade().dataset());
 
-        let foreign_clock = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock = TestClockDS::default_high_grade().dataset();
         let better_port = PortIdentity::new(
-            TestClockCatalog::default_high_grade().clock_identity(),
+            TestClockDS::default_high_grade().clock_identity(),
             PortNumber::new(1),
         );
         let mut pre_master = setup.port_under_test(&[]);

@@ -1191,13 +1191,13 @@ pub(crate) mod tests {
     use crate::log::NOOP_CLOCK_METRICS;
     use crate::port::PortNumber;
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, TestClockCatalog};
+    use crate::test_support::{FakeClock, TestClockDS};
     use crate::time::{Duration, Instant};
 
     #[test]
     fn grandmaster_tracking_bmca_gates_when_grandmaster_id_matches() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_high_grade().default_ds();
+        let default_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *default_ds.identity(),
@@ -1216,9 +1216,9 @@ pub(crate) mod tests {
     #[test]
     fn grandmaster_tracking_bmca_emits_when_grandmaster_id_differs() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_high_grade().default_ds();
+        let default_ds = TestClockDS::default_high_grade().dataset();
 
-        let other_grandmaster_id = TestClockCatalog::gps_grandmaster().clock_identity();
+        let other_grandmaster_id = TestClockDS::gps_grandmaster().clock_identity();
         let bmca = GrandMasterTrackingBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
@@ -1233,16 +1233,16 @@ pub(crate) mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let now = Instant::from_secs(0);
 
-        let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
+        let default_ds = TestClockDS::gps_grandmaster().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
-        let better = TestClockCatalog::atomic_grandmaster();
+        let better = TestClockDS::atomic_grandmaster();
         let better_port_id = PortIdentity::new(better.clock_identity(), PortNumber::new(1));
-        let better_ds = better.foreign_ds(StepsRemoved::new(0));
+        let better_ds = better.dataset();
         let records = [ForeignClockRecord::qualified(
             better_port_id,
             better_ds,
@@ -1267,16 +1267,16 @@ pub(crate) mod tests {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
         let now = Instant::from_secs(0);
 
-        let default_ds = TestClockCatalog::default_low_grade_slave_only().default_ds();
+        let default_ds = TestClockDS::default_low_grade_slave_only().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
-        let better = TestClockCatalog::default_high_grade();
+        let better = TestClockDS::default_high_grade();
         let better_port_id = PortIdentity::new(better.clock_identity(), PortNumber::new(1));
-        let better_ds = better.foreign_ds(StepsRemoved::new(0));
+        let better_ds = better.dataset();
         let records = [ForeignClockRecord::qualified(
             better_port_id,
             better_ds,
@@ -1358,26 +1358,26 @@ pub(crate) mod tests {
         let local_port = PortNumber::new(1);
         let other_port = PortNumber::new(2);
 
-        let default_ds = TestClockCatalog::default_low_grade_slave_only().default_ds();
+        let default_ds = TestClockDS::default_low_grade_slave_only().dataset();
         debug_assert!(
             !default_ds.is_authoritative(),
             "test expects non-authoritative local clock behavior"
         );
 
         // Seed Ebest on another local receive port. It must remain best after Erbest is remembered.
-        let better = TestClockCatalog::default_high_grade().with_priority1(Priority1::new(1));
+        let better = TestClockDS::default_high_grade().with_priority1(Priority1::new(1));
         let e_best_parent = PortIdentity::new(better.clock_identity(), PortNumber::new(1));
         foreign_candidates.remember(BestForeignSnapshot::Qualified {
-            ds: better.foreign_ds(StepsRemoved::new(0)),
+            ds: better.dataset(),
             source_port_identity: e_best_parent,
             received_on_port: other_port,
         });
 
         let bmca = BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, local_port);
 
-        let worse = TestClockCatalog::default_mid_grade();
+        let worse = TestClockDS::default_mid_grade();
         let e_rbest_parent = PortIdentity::new(worse.clock_identity(), PortNumber::new(1));
-        let e_rbest_ds = worse.foreign_ds(StepsRemoved::new(0));
+        let e_rbest_ds = worse.dataset();
         let e_rbest = BestForeignDataset::Qualified {
             ds: &e_rbest_ds,
             source_port_identity: &e_rbest_parent,
@@ -1392,8 +1392,8 @@ pub(crate) mod tests {
     #[test]
     fn sliding_window_qualification_requires_two_fast_announces() {
         let t0 = Instant::from_secs(0);
-        let high = TestClockCatalog::default_high_grade();
-        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
+        let high = TestClockDS::default_high_grade();
+        let foreign_high = high.dataset();
         let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
         let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
 
@@ -1414,8 +1414,8 @@ pub(crate) mod tests {
     #[test]
     fn sliding_window_qualification_drops_on_slow_announces() {
         let t0 = Instant::from_secs(0);
-        let high = TestClockCatalog::default_high_grade();
-        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
+        let high = TestClockDS::default_high_grade();
+        let foreign_high = high.dataset();
         let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
         let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
 
@@ -1443,8 +1443,8 @@ pub(crate) mod tests {
     #[test]
     fn sliding_window_never_qualifies_with_one_annonce_per_window() {
         let t0 = Instant::from_secs(0);
-        let high = TestClockCatalog::default_high_grade();
-        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
+        let high = TestClockDS::default_high_grade();
+        let foreign_high = high.dataset();
         let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
         let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
 
@@ -1481,10 +1481,9 @@ pub(crate) mod tests {
     #[test]
     fn qualified_dataset_change_reports_updated() {
         let t0 = Instant::from_secs(0);
-        let high = TestClockCatalog::default_high_grade();
-        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
-        let foreign_low =
-            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
+        let high = TestClockDS::default_high_grade();
+        let foreign_high = high.dataset();
+        let foreign_low = TestClockDS::default_low_grade_slave_only().dataset();
         let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
         let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
 
@@ -1513,10 +1512,9 @@ pub(crate) mod tests {
     #[test]
     fn unqualified_dataset_change_does_not_report_updated() {
         let t0 = Instant::from_secs(0);
-        let high = TestClockCatalog::default_high_grade();
-        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
-        let foreign_low =
-            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
+        let high = TestClockDS::default_high_grade();
+        let foreign_high = high.dataset();
+        let foreign_low = TestClockDS::default_low_grade_slave_only().dataset();
         let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
         let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
 
@@ -1545,8 +1543,8 @@ pub(crate) mod tests {
     #[test]
     fn sliding_window_edge_drops_qualification_but_not_stale() {
         let t0 = Instant::from_secs(0);
-        let high = TestClockCatalog::default_high_grade();
-        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
+        let high = TestClockDS::default_high_grade();
+        let foreign_high = high.dataset();
         let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
         let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
 
@@ -1572,9 +1570,9 @@ pub(crate) mod tests {
 
     #[test]
     fn test_foreign_clock_ordering() {
-        let high = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
-        let mid = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
-        let low = TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
+        let high = TestClockDS::default_high_grade().dataset();
+        let mid = TestClockDS::default_mid_grade().dataset();
+        let low = TestClockDS::default_low_grade_slave_only().dataset();
 
         assert!(high.better_than(&mid));
         assert!(!mid.better_than(&high));
@@ -1588,8 +1586,8 @@ pub(crate) mod tests {
 
     #[test]
     fn test_foreign_clock_equality() {
-        let c1 = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
-        let c2 = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let c1 = TestClockDS::default_high_grade().dataset();
+        let c2 = TestClockDS::default_high_grade().dataset();
 
         assert!(!c1.better_than(&c2));
         assert!(!c2.better_than(&c1));
@@ -1598,12 +1596,12 @@ pub(crate) mod tests {
 
     #[test]
     fn foreign_clock_ds_compares_priority1_before_quality() {
-        let a = TestClockCatalog::default_high_grade()
+        let a = TestClockDS::default_high_grade()
             .with_priority1(Priority1::new(10))
-            .foreign_ds(StepsRemoved::new(0));
-        let b = TestClockCatalog::atomic_grandmaster()
+            .dataset();
+        let b = TestClockDS::atomic_grandmaster()
             .with_priority1(Priority1::new(20))
-            .foreign_ds(StepsRemoved::new(0));
+            .dataset();
 
         // Atomic grandmaster looses againt default high grade because of lower priority1.
         assert!(a.better_than(&b));
@@ -1612,14 +1610,14 @@ pub(crate) mod tests {
 
     #[test]
     fn foreign_clock_ds_compares_priority2_after_quality() {
-        let a = TestClockCatalog::default_high_grade()
+        let a = TestClockDS::default_high_grade()
             .with_clock_identity(ClockIdentity::new(&[0x00; 8]))
             .with_priority2(Priority2::new(10))
-            .foreign_ds(StepsRemoved::new(0));
-        let b = TestClockCatalog::default_high_grade()
+            .dataset();
+        let b = TestClockDS::default_high_grade()
             .with_clock_identity(ClockIdentity::new(&[0x01; 8]))
             .with_priority2(Priority2::new(20))
-            .foreign_ds(StepsRemoved::new(0));
+            .dataset();
 
         // Same p1 and quality; lower p2 wins.
         assert!(a.better_than(&b));
@@ -1628,12 +1626,12 @@ pub(crate) mod tests {
 
     #[test]
     fn foreign_clock_ds_tiebreaks_on_identity_last() {
-        let a = TestClockCatalog::default_high_grade()
+        let a = TestClockDS::default_high_grade()
             .with_clock_identity(ClockIdentity::new(&[0x00; 8]))
-            .foreign_ds(StepsRemoved::new(0));
-        let b = TestClockCatalog::default_high_grade()
+            .dataset();
+        let b = TestClockDS::default_high_grade()
             .with_clock_identity(ClockIdentity::new(&[0x01; 8]))
-            .foreign_ds(StepsRemoved::new(0));
+            .dataset();
 
         // All fields equal except identity; lower identity better than higher.
         assert!(a.better_than(&b));
@@ -1642,8 +1640,12 @@ pub(crate) mod tests {
 
     #[test]
     fn foreign_clock_ds_prefers_lower_steps_removed_when_identity_equal() {
-        let a = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(1));
-        let b = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(3));
+        let a = TestClockDS::default_high_grade()
+            .with_steps_removed(StepsRemoved::new(1))
+            .dataset();
+        let b = TestClockDS::default_high_grade()
+            .with_steps_removed(StepsRemoved::new(3))
+            .dataset();
 
         assert!(a.better_than(&b));
         assert!(!b.better_than(&a));
@@ -1652,27 +1654,27 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let high = TestClockCatalog::default_high_grade();
-        let mid = TestClockCatalog::default_mid_grade();
-        let low = TestClockCatalog::default_low_grade_slave_only();
-        let gm = TestClockCatalog::gps_grandmaster();
+        let high = TestClockDS::default_high_grade();
+        let mid = TestClockDS::default_mid_grade();
+        let low = TestClockDS::default_low_grade_slave_only();
+        let gm = TestClockDS::gps_grandmaster();
 
         let stale_records = vec![
             ForeignClockRecord::qualified(
                 PortIdentity::new(high.clock_identity(), PortNumber::new(1)),
-                high.foreign_ds(StepsRemoved::new(0)),
+                high.dataset(),
                 LogInterval::new(0),
                 Instant::from_secs(0),
             ),
             ForeignClockRecord::qualified(
                 PortIdentity::new(mid.clock_identity(), PortNumber::new(1)),
-                mid.foreign_ds(StepsRemoved::new(0)),
+                mid.dataset(),
                 LogInterval::new(0),
                 Instant::from_secs(1),
             ),
             ForeignClockRecord::qualified(
                 PortIdentity::new(mid.clock_identity(), PortNumber::new(1)),
-                low.foreign_ds(StepsRemoved::new(0)),
+                low.dataset(),
                 LogInterval::new(0),
                 Instant::from_secs(2),
             ),
@@ -1680,10 +1682,10 @@ pub(crate) mod tests {
         let records = ForeignClockRecordsVec::from_records(&stale_records);
 
         let gm_port_id = PortIdentity::new(gm.clock_identity(), PortNumber::new(1));
-        let gm_foreign = gm.foreign_ds(StepsRemoved::new(0));
+        let gm_foreign = gm.dataset();
 
         // Consider a new announce from a different foreign clock.
-        let default_ds = TestClockCatalog::default_high_grade().default_ds();
+        let default_ds = TestClockDS::default_high_grade().dataset();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), records),
@@ -1719,7 +1721,7 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_gm_capable_local_with_no_qualified_foreign_is_undecided() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
+        let default_ds = TestClockDS::gps_grandmaster().dataset();
         let bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
@@ -1731,17 +1733,16 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_gm_capable_local_loses_tuple_returns_passive() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
+        let default_ds = TestClockDS::gps_grandmaster().dataset();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
         );
 
         // Foreign uses lower priority1 so it is better, even though clock class is worse.
-        let foreign =
-            TestClockCatalog::default_low_grade_slave_only().with_priority1(Priority1::new(1));
+        let foreign = TestClockDS::default_low_grade_slave_only().with_priority1(Priority1::new(1));
         let port_id = PortIdentity::new(foreign.clock_identity(), PortNumber::new(1));
-        let foreign_strong = foreign.foreign_ds(StepsRemoved::new(0));
+        let foreign_strong = foreign.dataset();
 
         bmca.consider(
             port_id,
@@ -1762,7 +1763,7 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_gm_capable_local_better_than_foreign_returns_master_m1() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::gps_grandmaster().default_ds();
+        let default_ds = TestClockDS::gps_grandmaster().dataset();
         let local_identity = *default_ds.identity();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
@@ -1770,9 +1771,9 @@ pub(crate) mod tests {
         );
 
         // Foreign is worse (higher priority1), so local GM-capable should become Master(M1).
-        let foreign = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign = TestClockDS::default_high_grade().dataset();
         let port_id = PortIdentity::new(
-            TestClockCatalog::default_high_grade().clock_identity(),
+            TestClockDS::default_high_grade().clock_identity(),
             PortNumber::new(1),
         );
 
@@ -1792,7 +1793,7 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_non_gm_local_better_than_foreign_returns_master_m2() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
+        let default_ds = TestClockDS::default_mid_grade().dataset();
         let local_identity = *default_ds.identity();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
@@ -1800,10 +1801,9 @@ pub(crate) mod tests {
         );
 
         // Foreign is slightly worse quality; local should be better and take M2.
-        let foreign =
-            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
+        let foreign = TestClockDS::default_low_grade_slave_only().dataset();
         let port_id = PortIdentity::new(
-            TestClockCatalog::default_low_grade_slave_only().clock_identity(),
+            TestClockDS::default_low_grade_slave_only().clock_identity(),
             PortNumber::new(1),
         );
 
@@ -1823,15 +1823,15 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_non_gm_local_loses_tuple_returns_slave() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
+        let default_ds = TestClockDS::default_mid_grade().dataset();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
         );
 
-        let foreign = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign = TestClockDS::default_high_grade().dataset();
         let port_id = PortIdentity::new(
-            TestClockCatalog::default_high_grade().clock_identity(),
+            TestClockDS::default_high_grade().clock_identity(),
             PortNumber::new(1),
         );
 
@@ -1847,16 +1847,16 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_recommends_slave_from_interleaved_announce_sequence() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_low_grade().default_ds();
+        let default_ds = TestClockDS::default_low_grade().dataset();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
         );
 
-        let high = TestClockCatalog::default_high_grade();
-        let mid = TestClockCatalog::default_mid_grade();
-        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
-        let foreign_mid = mid.foreign_ds(StepsRemoved::new(0));
+        let high = TestClockDS::default_high_grade();
+        let mid = TestClockDS::default_mid_grade();
+        let foreign_high = high.dataset();
+        let foreign_mid = mid.dataset();
 
         let port_id_high = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
         let port_id_mid = PortIdentity::new(mid.clock_identity(), PortNumber::new(1));
@@ -1897,16 +1897,16 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_recommends_slave_from_non_interleaved_announce_sequence() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_low_grade().default_ds();
+        let default_ds = TestClockDS::default_low_grade().dataset();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
         );
 
-        let high = TestClockCatalog::default_high_grade();
-        let mid = TestClockCatalog::default_mid_grade();
-        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
-        let foreign_mid = mid.foreign_ds(StepsRemoved::new(0));
+        let high = TestClockDS::default_high_grade();
+        let mid = TestClockDS::default_mid_grade();
+        let foreign_high = high.dataset();
+        let foreign_mid = mid.dataset();
 
         let port_id_high = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
         let port_id_mid = PortIdentity::new(mid.clock_identity(), PortNumber::new(1));
@@ -1947,7 +1947,7 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_undecided_when_no_announces_yet() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
+        let default_ds = TestClockDS::default_mid_grade().dataset();
         let bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
@@ -1959,13 +1959,13 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_undecided_when_no_qualified_clock_records_yet() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
+        let default_ds = TestClockDS::default_mid_grade().dataset();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
         );
 
-        let foreign_high = TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign_high = TestClockDS::default_high_grade().dataset();
 
         bmca.consider(
             PortIdentity::fake(),
@@ -1980,18 +1980,18 @@ pub(crate) mod tests {
     #[test]
     fn listening_bmca_undecided_when_only_single_announces_each() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
+        let default_ds = TestClockDS::default_mid_grade().dataset();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
         );
 
-        let high = TestClockCatalog::default_high_grade();
-        let mid = TestClockCatalog::default_mid_grade();
-        let low = TestClockCatalog::default_low_grade_slave_only();
-        let foreign_high = high.foreign_ds(StepsRemoved::new(0));
-        let foreign_mid = mid.foreign_ds(StepsRemoved::new(0));
-        let foreign_low = low.foreign_ds(StepsRemoved::new(0));
+        let high = TestClockDS::default_high_grade();
+        let mid = TestClockDS::default_mid_grade();
+        let low = TestClockDS::default_low_grade_slave_only();
+        let foreign_high = high.dataset();
+        let foreign_mid = mid.dataset();
+        let foreign_low = low.dataset();
 
         bmca.consider(
             PortIdentity::new(high.clock_identity(), PortNumber::new(0)),

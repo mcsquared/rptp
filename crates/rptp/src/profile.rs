@@ -12,8 +12,8 @@
 //! timers.
 
 use crate::bmca::{
-    BestForeignRecord, BestMasterClockAlgorithm, GrandMasterTrackingBmca, ListeningBmca,
-    ForeignClockRecords, ParentTrackingBmca, QualificationTimeoutPolicy,
+    BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, GrandMasterTrackingBmca,
+    ListeningBmca, ParentTrackingBmca, QualificationTimeoutPolicy,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::initializing::InitializingPort;
@@ -101,12 +101,7 @@ impl PortProfile {
         bmca: BestMasterClockAlgorithm,
         best_foreign: BestForeignRecord<S>,
     ) -> PortState<P, S> {
-        PortState::Initializing(InitializingPort::new(
-            port,
-            bmca,
-            best_foreign,
-            self,
-        ))
+        PortState::Initializing(InitializingPort::new(port, bmca, best_foreign, self))
     }
 
     /// Construct the `LISTENING` state and start the announce receipt timeout.

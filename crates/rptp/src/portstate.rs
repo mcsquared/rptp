@@ -301,8 +301,7 @@ mod tests {
     use crate::profile::PortProfile;
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{
-        FailingPort, FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping,
-        TestClockCatalog,
+        FailingPort, FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping, TestClockDS,
     };
     use crate::time::{Duration, LogInterval, LogMessageInterval, TimeStamp};
 
@@ -453,7 +452,7 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_master_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let listening = setup.listening_port();
 
@@ -464,7 +463,7 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_master_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let slave = setup.slave_port();
 
@@ -475,7 +474,7 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_master_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let pre_master = setup.pre_master_port();
 
@@ -486,7 +485,7 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_master_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let uncalibrated = setup.uncalibrated_port();
 
@@ -497,7 +496,7 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_slave_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let uncalibrated = setup.uncalibrated_port();
 
@@ -510,7 +509,7 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_uncalibrated_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let listening = setup.listening_port();
 
@@ -522,7 +521,7 @@ mod tests {
 
     #[test]
     fn portstate_master_to_uncalibrated_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let master = setup.master_port();
 
@@ -534,7 +533,7 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_pre_master_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let listening = setup.listening_port();
 
@@ -550,7 +549,7 @@ mod tests {
 
     #[test]
     fn portstate_initializing_to_listening_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let initializing = setup.initializing_port();
 
@@ -562,7 +561,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_initializing_to_master_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let initializing = setup.initializing_port();
 
@@ -572,7 +571,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_master_to_master_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let master = setup.master_port();
 
@@ -584,7 +583,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_initializing_to_slave_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let initializing = setup.initializing_port();
 
@@ -596,7 +595,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_listening_to_slave_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let listening = setup.listening_port();
 
@@ -608,7 +607,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_slave_to_slave_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let slave = setup.slave_port();
 
@@ -620,7 +619,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_master_to_slave_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let master = setup.master_port();
 
@@ -632,7 +631,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_pre_master_to_slave_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let pre_master = setup.pre_master_port();
 
@@ -644,7 +643,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_initializing_to_uncalibrated_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let initializing = setup.initializing_port();
 
@@ -654,7 +653,7 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_uncalibrated_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let slave = setup.slave_port();
 
@@ -666,7 +665,7 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_uncalibrated_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let pre_master = setup.pre_master_port();
 
@@ -678,7 +677,7 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_uncalibrated_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let uncalibrated = setup.uncalibrated_port();
 
@@ -692,7 +691,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_initializing_to_pre_master_illegal_transition_goes_to_faulty() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let initializing = setup.initializing_port();
 
@@ -707,7 +706,7 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_pre_master_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let slave = setup.slave_port();
 
@@ -722,7 +721,7 @@ mod tests {
 
     #[test]
     fn portstate_master_to_pre_master_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let master = setup.master_port();
 
@@ -737,7 +736,7 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_pre_master_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let pre_master = setup.pre_master_port();
 
@@ -752,7 +751,7 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_pre_master_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let uncalibrated = setup.uncalibrated_port();
 
@@ -768,7 +767,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_listening_to_listening_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let listening = setup.listening_port();
 
@@ -778,7 +777,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_slave_to_listening_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let slave = setup.slave_port();
 
@@ -788,7 +787,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_master_to_listening_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let master = setup.master_port();
 
@@ -798,7 +797,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn portstate_pre_master_to_listening_illegal_transition_panics() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let pre_master = setup.pre_master_port();
 
@@ -809,7 +808,7 @@ mod tests {
 
     #[test]
     fn portstate_initializing_to_faulty_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let initializing = setup.initializing_port();
 
@@ -820,7 +819,7 @@ mod tests {
 
     #[test]
     fn portstate_listening_to_faulty_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let listening = setup.listening_port();
 
@@ -831,7 +830,7 @@ mod tests {
 
     #[test]
     fn portstate_slave_to_faulty_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let slave = setup.slave_port();
 
@@ -842,7 +841,7 @@ mod tests {
 
     #[test]
     fn portstate_master_to_faulty_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let master = setup.master_port();
 
@@ -854,7 +853,7 @@ mod tests {
     #[test]
     fn portstate_master_enters_faulty_on_announce_send_failure() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_high_grade().default_ds();
+        let default_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *default_ds.identity(),
@@ -886,7 +885,7 @@ mod tests {
     #[test]
     fn portstate_master_enters_faulty_on_delay_response_send_failure() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_high_grade().default_ds();
+        let default_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *default_ds.identity(),
@@ -922,7 +921,7 @@ mod tests {
     #[test]
     fn portstate_master_enters_faulty_on_follow_up_send_failure() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_high_grade().default_ds();
+        let default_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *default_ds.identity(),
@@ -958,7 +957,7 @@ mod tests {
     #[test]
     fn portstate_master_enters_faulty_on_sync_send_failure() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_high_grade().default_ds();
+        let default_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *default_ds.identity(),
@@ -990,7 +989,7 @@ mod tests {
     #[test]
     fn portstate_slave_enters_faulty_on_delay_request_send_failure() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let default_ds = TestClockCatalog::default_mid_grade().default_ds();
+        let default_ds = TestClockDS::default_mid_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *default_ds.identity(),
@@ -1036,7 +1035,7 @@ mod tests {
 
     #[test]
     fn portstate_pre_master_to_faulty_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let pre_master = setup.pre_master_port();
 
@@ -1047,7 +1046,7 @@ mod tests {
 
     #[test]
     fn portstate_uncalibrated_to_faulty_transition() {
-        let setup = PortStateTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let uncalibrated = setup.uncalibrated_port();
 

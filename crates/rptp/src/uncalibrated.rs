@@ -296,9 +296,7 @@ mod tests {
     use crate::message::{DelayRequestMessage, DelayResponseMessage, SystemMessage};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{
-        FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockCatalog,
-    };
+    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockDS};
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     type UncalibratedTestDomainPort<'a> =
@@ -361,7 +359,10 @@ mod tests {
                         &self.foreign_candidates,
                         PortNumber::new(1),
                     ),
-                    BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::from_records(records)),
+                    BestForeignRecord::new(
+                        PortNumber::new(1),
+                        ForeignClockRecordsVec::from_records(records),
+                    ),
                     ParentPortIdentity::new(parent_port),
                 ),
                 announce_receipt_timeout,
@@ -373,8 +374,7 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_test_setup_is_side_effect_free() {
-        let setup =
-            UncalibratedPortTestSetup::new(TestClockCatalog::default_low_grade().default_ds());
+        let setup = UncalibratedPortTestSetup::new(TestClockDS::default_low_grade().dataset());
 
         let _uncalibrated = setup.port_under_test(PortIdentity::fake(), &[]);
 
@@ -384,15 +384,13 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_produces_slave_recommendation_with_new_parent() {
-        let setup =
-            UncalibratedPortTestSetup::new(TestClockCatalog::default_low_grade().default_ds());
+        let setup = UncalibratedPortTestSetup::new(TestClockDS::default_low_grade().dataset());
 
         let parent_port = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
             PortNumber::new(1),
         );
-        let foreign_clock_ds =
-            TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock_ds = TestClockDS::default_mid_grade().dataset();
         let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
@@ -410,7 +408,7 @@ mod tests {
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
+                TestClockDS::default_high_grade().dataset(),
                 TimeScale::Ptp,
             ),
             new_parent,
@@ -422,7 +420,7 @@ mod tests {
             AnnounceMessage::new(
                 43.into(),
                 LogMessageInterval::new(0),
-                TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
+                TestClockDS::default_high_grade().dataset(),
                 TimeScale::Ptp,
             ),
             new_parent,
@@ -440,12 +438,10 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_becomes_slave_on_next_sync_from_parent() {
-        let setup =
-            UncalibratedPortTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = UncalibratedPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let parent_port = PortIdentity::fake();
-        let foreign_clock_ds =
-            TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock_ds = TestClockDS::default_high_grade().dataset();
         let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
@@ -483,8 +479,7 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_to_master_on_announce_receipt_timeout() {
-        let setup =
-            UncalibratedPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = UncalibratedPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let uncalibrated = setup.port_under_test(PortIdentity::fake(), &[]);
 
@@ -495,15 +490,14 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_produces_m1_master_recommendation_when_local_better_than_foreign() {
-        let setup =
-            UncalibratedPortTestSetup::new(TestClockCatalog::gps_grandmaster().default_ds());
+        let setup = UncalibratedPortTestSetup::new(TestClockDS::gps_grandmaster().dataset());
 
         let parent_port = PortIdentity::fake();
         let mut uncalibrated = setup.port_under_test(parent_port, &[]);
 
-        let foreign_clock = TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock = TestClockDS::default_mid_grade().dataset();
         let foreign_port = PortIdentity::new(
-            TestClockCatalog::default_mid_grade().clock_identity(),
+            TestClockDS::default_mid_grade().clock_identity(),
             PortNumber::new(1),
         );
 
@@ -549,16 +543,14 @@ mod tests {
 
     #[test]
     fn uncalibrated_port_produces_m2_master_recommendation_when_non_gm_local_better_than_foreign() {
-        let setup =
-            UncalibratedPortTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = UncalibratedPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let parent_port = PortIdentity::fake();
         let mut uncalibrated = setup.port_under_test(parent_port, &[]);
 
-        let foreign_clock =
-            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock = TestClockDS::default_low_grade_slave_only().dataset();
         let foreign_port = PortIdentity::new(
-            TestClockCatalog::default_low_grade_slave_only().clock_identity(),
+            TestClockDS::default_low_grade_slave_only().clock_identity(),
             PortNumber::new(1),
         );
 

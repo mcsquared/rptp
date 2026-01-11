@@ -275,7 +275,7 @@ mod tests {
         BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
         ForeignClockRecord, GrandMasterTrackingBmca,
     };
-    use crate::clock::{LocalClock, StepsRemoved, TimeScale};
+    use crate::clock::{LocalClock, TimeScale};
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{
@@ -285,15 +285,14 @@ mod tests {
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{
-        FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping, TestClockCatalog,
+        FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping, TestClockDS,
     };
     use crate::time::{Instant, LogInterval, LogMessageInterval};
 
     type MasterTestDomainPort<'a> =
         DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type MasterTestPort<'a> =
-        MasterPort<'a, MasterTestDomainPort<'a>, ForeignClockRecordsVec>;
+    type MasterTestPort<'a> = MasterPort<'a, MasterTestDomainPort<'a>, ForeignClockRecordsVec>;
 
     struct MasterPortTestSetup {
         local_clock: LocalClock<FakeClock>,
@@ -352,7 +351,10 @@ mod tests {
                         &self.foreign_candidates,
                         PortNumber::new(1),
                     ),
-                    BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::from_records(records)),
+                    BestForeignRecord::new(
+                        PortNumber::new(1),
+                        ForeignClockRecordsVec::from_records(records),
+                    ),
                     grandmaster_id,
                 ),
                 announce_cycle,
@@ -364,7 +366,7 @@ mod tests {
 
     #[test]
     fn master_port_test_setup_is_side_effect_free() {
-        let setup = MasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let _slave = setup.port_under_test(&[]);
 
@@ -375,7 +377,7 @@ mod tests {
     #[test]
     fn master_port_answers_delay_request_with_delay_response() {
         let setup = MasterPortTestSetup::new_with_time(
-            TestClockCatalog::default_high_grade().default_ds(),
+            TestClockDS::default_high_grade().dataset(),
             TimeStamp::new(0, 0),
         );
 
@@ -403,7 +405,7 @@ mod tests {
 
     #[test]
     fn master_port_sends_sync() {
-        let setup = MasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let mut master = setup.port_under_test(&[]);
 
@@ -421,7 +423,7 @@ mod tests {
 
     #[test]
     fn master_port_schedules_next_sync_timeout() {
-        let setup = MasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let mut master = setup.port_under_test(&[]);
 
@@ -433,7 +435,7 @@ mod tests {
 
     #[test]
     fn master_port_sends_follow_up() {
-        let setup = MasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let mut master = setup.port_under_test(&[]);
 
@@ -457,7 +459,7 @@ mod tests {
 
     #[test]
     fn master_port_schedules_next_announce() {
-        let setup = MasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let mut master = setup.port_under_test(&[]);
 
@@ -469,7 +471,7 @@ mod tests {
 
     #[test]
     fn master_port_sends_announce() {
-        let setup = MasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let mut master = setup.port_under_test(&[]);
 
@@ -481,7 +483,7 @@ mod tests {
                 .contains_general_message(&GeneralMessage::Announce(AnnounceMessage::new(
                     0.into(),
                     LogMessageInterval::new(0),
-                    TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0)),
+                    TestClockDS::default_high_grade().dataset(),
                     TimeScale::Ptp,
                 )))
         );
@@ -489,10 +491,9 @@ mod tests {
 
     #[test]
     fn master_port_recommends_slave_on_two_better_announces() {
-        let setup = MasterPortTestSetup::new(TestClockCatalog::default_mid_grade().default_ds());
+        let setup = MasterPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
-        let foreign_clock_ds =
-            TestClockCatalog::default_high_grade().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock_ds = TestClockDS::default_high_grade().dataset();
 
         let mut master = setup.port_under_test(&[]);
 
@@ -524,10 +525,9 @@ mod tests {
 
     #[test]
     fn master_port_stays_master_on_subsequent_announce() {
-        let setup = MasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let foreign_clock_ds =
-            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock_ds = TestClockDS::default_low_grade_slave_only().dataset();
         let prior_records = [ForeignClockRecord::qualified(
             PortIdentity::fake(),
             foreign_clock_ds,
@@ -554,10 +554,9 @@ mod tests {
 
     #[test]
     fn master_port_stays_master_single_new_announce() {
-        let setup = MasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let foreign_clock_ds =
-            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock_ds = TestClockDS::default_low_grade_slave_only().dataset();
 
         let mut master = setup.port_under_test(&[]);
 
@@ -577,11 +576,10 @@ mod tests {
 
     #[test]
     fn master_port_does_not_recommend_master_when_local_clock_unchanged_but_still_best() {
-        let setup = MasterPortTestSetup::new(TestClockCatalog::default_high_grade().default_ds());
+        let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let parent_port = PortIdentity::fake();
-        let foreign_clock_ds =
-            TestClockCatalog::default_low_grade_slave_only().foreign_ds(StepsRemoved::new(0));
+        let foreign_clock_ds = TestClockDS::default_low_grade_slave_only().dataset();
         let prior_records = [ForeignClockRecord::qualified(
             parent_port,
             foreign_clock_ds,
@@ -596,7 +594,7 @@ mod tests {
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
-                TestClockCatalog::default_mid_grade().foreign_ds(StepsRemoved::new(0)),
+                TestClockDS::default_mid_grade().dataset(),
                 TimeScale::Ptp,
             ),
             parent_port,
@@ -610,7 +608,7 @@ mod tests {
     #[test]
     fn announce_cycle_produces_announce_messages_with_monotonic_sequence_ids() {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
-        let clock_ds = TestClockCatalog::default_high_grade().default_ds();
+        let clock_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
             *clock_ds.identity(),
