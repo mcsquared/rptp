@@ -104,7 +104,7 @@ General expectations:
 
 1. **Discuss first (recommended for larger changes)**  
    - Open a GitHub issue or draft PR describing the domain behavior you want to add or change.  
-   - Tie it back to the PTP domain and, if relevant, to points from `docs/design-philosophy.md`.
+   - Tie it back to the PTP domain and, if relevant, to points from `docs/architecture-overview.md` or `docs/design-philosophy.md`.
 
 2. **Model the behavior**  
    - Identify the objects and messages involved.  
