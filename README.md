@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mcsquared/rptp/actions/workflows/ci.yml/badge.svg)](https://github.com/mcsquared/rptp/actions/workflows/ci.yml)
 
-*A domain-driven IEEE 1588/PTP core in Rust.*
+*An Object-Oriented and Domain-Driven PTPv2 core in Rust*
 
 ---
 
