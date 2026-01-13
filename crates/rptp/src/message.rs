@@ -160,6 +160,7 @@ pub enum SystemMessage {
     SyncTimeout,
     Timestamp(TimestampMessage),
     Initialized,
+    FaultCleared,
     AnnounceReceiptTimeout,
     QualificationTimeout,
 }

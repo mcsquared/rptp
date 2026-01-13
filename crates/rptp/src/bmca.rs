@@ -215,6 +215,11 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
         let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
+
+    /// Decompose ListeningBmca into its parts.
+    pub(crate) fn into_parts(self) -> (BestMasterClockAlgorithm<'a>, BestForeignRecord<S>) {
+        (self.bmca, self.best_foreign)
+    }
 }
 
 impl<'a, S: ForeignClockRecords> Bmca for ListeningBmca<'a, S> {
@@ -318,6 +323,11 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
     ) -> ParentTrackingBmca<'a, S> {
         ParentTrackingBmca::new(self.bmca, self.best_foreign, parent_port_identity)
     }
+
+    /// Decompose GrandMasterTrackingBmca into its parts.
+    pub(crate) fn into_parts(self) -> (BestMasterClockAlgorithm<'a>, BestForeignRecord<S>) {
+        (self.bmca, self.best_foreign)
+    }
 }
 
 impl<'a, S: ForeignClockRecords> Bmca for GrandMasterTrackingBmca<'a, S> {
@@ -409,6 +419,11 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
     pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<'a, S> {
         let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
+    }
+
+    /// Decompose ParentTrackingBmca into its parts.
+    pub(crate) fn into_parts(self) -> (BestMasterClockAlgorithm<'a>, BestForeignRecord<S>) {
+        (self.bmca, self.best_foreign)
     }
 }
 
