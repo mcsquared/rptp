@@ -16,6 +16,7 @@ use crate::bmca::{
     ListeningBmca, ParentTrackingBmca, QualificationTimeoutPolicy,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
+use crate::faulty::FaultyPort;
 use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
@@ -225,5 +226,17 @@ impl PortProfile {
             EndToEndDelayMechanism::new(delay_cycle),
             self,
         ))
+    }
+
+    /// Construct the `FAULTY` state.
+    ///
+    /// This variant is used when the port has detected a fault condition and is not operational.
+    pub(crate) fn faulty<P: Port, S: ForeignClockRecords>(
+        self,
+        port: P,
+        bmca: BestMasterClockAlgorithm,
+        best_foreign: BestForeignRecord<S>,
+    ) -> PortState<P, S> {
+        PortState::Faulty(FaultyPort::new(port, bmca, best_foreign, self))
     }
 }

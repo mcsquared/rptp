@@ -1,23 +1,50 @@
-use core::marker::PhantomData;
+//! Port state: Faulty.
+//!
+//! This module models the `FAULTY` state of the IEEE 1588 port state machine.
+//!
+//! At the current stage, FAULTY is intentionally minimal:
+//! - it is a quiescent state (no message handling / no periodic sending),
+//! - it preserves the ownership of the minimal set of port collaborators required to
+//!   re-initialize the port when the fault is cleared.
 
-use crate::bmca::ForeignClockRecords;
+use crate::bmca::{BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords};
+use crate::log::PortEvent;
 use crate::port::Port;
+use crate::portstate::PortState;
+use crate::profile::PortProfile;
 
-// FaultyPort stub implementation. At the moment it does nothing and is a dead end. For the current
-// phase of development this is sufficient as we only need to model the existence of faulty ports.
-// TODO: implement proper transistions into and out of the faulty state, passing actual port, bmca
-// and log like a baton like the other port states do.
-// TODO: implement BMCA reset and other faulty port behavior.
-pub struct FaultyPort<P: Port, S: ForeignClockRecords> {
-    _port: PhantomData<P>,
-    _bmca: PhantomData<S>,
+/// Port role for the `FAULTY` state.
+///
+/// This state is entered upon fault detection (e.g., send failure or explicit fault condition).
+/// While in this state, the port does not send or process any messages. It preserves ownership
+/// of the underlying [`Port`] to allow for logging and recovery into initialization when the fault
+/// is cleared.
+pub struct FaultyPort<'a, P: Port, S: ForeignClockRecords> {
+    port: P,
+    bmca: BestMasterClockAlgorithm<'a>,
+    best_foreign: BestForeignRecord<S>,
+    profile: PortProfile,
 }
 
-impl<P: Port, S: ForeignClockRecords> Default for FaultyPort<P, S> {
-    fn default() -> Self {
+impl<'a, P: Port, S: ForeignClockRecords> FaultyPort<'a, P, S> {
+    pub(crate) fn new(
+        port: P,
+        bmca: BestMasterClockAlgorithm<'a>,
+        best_foreign: BestForeignRecord<S>,
+        profile: PortProfile,
+    ) -> Self {
+        port.log(PortEvent::Static("Become FaultyPort"));
+
         Self {
-            _port: PhantomData,
-            _bmca: PhantomData,
+            port,
+            bmca,
+            best_foreign,
+            profile,
         }
+    }
+
+    pub(crate) fn fault_cleared(self) -> PortState<'a, P, S> {
+        self.profile
+            .initializing(self.port, self.bmca, self.best_foreign)
     }
 }

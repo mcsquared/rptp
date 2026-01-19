@@ -184,6 +184,11 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
 
         self.profile.uncalibrated(self.port, bmca)
     }
+
+    pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
+        let (bmca, best_foreign) = self.bmca.into_parts();
+        self.profile.faulty(self.port, bmca, best_foreign)
+    }
 }
 
 /// Announce message sequencing and scheduling.

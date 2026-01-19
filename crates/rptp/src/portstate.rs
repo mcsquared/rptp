@@ -66,6 +66,8 @@ pub(crate) enum StateDecision {
     RecommendedMaster(BmcaMasterDecision),
     /// A fault was detected (send failure, explicit fault condition, …).
     FaultDetected,
+    /// A previously detected fault has been cleared (`FAULTY → INITIALIZING`).
+    FaultCleared,
     /// Qualification timeout expired (`PRE_MASTER → MASTER`).
     QualificationTimeoutExpired,
     /// Announce receipt timeout expired (used to leave listening/slave/uncalibrated).
@@ -86,7 +88,7 @@ pub enum PortState<'a, P: Port, S: ForeignClockRecords> {
     Master(MasterPort<'a, P, S>),
     PreMaster(PreMasterPort<'a, P, S>),
     Uncalibrated(UncalibratedPort<'a, P, S>),
-    Faulty(FaultyPort<P, S>),
+    Faulty(FaultyPort<'a, P, S>),
 }
 
 impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
@@ -142,7 +144,21 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
                 PortState::Slave(slave) => slave.synchronization_fault(),
                 _ => panic!("SynchronizationFault can only be applied in Slave state"),
             },
-            StateDecision::FaultDetected => PortState::Faulty(FaultyPort::default()),
+            StateDecision::FaultDetected => match self {
+                PortState::Listening(listening) => listening.fault_detected(),
+                PortState::Slave(slave) => slave.fault_detected(),
+                PortState::Master(master) => master.fault_detected(),
+                PortState::PreMaster(pre_master) => pre_master.fault_detected(),
+                PortState::Uncalibrated(uncalibrated) => uncalibrated.fault_detected(),
+                PortState::Faulty(faulty) => PortState::Faulty(faulty),
+                PortState::Initializing(_) => {
+                    panic!("FaultDetected cannot be applied in Initializing state")
+                }
+            },
+            StateDecision::FaultCleared => match self {
+                PortState::Faulty(faulty) => faulty.fault_cleared(),
+                _ => panic!("FaultCleared can only be applied in Faulty state"),
+            },
         }
     }
 
@@ -274,6 +290,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
             (PreMaster(_), QualificationTimeout) => {
                 Some(StateDecision::QualificationTimeoutExpired)
             }
+            (Faulty(_), FaultCleared) => Some(StateDecision::FaultCleared),
             _ => None,
         }
     }
@@ -446,6 +463,20 @@ mod tests {
                     BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
                     ParentPortIdentity::new(PortIdentity::fake()),
                 ),
+            )
+        }
+
+        fn faulty_port(
+            &self,
+        ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+            PortProfile::default().faulty(
+                self.domain_port(),
+                BestMasterClockAlgorithm::new(
+                    &self.default_ds,
+                    &self.foreign_candidates,
+                    PortNumber::new(1),
+                ),
+                BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
             )
         }
     }
@@ -807,14 +838,13 @@ mod tests {
     // Tests for explicit ToFaulty transitions from every state
 
     #[test]
-    fn portstate_initializing_to_faulty_transition() {
+    #[should_panic]
+    fn portstate_initializing_to_faulty_transition_panics() {
         let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let initializing = setup.initializing_port();
 
-        let result = initializing.apply(StateDecision::FaultDetected);
-
-        assert!(matches!(result, PortState::Faulty(_)));
+        let _ = initializing.apply(StateDecision::FaultDetected);
     }
 
     #[test]
@@ -1057,13 +1087,34 @@ mod tests {
 
     #[test]
     fn portstate_faulty_to_faulty_transition() {
-        let faulty: PortState<
-            DomainPort<FakeClock, FakeTimerHost, FakeTimestamping, NoopPortLog>,
-            ForeignClockRecordsVec,
-        > = PortState::Faulty(FaultyPort::default());
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
+
+        let faulty = setup.faulty_port();
 
         let result = faulty.apply(StateDecision::FaultDetected);
 
         assert!(matches!(result, PortState::Faulty(_)));
+    }
+
+    #[test]
+    fn portstate_faulty_to_initializing_on_fault_cleared() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
+
+        let faulty = setup.faulty_port();
+
+        let result = faulty.apply(StateDecision::FaultCleared);
+
+        assert!(matches!(result, PortState::Initializing(_)));
+    }
+
+    #[test]
+    fn portstate_faulty_dispatch_system_fault_cleared_requests_transition() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
+
+        let mut faulty = setup.faulty_port();
+
+        let decision = faulty.dispatch_system(SystemMessage::FaultCleared);
+
+        assert!(matches!(decision, Some(StateDecision::FaultCleared)));
     }
 }

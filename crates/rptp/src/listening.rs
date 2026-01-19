@@ -126,6 +126,12 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
             None => None,
         }
     }
+
+    /// Transition to `FAULTY` upon fault detection.
+    pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
+        let (bmca, best_foreign) = self.bmca.into_parts();
+        self.profile.faulty(self.port, bmca, best_foreign)
+    }
 }
 
 #[cfg(test)]
