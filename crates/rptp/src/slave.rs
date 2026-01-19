@@ -347,6 +347,7 @@ mod tests {
 
         fn port_under_test(
             &self,
+            port_number: PortNumber,
             parent: PortIdentity,
             records: &[ForeignClockRecord],
         ) -> SlaveTestPort<'_> {
@@ -357,7 +358,7 @@ mod tests {
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
+                port_number,
             );
 
             let delay_request_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
@@ -368,10 +369,10 @@ mod tests {
                     BestMasterClockAlgorithm::new(
                         &self.default_ds,
                         &self.foreign_candidates,
-                        PortNumber::new(1),
+                        port_number,
                     ),
                     BestForeignRecord::new(
-                        PortNumber::new(1),
+                        port_number,
                         ForeignClockRecordsVec::from_records(records),
                     ),
                     ParentPortIdentity::new(parent),
@@ -394,7 +395,7 @@ mod tests {
     fn slave_port_test_setup_is_side_effect_free() {
         let setup = SlavePortTestSetup::new();
 
-        let _slave = setup.port_under_test(PortIdentity::fake(), &[]);
+        let _slave = setup.port_under_test(PortNumber::new(1), PortIdentity::fake(), &[]);
 
         assert!(setup.timer_host.take_system_messages().is_empty());
         assert!(setup.physical_port.is_empty());
@@ -404,7 +405,7 @@ mod tests {
     fn slave_port_synchronizes_clock_with_two_step_sync() {
         let setup = SlavePortTestSetup::new();
 
-        let mut slave = setup.port_under_test(PortIdentity::fake(), &[]);
+        let mut slave = setup.port_under_test(PortNumber::new(1), PortIdentity::fake(), &[]);
 
         slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
         slave.process_delay_response(
@@ -433,7 +434,7 @@ mod tests {
     fn slave_port_synchronizes_clock_with_one_step_sync() {
         let setup = SlavePortTestSetup::new();
 
-        let mut slave = setup.port_under_test(PortIdentity::fake(), &[]);
+        let mut slave = setup.port_under_test(PortNumber::new(1), PortIdentity::fake(), &[]);
 
         slave.process_delay_request(DelayRequestMessage::new(0.into()), TimeStamp::new(0, 0));
         slave.process_delay_response(
@@ -458,7 +459,7 @@ mod tests {
     fn slave_port_schedules_next_delay_request_timeout() {
         let setup = SlavePortTestSetup::new();
 
-        let mut slave = setup.port_under_test(PortIdentity::fake(), &[]);
+        let mut slave = setup.port_under_test(PortNumber::new(1), PortIdentity::fake(), &[]);
 
         slave.send_delay_request().unwrap();
 
@@ -470,7 +471,7 @@ mod tests {
     fn slave_port_sends_delay_request() {
         let setup = SlavePortTestSetup::new();
 
-        let mut slave = setup.port_under_test(PortIdentity::fake(), &[]);
+        let mut slave = setup.port_under_test(PortNumber::new(1), PortIdentity::fake(), &[]);
 
         slave.send_delay_request().unwrap();
 
@@ -487,7 +488,7 @@ mod tests {
     fn slave_port_to_master_transition_on_announce_receipt_timeout() {
         let setup = SlavePortTestSetup::new();
 
-        let slave = setup.port_under_test(PortIdentity::fake(), &[]);
+        let slave = setup.port_under_test(PortNumber::new(1), PortIdentity::fake(), &[]);
 
         let master = slave.announce_receipt_timeout_expired();
 
@@ -509,7 +510,7 @@ mod tests {
         );
 
         // Create slave with a chosen parent
-        let mut slave = setup.port_under_test(parent, &[]);
+        let mut slave = setup.port_under_test(PortNumber::new(1), parent, &[]);
 
         // Record a TwoStepSync from the parent so a matching FollowUp could produce ms_offset
         let transition = slave.process_two_step_sync(
@@ -561,7 +562,7 @@ mod tests {
         );
 
         // Create slave with chosen parent
-        let mut slave = setup.port_under_test(parent, &[]);
+        let mut slave = setup.port_under_test(PortNumber::new(1), parent, &[]);
 
         // Send a FollowUp from the parent first (ms offset incomplete without sync)
         let transition = slave.process_follow_up(
@@ -607,7 +608,7 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let mut slave = setup.port_under_test(parent, &[]);
+        let mut slave = setup.port_under_test(PortNumber::new(1), parent, &[]);
 
         let transition =
             slave.process_delay_request(DelayRequestMessage::new(43.into()), TimeStamp::new(0, 0));
@@ -658,7 +659,7 @@ mod tests {
             Instant::from_secs(0),
         )];
 
-        let mut slave = setup.port_under_test(parent_port, &prior_records);
+        let mut slave = setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
 
         // Receive a better announce from the same parent port
         let decision = slave.process_announce(
@@ -694,7 +695,7 @@ mod tests {
             Instant::from_secs(0),
         )];
 
-        let mut slave = setup.port_under_test(parent_port, &prior_records);
+        let mut slave = setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
 
         // Receive two better announces from another parent port
         let new_parent = PortIdentity::new(
@@ -749,7 +750,7 @@ mod tests {
             Instant::from_secs(0),
         )];
 
-        let mut slave = setup.port_under_test(parent_port, &prior_records);
+        let mut slave = setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
 
         // Receive a worse announce from the current parent
         let decision = slave.process_announce(

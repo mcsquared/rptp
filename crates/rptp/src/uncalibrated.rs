@@ -345,6 +345,7 @@ mod tests {
 
         fn port_under_test(
             &self,
+            port_number: PortNumber,
             parent_port: PortIdentity,
             records: &[ForeignClockRecord],
         ) -> UncalibratedTestPort<'_> {
@@ -355,7 +356,7 @@ mod tests {
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
+                port_number,
             );
 
             let announce_receipt_timeout = AnnounceReceiptTimeout::new(
@@ -372,10 +373,10 @@ mod tests {
                     BestMasterClockAlgorithm::new(
                         &self.default_ds,
                         &self.foreign_candidates,
-                        PortNumber::new(1),
+                        port_number,
                     ),
                     BestForeignRecord::new(
-                        PortNumber::new(1),
+                        port_number,
                         ForeignClockRecordsVec::from_records(records),
                     ),
                     ParentPortIdentity::new(parent_port),
@@ -391,7 +392,7 @@ mod tests {
     fn uncalibrated_port_test_setup_is_side_effect_free() {
         let setup = UncalibratedPortTestSetup::new(TestClockDS::default_low_grade().dataset());
 
-        let _uncalibrated = setup.port_under_test(PortIdentity::fake(), &[]);
+        let _uncalibrated = setup.port_under_test(PortNumber::new(1), PortIdentity::fake(), &[]);
 
         assert!(setup.timer_host.take_system_messages().is_empty());
         assert!(setup.physical_port.is_empty());
@@ -412,7 +413,7 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let mut uncalibrated = setup.port_under_test(parent_port, &prior_records);
+        let mut uncalibrated = setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
 
         // Receive two better announces from another parent port
         let new_parent = PortIdentity::new(
@@ -463,7 +464,7 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let mut uncalibrated = setup.port_under_test(parent_port, &prior_records);
+        let mut uncalibrated = setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
 
         // pre-feed the delay mechanism with delay req/resp messages so it can calibrate
         let decision = uncalibrated
@@ -496,7 +497,7 @@ mod tests {
     fn uncalibrated_port_to_master_on_announce_receipt_timeout() {
         let setup = UncalibratedPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let uncalibrated = setup.port_under_test(PortIdentity::fake(), &[]);
+        let uncalibrated = setup.port_under_test(PortNumber::new(1), PortIdentity::fake(), &[]);
 
         let master = uncalibrated.announce_receipt_timeout_expired();
 
@@ -508,7 +509,7 @@ mod tests {
         let setup = UncalibratedPortTestSetup::new(TestClockDS::gps_grandmaster().dataset());
 
         let parent_port = PortIdentity::fake();
-        let mut uncalibrated = setup.port_under_test(parent_port, &[]);
+        let mut uncalibrated = setup.port_under_test(PortNumber::new(1), parent_port, &[]);
 
         let foreign_clock = TestClockDS::default_mid_grade().dataset();
         let foreign_port = PortIdentity::new(
@@ -561,7 +562,7 @@ mod tests {
         let setup = UncalibratedPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let parent_port = PortIdentity::fake();
-        let mut uncalibrated = setup.port_under_test(parent_port, &[]);
+        let mut uncalibrated = setup.port_under_test(PortNumber::new(1), parent_port, &[]);
 
         let foreign_clock = TestClockDS::default_low_grade_slave_only().dataset();
         let foreign_port = PortIdentity::new(

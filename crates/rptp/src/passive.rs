@@ -184,7 +184,11 @@ mod tests {
             }
         }
 
-        fn port_under_test(&self, records: &[ForeignClockRecord]) -> PassiveTestPort<'_> {
+        fn port_under_test(
+            &self,
+            port_number: PortNumber,
+            records: &[ForeignClockRecord],
+        ) -> PassiveTestPort<'_> {
             let domain_port = DomainPort::new(
                 &self.local_clock,
                 &self.physical_port,
@@ -192,7 +196,7 @@ mod tests {
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
+                port_number,
             );
 
             let announce_receipt_timeout = AnnounceReceiptTimeout::new(
@@ -206,10 +210,10 @@ mod tests {
                     BestMasterClockAlgorithm::new(
                         &self.default_ds,
                         &self.foreign_candidates,
-                        PortNumber::new(1),
+                        port_number,
                     ),
                     BestForeignRecord::new(
-                        PortNumber::new(1),
+                        port_number,
                         ForeignClockRecordsVec::from_records(records),
                     ),
                 ),
@@ -223,7 +227,7 @@ mod tests {
     fn passive_port_test_setup_is_side_effect_free() {
         let setup = PassivePortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let _passive = setup.port_under_test(&[]);
+        let _passive = setup.port_under_test(PortNumber::new(1), &[]);
 
         assert!(setup.timer_host.take_system_messages().is_empty());
         assert!(setup.physical_port.is_empty());
@@ -233,7 +237,7 @@ mod tests {
     fn passive_port_to_master_transition_on_announce_receipt_timeout() {
         let setup = PassivePortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let passive = setup.port_under_test(&[]);
+        let passive = setup.port_under_test(PortNumber::new(1), &[]);
 
         let master = passive.announce_receipt_timeout_expired();
 
@@ -254,7 +258,7 @@ mod tests {
             Instant::from_secs(0),
         )];
 
-        let mut passive = setup.port_under_test(&prior_records);
+        let mut passive = setup.port_under_test(PortNumber::new(1), &prior_records);
 
         // Process another announce from the same foreign clock
         let decision = passive.process_announce(
@@ -290,7 +294,7 @@ mod tests {
             Instant::from_secs(0),
         )];
 
-        let mut passive = setup.port_under_test(&prior_records);
+        let mut passive = setup.port_under_test(PortNumber::new(1), &prior_records);
 
         // Process another announce from the same foreign clock
         let decision = passive.process_announce(
@@ -328,7 +332,7 @@ mod tests {
             Instant::from_secs(0),
         )];
 
-        let mut passive = setup.port_under_test(&prior_records);
+        let mut passive = setup.port_under_test(PortNumber::new(1), &prior_records);
 
         let decision = passive.process_announce(
             AnnounceMessage::new(

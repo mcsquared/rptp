@@ -195,7 +195,7 @@ mod tests {
             self.local_clock.identity()
         }
 
-        fn port_under_test(&self) -> ListeningTestPort<'_> {
+        fn port_under_test(&self, port_number: PortNumber) -> ListeningTestPort<'_> {
             let domain_port = DomainPort::new(
                 &self.local_clock,
                 &self.physical_port,
@@ -203,7 +203,7 @@ mod tests {
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
+                port_number,
             );
 
             let announce_receipt_timeout = AnnounceReceiptTimeout::new(
@@ -217,9 +217,9 @@ mod tests {
                     BestMasterClockAlgorithm::new(
                         &self.default_ds,
                         &self.foreign_candidates,
-                        PortNumber::new(1),
+                        port_number,
                     ),
-                    BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
+                    BestForeignRecord::new(port_number, ForeignClockRecordsVec::new()),
                 ),
                 announce_receipt_timeout,
                 PortProfile::default(),
@@ -231,7 +231,7 @@ mod tests {
     fn listening_port_test_setup_is_side_effect_free() {
         let setup = ListeningPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let _listening = setup.port_under_test();
+        let _listening = setup.port_under_test(PortNumber::new(1));
 
         assert!(setup.timer_host.take_system_messages().is_empty());
         assert!(setup.physical_port.is_empty());
@@ -241,7 +241,7 @@ mod tests {
     fn listening_port_to_master_transition_on_announce_receipt_timeout() {
         let setup = ListeningPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let listening = setup.port_under_test();
+        let listening = setup.port_under_test(PortNumber::new(1));
 
         let master = listening.announce_receipt_timeout_expired();
 
@@ -252,7 +252,7 @@ mod tests {
     fn listening_port_stays_in_listening_on_single_announce() {
         let setup = ListeningPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
-        let mut listening = setup.port_under_test();
+        let mut listening = setup.port_under_test(PortNumber::new(1));
 
         let foreign_clock = TestClockDS::default_mid_grade().dataset();
 
@@ -277,7 +277,7 @@ mod tests {
     fn listening_port_recommends_master_on_two_announces() {
         let setup = ListeningPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let mut listening = setup.port_under_test();
+        let mut listening = setup.port_under_test(PortNumber::new(1));
 
         let foreign_clock = TestClockDS::default_mid_grade().dataset();
 
@@ -316,7 +316,7 @@ mod tests {
     fn listening_port_recommends_slave_on_two_announces() {
         let setup = ListeningPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
-        let mut listening = setup.port_under_test();
+        let mut listening = setup.port_under_test(PortNumber::new(1));
 
         let foreign_clock = TestClockDS::default_high_grade().dataset();
 
@@ -353,7 +353,7 @@ mod tests {
     fn listening_port_updates_steps_removed_on_m1_master_recommendation() {
         let setup = ListeningPortTestSetup::new(TestClockDS::gps_grandmaster().dataset());
 
-        let mut listening = setup.port_under_test();
+        let mut listening = setup.port_under_test(PortNumber::new(1));
 
         let foreign_clock = TestClockDS::default_mid_grade().dataset();
 
@@ -403,7 +403,7 @@ mod tests {
     fn listening_port_updates_steps_removed_on_m2_master_recommendation() {
         let setup = ListeningPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
-        let mut listening = setup.port_under_test();
+        let mut listening = setup.port_under_test(PortNumber::new(1));
 
         let foreign_clock = TestClockDS::default_low_grade_slave_only().dataset();
 
@@ -453,7 +453,7 @@ mod tests {
     fn listening_port_updates_steps_removed_on_s1_slave_recommendation() {
         let setup = ListeningPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
-        let mut listening = setup.port_under_test();
+        let mut listening = setup.port_under_test(PortNumber::new(1));
 
         let foreign_clock = TestClockDS::default_high_grade().dataset();
 
@@ -497,7 +497,7 @@ mod tests {
         // Local GPS grandmaster, but foreign has lower priority1 making it better overall
         let setup = ListeningPortTestSetup::new(TestClockDS::gps_grandmaster().dataset());
 
-        let mut listening = setup.port_under_test();
+        let mut listening = setup.port_under_test(PortNumber::new(1));
 
         // Foreign uses lower priority1 so it is better, even though clock class is worse
         let foreign = TestClockDS::default_low_grade_slave_only().with_priority1(Priority1::new(1));

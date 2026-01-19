@@ -336,7 +336,11 @@ mod tests {
             }
         }
 
-        fn port_under_test(&self, records: &[ForeignClockRecord]) -> MasterTestPort<'_> {
+        fn port_under_test(
+            &self,
+            port_number: PortNumber,
+            records: &[ForeignClockRecord],
+        ) -> MasterTestPort<'_> {
             let domain_port = DomainPort::new(
                 &self.local_clock,
                 &self.physical_port,
@@ -344,7 +348,7 @@ mod tests {
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
+                port_number,
             );
             let announce_cycle = AnnounceCycle::new(
                 0.into(),
@@ -365,10 +369,10 @@ mod tests {
                     BestMasterClockAlgorithm::new(
                         &self.default_ds,
                         &self.foreign_candidates,
-                        PortNumber::new(1),
+                        port_number,
                     ),
                     BestForeignRecord::new(
-                        PortNumber::new(1),
+                        port_number,
                         ForeignClockRecordsVec::from_records(records),
                     ),
                     grandmaster_id,
@@ -385,7 +389,7 @@ mod tests {
     fn master_port_test_setup_is_side_effect_free() {
         let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let _slave = setup.port_under_test(&[]);
+        let _slave = setup.port_under_test(PortNumber::new(1), &[]);
 
         assert!(setup.timer_host.take_system_messages().is_empty());
         assert!(setup.physical_port.is_empty());
@@ -398,7 +402,7 @@ mod tests {
             TimeStamp::new(0, 0),
         );
 
-        let mut master = setup.port_under_test(&[]);
+        let mut master = setup.port_under_test(PortNumber::new(1), &[]);
 
         master
             .process_delay_request(
@@ -424,7 +428,7 @@ mod tests {
     fn master_port_sends_sync() {
         let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let mut master = setup.port_under_test(&[]);
+        let mut master = setup.port_under_test(PortNumber::new(1), &[]);
 
         master.send_sync().unwrap();
 
@@ -442,7 +446,7 @@ mod tests {
     fn master_port_schedules_next_sync_timeout() {
         let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let mut master = setup.port_under_test(&[]);
+        let mut master = setup.port_under_test(PortNumber::new(1), &[]);
 
         master.send_sync().unwrap();
 
@@ -454,7 +458,7 @@ mod tests {
     fn master_port_sends_follow_up() {
         let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let mut master = setup.port_under_test(&[]);
+        let mut master = setup.port_under_test(PortNumber::new(1), &[]);
 
         master
             .send_follow_up(
@@ -478,7 +482,7 @@ mod tests {
     fn master_port_schedules_next_announce() {
         let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let mut master = setup.port_under_test(&[]);
+        let mut master = setup.port_under_test(PortNumber::new(1), &[]);
 
         master.send_announce().unwrap();
 
@@ -490,7 +494,7 @@ mod tests {
     fn master_port_sends_announce() {
         let setup = MasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let mut master = setup.port_under_test(&[]);
+        let mut master = setup.port_under_test(PortNumber::new(1), &[]);
 
         master.send_announce().unwrap();
 
@@ -512,7 +516,7 @@ mod tests {
 
         let foreign_clock_ds = TestClockDS::default_high_grade().dataset();
 
-        let mut master = setup.port_under_test(&[]);
+        let mut master = setup.port_under_test(PortNumber::new(1), &[]);
 
         let decision = master.process_announce(
             AnnounceMessage::new(
@@ -552,7 +556,7 @@ mod tests {
             Instant::from_secs(0),
         )];
 
-        let mut master = setup.port_under_test(&prior_records);
+        let mut master = setup.port_under_test(PortNumber::new(1), &prior_records);
 
         let decision = master.process_announce(
             AnnounceMessage::new(
@@ -575,7 +579,7 @@ mod tests {
 
         let foreign_clock_ds = TestClockDS::default_low_grade_slave_only().dataset();
 
-        let mut master = setup.port_under_test(&[]);
+        let mut master = setup.port_under_test(PortNumber::new(1), &[]);
 
         let decision = master.process_announce(
             AnnounceMessage::new(
@@ -604,7 +608,7 @@ mod tests {
             Instant::from_secs(0),
         )];
 
-        let mut master = setup.port_under_test(&prior_records);
+        let mut master = setup.port_under_test(PortNumber::new(1), &prior_records);
 
         // Receive a better announce (but still lower quality than local high-grade clock)
         let decision = master.process_announce(
@@ -735,7 +739,7 @@ mod tests {
             Instant::from_secs(0),
         )];
 
-        let mut master = setup.port_under_test(&prior_records);
+        let mut master = setup.port_under_test(PortNumber::new(1), &prior_records);
 
         // Process another announce from the same foreign clock
         let decision = master.process_announce(

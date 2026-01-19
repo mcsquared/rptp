@@ -180,7 +180,11 @@ mod tests {
             }
         }
 
-        fn port_under_test(&self, records: &[ForeignClockRecord]) -> PreMasterTestPort<'_> {
+        fn port_under_test(
+            &self,
+            port_number: PortNumber,
+            records: &[ForeignClockRecord],
+        ) -> PreMasterTestPort<'_> {
             let domain_port = DomainPort::new(
                 &self.local_clock,
                 &self.physical_port,
@@ -188,7 +192,7 @@ mod tests {
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
+                port_number,
             );
 
             let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
@@ -200,10 +204,10 @@ mod tests {
                     BestMasterClockAlgorithm::new(
                         &self.default_ds,
                         &self.foreign_candidates,
-                        PortNumber::new(1),
+                        port_number,
                     ),
                     BestForeignRecord::new(
-                        PortNumber::new(1),
+                        port_number,
                         ForeignClockRecordsVec::from_records(records),
                     ),
                     grandmaster_id,
@@ -218,7 +222,7 @@ mod tests {
     fn pre_master_port_test_setup_is_side_effect_free() {
         let setup = PreMasterPortTestSetup::new(TestClockDS::default_low_grade().dataset());
 
-        let _pre_master = setup.port_under_test(&[]);
+        let _pre_master = setup.port_under_test(PortNumber::new(1), &[]);
 
         assert!(setup.timer_host.take_system_messages().is_empty());
         assert!(setup.physical_port.is_empty());
@@ -228,7 +232,7 @@ mod tests {
     fn pre_master_port_to_master_on_qualified() {
         let setup = PreMasterPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
-        let pre_master = setup.port_under_test(&[]);
+        let pre_master = setup.port_under_test(PortNumber::new(1), &[]);
 
         let master = pre_master.qualified();
 
@@ -247,7 +251,7 @@ mod tests {
             TestClockDS::default_high_grade().clock_identity(),
             PortNumber::new(1),
         );
-        let mut pre_master = setup.port_under_test(&[]);
+        let mut pre_master = setup.port_under_test(PortNumber::new(1), &[]);
 
         // Receive first better announce
         let decision = pre_master.process_announce(
@@ -302,7 +306,7 @@ mod tests {
             Instant::from_secs(0),
         )];
 
-        let mut pre_master = setup.port_under_test(&prior_records);
+        let mut pre_master = setup.port_under_test(PortNumber::new(1), &prior_records);
 
         // Process another announce from the same foreign clock
         let decision = pre_master.process_announce(
