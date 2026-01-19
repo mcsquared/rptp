@@ -41,6 +41,7 @@ use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
 use crate::master::MasterPort;
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
+use crate::passive::PassivePort;
 use crate::port::{ParentPortIdentity, Port, PortIdentity};
 use crate::premaster::PreMasterPort;
 use crate::slave::SlavePort;
@@ -64,6 +65,8 @@ pub(crate) enum StateDecision {
     RecommendedSlave(ParentPortIdentity),
     /// BMCA recommended transitioning toward master/pre-master.
     RecommendedMaster(BmcaMasterDecision),
+    /// BMCA recommended transitioning toward passive.
+    RecommendedPassive,
     /// A fault was detected (send failure, explicit fault condition, …).
     FaultDetected,
     /// A previously detected fault has been cleared (`FAULTY → INITIALIZING`).
@@ -88,6 +91,7 @@ pub enum PortState<'a, P: Port, S: ForeignClockRecords> {
     Master(MasterPort<'a, P, S>),
     PreMaster(PreMasterPort<'a, P, S>),
     Uncalibrated(UncalibratedPort<'a, P, S>),
+    Passive(PassivePort<'a, P, S>),
     Faulty(FaultyPort<'a, P, S>),
 }
 
@@ -104,8 +108,9 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
                 PortState::Uncalibrated(uncalibrated) => {
                     uncalibrated.announce_receipt_timeout_expired()
                 }
+                PortState::Passive(passive) => passive.announce_receipt_timeout_expired(),
                 _ => panic!(
-                    "AnnounceReceiptTimeoutExpired can only be applied in Listening, Slave, or Uncalibrated states"
+                    "AnnounceReceiptTimeoutExpired can only be applied in Listening, Slave, Uncalibrated, or Passive states"
                 ),
             },
             StateDecision::MasterClockSelected(parent) => match self {
@@ -118,8 +123,9 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
                 PortState::PreMaster(pre_master) => pre_master.recommended_slave(decision),
                 PortState::Slave(slave) => slave.recommended_slave(decision),
                 PortState::Uncalibrated(uncalibrated) => uncalibrated.recommended_slave(decision),
+                PortState::Passive(passive) => passive.recommended_slave(decision),
                 _ => panic!(
-                    "RecommendedSlave can only be applied in Listening, Master, PreMaster, Slave, or Uncalibrated states"
+                    "RecommendedSlave can only be applied in Listening, Master, PreMaster, Slave, Uncalibrated, or Passive states"
                 ),
             },
             StateDecision::RecommendedMaster(decision) => match self {
@@ -128,8 +134,19 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
                 PortState::Master(master) => master.recommended_master(decision),
                 PortState::Slave(slave) => slave.recommended_master(decision),
                 PortState::PreMaster(pre_master) => pre_master.recommended_master(decision),
+                PortState::Passive(passive) => passive.recommended_master(decision),
                 _ => panic!(
-                    "RecommendedMaster can only be applied in Listening, Uncalibrated, Master, PreMaster, or Slave states"
+                    "RecommendedMaster can only be applied in Listening, Uncalibrated, Master, PreMaster, Slave, or Passive states"
+                ),
+            },
+            StateDecision::RecommendedPassive => match self {
+                PortState::Listening(listening) => listening.recommended_passive(),
+                PortState::Master(master) => master.recommended_passive(),
+                PortState::PreMaster(pre_master) => pre_master.recommended_passive(),
+                PortState::Slave(slave) => slave.recommended_passive(),
+                PortState::Uncalibrated(uncalibrated) => uncalibrated.recommended_passive(),
+                _ => panic!(
+                    "RecommendedPassive can only be applied in Listening, Master, PreMaster, Slave, or Uncalibrated states"
                 ),
             },
             StateDecision::Initialized => match self {
@@ -150,6 +167,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
                 PortState::Master(master) => master.fault_detected(),
                 PortState::PreMaster(pre_master) => pre_master.fault_detected(),
                 PortState::Uncalibrated(uncalibrated) => uncalibrated.fault_detected(),
+                PortState::Passive(passive) => passive.fault_detected(),
                 PortState::Faulty(faulty) => PortState::Faulty(faulty),
                 PortState::Initializing(_) => {
                     panic!("FaultDetected cannot be applied in Initializing state")
@@ -194,6 +212,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
                     Err(_) => Some(StateDecision::FaultDetected),
                 }
             }
+            (Passive(_), _) => None,
             _ => None,
         }
     }
@@ -231,6 +250,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
             }
             (Slave(port), FollowUp(msg)) => port.process_follow_up(msg, source_port_identity),
             (Slave(port), DelayResp(msg)) => port.process_delay_response(msg, source_port_identity),
+            (Passive(port), Announce(msg)) => port.process_announce(msg, source_port_identity, now),
             _ => None,
         }
     }
@@ -284,9 +304,10 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
                 _ => None,
             },
             (Initializing(_), SystemMessage::Initialized) => Some(StateDecision::Initialized),
-            (Listening(_) | Slave(_) | Master(_) | Uncalibrated(_), AnnounceReceiptTimeout) => {
-                Some(StateDecision::AnnounceReceiptTimeoutExpired)
-            }
+            (
+                Listening(_) | Slave(_) | Master(_) | Uncalibrated(_) | Passive(_),
+                AnnounceReceiptTimeout,
+            ) => Some(StateDecision::AnnounceReceiptTimeoutExpired),
             (PreMaster(_), QualificationTimeout) => {
                 Some(StateDecision::QualificationTimeoutExpired)
             }
@@ -305,7 +326,7 @@ mod tests {
     use crate::bmca::{
         BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, BmcaMasterDecision,
         BmcaMasterDecisionPoint, ClockDS, GrandMasterTrackingBmca, ListeningBmca,
-        ParentTrackingBmca, QualificationTimeoutPolicy,
+        ParentTrackingBmca, PassiveBmca, QualificationTimeoutPolicy,
     };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved};
     use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
@@ -477,6 +498,22 @@ mod tests {
                     PortNumber::new(1),
                 ),
                 BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
+            )
+        }
+
+        fn passive_port(
+            &self,
+        ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+            PortProfile::default().passive(
+                self.domain_port(),
+                PassiveBmca::new(
+                    BestMasterClockAlgorithm::new(
+                        &self.default_ds,
+                        &self.foreign_candidates,
+                        PortNumber::new(1),
+                    ),
+                    BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
+                ),
             )
         }
     }
@@ -1116,5 +1153,129 @@ mod tests {
         let decision = faulty.dispatch_system(SystemMessage::FaultCleared);
 
         assert!(matches!(decision, Some(StateDecision::FaultCleared)));
+    }
+
+    #[test]
+    fn portstate_listening_to_passive_transition() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
+
+        let listening = setup.listening_port();
+
+        let passive = listening.apply(StateDecision::RecommendedPassive);
+
+        assert!(matches!(passive, PortState::Passive(_)));
+    }
+
+    #[test]
+    fn portstate_master_to_passive_transition() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
+
+        let master = setup.master_port();
+
+        let passive = master.apply(StateDecision::RecommendedPassive);
+
+        assert!(matches!(passive, PortState::Passive(_)));
+    }
+
+    #[test]
+    fn portstate_pre_master_to_passive_transition() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
+
+        let pre_master = setup.pre_master_port();
+
+        let passive = pre_master.apply(StateDecision::RecommendedPassive);
+
+        assert!(matches!(passive, PortState::Passive(_)));
+    }
+
+    #[test]
+    fn portstate_slave_to_passive_transition() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
+
+        let slave = setup.slave_port();
+
+        let passive = slave.apply(StateDecision::RecommendedPassive);
+
+        assert!(matches!(passive, PortState::Passive(_)));
+    }
+
+    #[test]
+    fn portstate_uncalibrated_to_passive_transition() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
+
+        let uncalibrated = setup.uncalibrated_port();
+
+        let passive = uncalibrated.apply(StateDecision::RecommendedPassive);
+
+        assert!(matches!(passive, PortState::Passive(_)));
+    }
+
+    #[test]
+    fn portstate_passive_to_pre_master_transition() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
+
+        let passive = setup.passive_port();
+
+        let pre_master = passive.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
+            BmcaMasterDecisionPoint::M1,
+            StepsRemoved::new(0),
+            *setup.local_clock_identity(),
+        )));
+
+        assert!(matches!(pre_master, PortState::PreMaster(_)));
+    }
+
+    #[test]
+    fn portstate_passive_to_uncalibrated_transition() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
+
+        let passive = setup.passive_port();
+
+        let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
+        let uncalibrated = passive.apply(StateDecision::RecommendedSlave(parent_port_identity));
+
+        assert!(matches!(uncalibrated, PortState::Uncalibrated(_)));
+    }
+
+    #[test]
+    fn portstate_passive_to_master_transition() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_high_grade().dataset());
+
+        let passive = setup.passive_port();
+
+        let master = passive.apply(StateDecision::AnnounceReceiptTimeoutExpired);
+
+        assert!(matches!(master, PortState::Master(_)));
+    }
+
+    #[test]
+    fn portstate_passive_to_faulty_transition() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
+
+        let passive = setup.passive_port();
+
+        let result = passive.apply(StateDecision::FaultDetected);
+
+        assert!(matches!(result, PortState::Faulty(_)));
+    }
+
+    #[test]
+    #[should_panic]
+    fn portstate_initializing_to_passive_illegal_transition_panics() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
+
+        let initializing = setup.initializing_port();
+
+        initializing.apply(StateDecision::RecommendedPassive);
+    }
+
+    #[test]
+    #[should_panic]
+    fn portstate_faulty_to_passive_illegal_transition_panics() {
+        let setup = PortStateTestSetup::new(TestClockDS::default_mid_grade().dataset());
+
+        let faulty = setup.faulty_port();
+
+        faulty.apply(StateDecision::RecommendedPassive);
     }
 }

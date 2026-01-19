@@ -278,6 +278,15 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
         self.profile.uncalibrated(self.port, bmca)
     }
 
+    /// Apply a BMCA recommendation to become passive.
+    ///
+    /// This transitions into `PASSIVE` while preserving the BMCA state.
+    pub(crate) fn recommended_passive(self) -> PortState<'a, P, S> {
+        self.port.log(PortEvent::Static("RecommendedPassive"));
+        let bmca = self.bmca.into_passive();
+        self.profile.passive(self.port, bmca)
+    }
+
     /// Transition to `FAULTY` upon fault detection.
     pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
         let (bmca, best_foreign) = self.bmca.into_parts();

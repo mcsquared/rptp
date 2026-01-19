@@ -13,7 +13,7 @@
 
 use crate::bmca::{
     BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, GrandMasterTrackingBmca,
-    ListeningBmca, ParentTrackingBmca, QualificationTimeoutPolicy,
+    ListeningBmca, ParentTrackingBmca, PassiveBmca, QualificationTimeoutPolicy,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::faulty::FaultyPort;
@@ -21,6 +21,7 @@ use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};
 use crate::message::SystemMessage;
+use crate::passive::PassivePort;
 use crate::port::{AnnounceReceiptTimeout, Port, Timeout};
 use crate::portstate::PortState;
 use crate::premaster::PreMasterPort;
@@ -198,7 +199,7 @@ impl PortProfile {
 
     /// Construct the `UNCALIBRATED` state.
     ///
-    /// This state participates in offset measurement while the servo is not yet “locked”.
+    /// This state participates in offset measurement while the servo is not yet "locked".
     /// It starts both:
     /// - the announce receipt timeout (to detect loss of announces), and
     /// - the delay-request schedule (initially immediate) to begin collecting delay samples.
@@ -238,5 +239,23 @@ impl PortProfile {
         best_foreign: BestForeignRecord<S>,
     ) -> PortState<P, S> {
         PortState::Faulty(FaultyPort::new(port, bmca, best_foreign, self))
+    }
+
+    /// Construct the `PASSIVE` state and start the announce receipt timeout.
+    ///
+    /// The announce receipt timer is restarted immediately so the port can transition away from
+    /// passive if no Announce messages arrive within the configured interval.
+    pub(crate) fn passive<P: Port, S: ForeignClockRecords>(
+        self,
+        port: P,
+        bmca: PassiveBmca<S>,
+    ) -> PortState<P, S> {
+        let announce_receipt_timeout = AnnounceReceiptTimeout::new(
+            port.timeout(SystemMessage::AnnounceReceiptTimeout),
+            self.announce_receipt_timeout_interval,
+        );
+        announce_receipt_timeout.restart();
+
+        PortState::Passive(PassivePort::new(port, bmca, announce_receipt_timeout, self))
     }
 }

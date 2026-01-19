@@ -94,6 +94,15 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
         })
     }
 
+    /// Apply a BMCA recommendation to become passive.
+    ///
+    /// This transitions into `PASSIVE` while preserving the BMCA state.
+    pub(crate) fn recommended_passive(self) -> PortState<'a, P, S> {
+        self.port.log(PortEvent::Static("RecommendedPassive"));
+        let bmca = self.bmca.into_passive();
+        self.profile.passive(self.port, bmca)
+    }
+
     /// Handle Announce receipt timeout expiry while in `LISTENING`.
     ///
     /// This transitions to `MASTER` using “current grandmaster tracking”, which (in current
@@ -142,7 +151,7 @@ mod tests {
 
     use crate::bmca::{
         BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, BmcaMasterDecisionPoint,
-        ClockDS, ListeningBmca,
+        ClockDS, ListeningBmca, Priority1,
     };
     use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
     use crate::infra::infra_support::ForeignClockRecordsVec;
@@ -481,5 +490,42 @@ mod tests {
             listening.recommended_slave(decision),
             PortState::Uncalibrated(_)
         ));
+    }
+
+    #[test]
+    fn listening_port_recommends_passive_when_foreign_better_by_tuple() {
+        // Local GPS grandmaster, but foreign has lower priority1 making it better overall
+        let setup = ListeningPortTestSetup::new(TestClockDS::gps_grandmaster().dataset());
+
+        let mut listening = setup.port_under_test();
+
+        // Foreign uses lower priority1 so it is better, even though clock class is worse
+        let foreign = TestClockDS::default_low_grade_slave_only().with_priority1(Priority1::new(1));
+        let foreign_port = PortIdentity::new(foreign.clock_identity(), PortNumber::new(1));
+
+        let decision = listening.process_announce(
+            AnnounceMessage::new(
+                0.into(),
+                LogMessageInterval::new(0),
+                foreign.dataset(),
+                TimeScale::Ptp,
+            ),
+            foreign_port,
+            Instant::from_secs(0),
+        );
+        assert!(decision.is_none());
+
+        let decision = listening.process_announce(
+            AnnounceMessage::new(
+                1.into(),
+                LogMessageInterval::new(0),
+                foreign.dataset(),
+                TimeScale::Ptp,
+            ),
+            foreign_port,
+            Instant::from_secs(0),
+        );
+
+        assert!(matches!(decision, Some(StateDecision::RecommendedPassive)));
     }
 }

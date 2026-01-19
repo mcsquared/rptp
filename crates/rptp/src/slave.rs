@@ -260,6 +260,15 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         })
     }
 
+    /// Apply a BMCA recommendation to become passive.
+    ///
+    /// This transitions into `PASSIVE` while preserving the BMCA state.
+    pub(crate) fn recommended_passive(self) -> PortState<'a, P, S> {
+        self.port.log(PortEvent::Static("RecommendedPassive"));
+        let bmca = self.bmca.into_passive();
+        self.profile.passive(self.port, bmca)
+    }
+
     /// Handle a synchronization fault reported by the servo.
     ///
     /// This transitions from `SLAVE` to `UNCALIBRATED` while preserving the currently tracked

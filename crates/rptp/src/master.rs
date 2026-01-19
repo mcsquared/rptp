@@ -185,6 +185,15 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
         self.profile.uncalibrated(self.port, bmca)
     }
 
+    /// Apply a BMCA recommendation to become passive.
+    ///
+    /// This transitions into `PASSIVE` while preserving the BMCA state.
+    pub(crate) fn recommended_passive(self) -> PortState<'a, P, S> {
+        self.port.log(PortEvent::Static("RecommendedPassive"));
+        let bmca = self.bmca.into_passive();
+        self.profile.passive(self.port, bmca)
+    }
+
     pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
         let (bmca, best_foreign) = self.bmca.into_parts();
         self.profile.faulty(self.port, bmca, best_foreign)
@@ -278,9 +287,9 @@ mod tests {
 
     use crate::bmca::{
         BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
-        ForeignClockRecord, GrandMasterTrackingBmca,
+        ForeignClockRecord, GrandMasterTrackingBmca, Priority1,
     };
-    use crate::clock::{LocalClock, TimeScale};
+    use crate::clock::{ClockIdentity, LocalClock, TimeScale};
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{
@@ -702,5 +711,41 @@ mod tests {
                 LogInterval::new(0)
             )
         );
+    }
+
+    #[test]
+    fn master_port_recommends_passive_when_foreign_better_by_tuple() {
+        // Local GPS grandmaster, but foreign has lower priority1 making it better overall
+        let setup = MasterPortTestSetup::new(TestClockDS::gps_grandmaster().dataset());
+
+        // Start with a qualified foreign clock record
+        let foreign_port = PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x01]),
+            PortNumber::new(1),
+        );
+        // Foreign uses lower priority1 so it is better, even though clock class is worse
+        let foreign = TestClockDS::default_low_grade_slave_only().with_priority1(Priority1::new(1));
+        let prior_records = [ForeignClockRecord::qualified(
+            foreign_port,
+            foreign.dataset(),
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )];
+
+        let mut master = setup.port_under_test(&prior_records);
+
+        // Process another announce from the same foreign clock
+        let decision = master.process_announce(
+            AnnounceMessage::new(
+                1.into(),
+                LogMessageInterval::new(0),
+                foreign.dataset(),
+                TimeScale::Ptp,
+            ),
+            foreign_port,
+            Instant::from_secs(1),
+        );
+
+        assert!(matches!(decision, Some(StateDecision::RecommendedPassive)));
     }
 }
