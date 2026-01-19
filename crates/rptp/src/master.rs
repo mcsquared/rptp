@@ -46,6 +46,7 @@ pub struct MasterPort<'a, P: Port, S: ForeignClockRecords> {
     bmca: GrandMasterTrackingBmca<'a, S>,
     announce_cycle: AnnounceCycle<P::Timeout>,
     sync_cycle: SyncCycle<P::Timeout>,
+    log_min_delay_request_interval: LogInterval,
     profile: PortProfile,
 }
 
@@ -56,6 +57,7 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
         bmca: GrandMasterTrackingBmca<'a, S>,
         announce_cycle: AnnounceCycle<P::Timeout>,
         sync_cycle: SyncCycle<P::Timeout>,
+        log_min_delay_request_interval: LogInterval,
         profile: PortProfile,
     ) -> Self {
         port.log(PortEvent::Static("Become MasterPort"));
@@ -65,6 +67,7 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
             bmca,
             announce_cycle,
             sync_cycle,
+            log_min_delay_request_interval,
             profile,
         }
     }
@@ -119,9 +122,7 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
         self.port.log(PortEvent::MessageReceived("DelayReq"));
 
         let response = req.response(
-            self.profile
-                .log_min_delay_request_interval()
-                .log_message_interval(),
+            self.log_min_delay_request_interval.log_message_interval(),
             ingress_timestamp,
             requesting_port_identity,
         );
@@ -357,6 +358,7 @@ mod tests {
             );
             let grandmaster_id = *self.local_clock.identity();
 
+            let default_profile = PortProfile::default();
             MasterPort::new(
                 domain_port,
                 GrandMasterTrackingBmca::new(
@@ -373,7 +375,8 @@ mod tests {
                 ),
                 announce_cycle,
                 sync_cycle,
-                PortProfile::default(),
+                LogInterval::new(0),
+                default_profile,
             )
         }
     }
