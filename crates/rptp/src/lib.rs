@@ -51,6 +51,7 @@ mod faulty;
 mod initializing;
 mod listening;
 mod master;
+mod passive;
 mod premaster;
 mod slave;
 mod uncalibrated;

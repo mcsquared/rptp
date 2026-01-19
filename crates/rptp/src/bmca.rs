@@ -216,6 +216,11 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 
+    /// Convert to a PassiveBmca for transitioning to passive state.
+    pub(crate) fn into_passive(self) -> PassiveBmca<'a, S> {
+        PassiveBmca::new(self.bmca, self.best_foreign)
+    }
+
     /// Decompose ListeningBmca into its parts.
     pub(crate) fn into_parts(self) -> (BestMasterClockAlgorithm<'a>, BestForeignRecord<S>) {
         (self.bmca, self.best_foreign)
@@ -324,6 +329,11 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
         ParentTrackingBmca::new(self.bmca, self.best_foreign, parent_port_identity)
     }
 
+    /// Convert to a PassiveBmca for transitioning to passive state.
+    pub(crate) fn into_passive(self) -> PassiveBmca<'a, S> {
+        PassiveBmca::new(self.bmca, self.best_foreign)
+    }
+
     /// Decompose GrandMasterTrackingBmca into its parts.
     pub(crate) fn into_parts(self) -> (BestMasterClockAlgorithm<'a>, BestForeignRecord<S>) {
         (self.bmca, self.best_foreign)
@@ -421,6 +431,11 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 
+    /// Convert to a PassiveBmca for transitioning to passive state.
+    pub(crate) fn into_passive(self) -> PassiveBmca<'a, S> {
+        PassiveBmca::new(self.bmca, self.best_foreign)
+    }
+
     /// Decompose ParentTrackingBmca into its parts.
     pub(crate) fn into_parts(self) -> (BestMasterClockAlgorithm<'a>, BestForeignRecord<S>) {
         (self.bmca, self.best_foreign)
@@ -456,6 +471,85 @@ impl<'a, S: ForeignClockRecords> Bmca for ParentTrackingBmca<'a, S> {
                     None
                 }
             }
+            _ => Some(decision),
+        }
+    }
+}
+
+/// PassiveBmca
+///
+/// BMCA role decorator that suppresses "passive" decisions while in passive state.
+///
+/// If the underlying BMCA would decide to be passive, this wrapper returns `None` from
+/// `decision()` to avoid repeatedly re-emitting identical transitions. Master and slave
+/// decisions are always emitted to allow transitions away from passive state.
+///
+/// Encodes the transition gating for passive state in IEEE 1588-2019 §9.2.5.
+pub(crate) struct PassiveBmca<'a, S: ForeignClockRecords> {
+    bmca: BestMasterClockAlgorithm<'a>,
+    best_foreign: BestForeignRecord<S>,
+}
+
+impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
+    pub fn new(bmca: BestMasterClockAlgorithm<'a>, best_foreign: BestForeignRecord<S>) -> Self {
+        Self { bmca, best_foreign }
+    }
+
+    /// Convert to a ParentTrackingBmca that tracks the given parent.
+    pub(crate) fn into_parent_tracking(
+        self,
+        parent_port_identity: ParentPortIdentity,
+    ) -> ParentTrackingBmca<'a, S> {
+        ParentTrackingBmca::new(self.bmca, self.best_foreign, parent_port_identity)
+    }
+
+    /// Convert to a GrandMasterTrackingBmca that tracks the given grandmaster.
+    pub(crate) fn into_grandmaster_tracking(
+        self,
+        grandmaster_id: ClockIdentity,
+    ) -> GrandMasterTrackingBmca<'a, S> {
+        GrandMasterTrackingBmca::new(self.bmca, self.best_foreign, grandmaster_id)
+    }
+
+    /// Convert to a GrandMasterTrackingBmca that tracks the currently known grandmaster.
+    pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<'a, S> {
+        let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
+        self.into_grandmaster_tracking(current_grandmaster_id)
+    }
+
+    /// Decompose PassiveBmca into its parts.
+    pub(crate) fn into_parts(self) -> (BestMasterClockAlgorithm<'a>, BestForeignRecord<S>) {
+        (self.bmca, self.best_foreign)
+    }
+}
+
+impl<'a, S: ForeignClockRecords> Bmca for PassiveBmca<'a, S> {
+    fn consider(
+        &mut self,
+        source_port_identity: PortIdentity,
+        foreign_clock_ds: ClockDS,
+        log_announce_interval: LogInterval,
+        now: Instant,
+    ) {
+        self.best_foreign.consider(
+            source_port_identity,
+            foreign_clock_ds,
+            log_announce_interval,
+            now,
+        );
+    }
+
+    /// Return a decision while suppressing passive decisions.
+    ///
+    /// Suppresses `BmcaDecision::Passive` to avoid repeatedly re-emitting identical transitions
+    /// while in passive state. Master and slave decisions are always emitted to allow transitions
+    /// away from passive state.
+    fn decision(&self) -> Option<BmcaDecision> {
+        let e_rbest = self.best_foreign.dataset();
+        let decision = self.bmca.decision(e_rbest);
+
+        match decision {
+            BmcaDecision::Passive => None,
             _ => Some(decision),
         }
     }
@@ -708,7 +802,7 @@ impl BmcaDecision {
         match self {
             BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
             BmcaDecision::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
-            BmcaDecision::Passive => None, // TODO: Handle passive recommendation
+            BmcaDecision::Passive => Some(StateDecision::RecommendedPassive),
         }
     }
 }
