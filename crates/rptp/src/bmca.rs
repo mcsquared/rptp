@@ -595,13 +595,24 @@ impl BestForeignSnapshot {
 ///
 /// Infrastructure implementations own storage strategy, locking, etc.
 pub trait ForeignGrandMasterCandidates {
-    fn remember(&self, snapshot: BestForeignSnapshot);
+    /// Remember or update what a port reports (qualified candidate or empty).
+    ///
+    /// `port` identifies which port is reporting. For `Empty` snapshots, this signals
+    /// that the port has no qualified candidates and allows the store to update its
+    /// per-port tracking accordingly.
+    fn remember(&self, port: PortNumber, snapshot: BestForeignSnapshot);
+
+    /// Return the best qualified foreign candidate across all ports.
     fn best(&self) -> BestForeignSnapshot;
 }
 
 // Simple in-memory implementation of ForeignGrandMasterCandidates for single-port use cases.
 impl ForeignGrandMasterCandidates for Cell<BestForeignSnapshot> {
-    fn remember(&self, snapshot: BestForeignSnapshot) {
+    fn remember(&self, port: PortNumber, snapshot: BestForeignSnapshot) {
+        debug_assert!(
+            port == PortNumber::new(1),
+            "only single-port use cases supported"
+        );
         debug_assert!(
             match snapshot {
                 BestForeignSnapshot::Qualified {
@@ -683,7 +694,8 @@ impl<'a> BestMasterClockAlgorithm<'a> {
     /// The argument `e_rbest` is the best qualified foreign candidate observed on the current
     /// port (if any).
     pub(crate) fn decision(&self, e_rbest: BestForeignDataset) -> BmcaDecision {
-        self.foreign_candidates.remember(e_rbest.snapshot());
+        self.foreign_candidates
+            .remember(self.port_number, e_rbest.snapshot());
 
         let d_0 = self.local_candidate.snapshot();
         if d_0.is_authoritative() {
@@ -1289,14 +1301,11 @@ impl From<u8> for Priority2 {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
 
-    use std::cell::RefCell;
-    use std::collections::BTreeMap;
-
     use crate::clock::LocalClock;
-    use crate::infra::infra_support::ForeignClockRecordsVec;
+    use crate::infra::infra_support::{ForeignClockRecordsVec, MultiPortForeignCandidates};
     use crate::log::NOOP_CLOCK_METRICS;
     use crate::port::PortNumber;
     use crate::servo::{Servo, SteppingServo};
@@ -1407,61 +1416,10 @@ pub(crate) mod tests {
 
     // Test for IEEE 1588-2019 Section 9.3.3, figure 33, Slave decision point S1.
     //
-    // TODO: this is an early multi-port BMCA test with the test helpers here considered blueprints
-    // for future multi-port BMCA support. Once multi-port BMCA is implemented, this test
-    // should be adapted to use the real multi-port BMCA implementation instead of the
-    // test-specific ForeignGrandMasterCandidates implementation.
+    // This test verifies that when E_best was received on a different port, the BMCA does not
+    // recommend SLAVE (S1 decision point). Instead, it should recommend PASSIVE or MASTER (P2/M3).
     #[test]
     fn bmca_does_not_choose_slave_when_ebest_received_on_other_port() {
-        struct MultiPortForeignCandidates {
-            by_port: RefCell<BTreeMap<PortNumber, BestForeignSnapshot>>,
-        }
-
-        impl MultiPortForeignCandidates {
-            fn new() -> Self {
-                Self {
-                    by_port: RefCell::new(BTreeMap::new()),
-                }
-            }
-        }
-
-        impl ForeignGrandMasterCandidates for MultiPortForeignCandidates {
-            fn remember(&self, snapshot: BestForeignSnapshot) {
-                let BestForeignSnapshot::Qualified {
-                    received_on_port, ..
-                } = snapshot
-                else {
-                    return;
-                };
-                self.by_port.borrow_mut().insert(received_on_port, snapshot);
-            }
-
-            fn best(&self) -> BestForeignSnapshot {
-                let by_port = self.by_port.borrow();
-                let mut best_snapshot = BestForeignSnapshot::Empty;
-
-                for snapshot in by_port.values().copied() {
-                    let better = match (snapshot, best_snapshot) {
-                        (
-                            BestForeignSnapshot::Qualified { ds: ds1, .. },
-                            BestForeignSnapshot::Qualified { ds: ds2, .. },
-                        ) => ds1.better_than(&ds2),
-                        (BestForeignSnapshot::Qualified { .. }, BestForeignSnapshot::Empty) => true,
-                        (BestForeignSnapshot::Empty, BestForeignSnapshot::Qualified { .. }) => {
-                            false
-                        }
-                        (BestForeignSnapshot::Empty, BestForeignSnapshot::Empty) => false,
-                    };
-
-                    if better {
-                        best_snapshot = snapshot;
-                    }
-                }
-
-                best_snapshot
-            }
-        }
-
         let foreign_candidates = MultiPortForeignCandidates::new();
 
         let local_port = PortNumber::new(1);
@@ -1476,11 +1434,14 @@ pub(crate) mod tests {
         // Seed Ebest on another local receive port. It must remain best after Erbest is remembered.
         let better = TestClockDS::default_high_grade().with_priority1(Priority1::new(1));
         let e_best_parent = PortIdentity::new(better.clock_identity(), PortNumber::new(1));
-        foreign_candidates.remember(BestForeignSnapshot::Qualified {
-            ds: better.dataset(),
-            source_port_identity: e_best_parent,
-            received_on_port: other_port,
-        });
+        foreign_candidates.remember(
+            other_port,
+            BestForeignSnapshot::Qualified {
+                ds: better.dataset(),
+                source_port_identity: e_best_parent,
+                received_on_port: other_port,
+            },
+        );
 
         let bmca = BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, local_port);
 

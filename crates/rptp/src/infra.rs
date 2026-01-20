@@ -18,13 +18,18 @@ pub mod infra_support {
     //! - adapters for common pointer/container types (`Rc`, `Box`, `&mut _`),
     //! - and a simple `Vec`-backed [`ForeignClockRecords`] implementation for BMCA.
 
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
     use std::rc::Rc;
 
-    use crate::bmca::{ForeignClockRecord, ForeignClockRecords, ForeignClockStatus};
+    use crate::bmca::{
+        BestForeignSnapshot, ForeignClockRecord, ForeignClockRecords, ForeignClockStatus,
+        ForeignGrandMasterCandidates,
+    };
     use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
     use crate::log::PortEvent;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-    use crate::port::{Port, SendResult};
+    use crate::port::{Port, PortNumber, SendResult};
     use crate::time::TimeStamp;
 
     impl Clock for Rc<dyn SynchronizableClock> {
@@ -163,9 +168,73 @@ pub mod infra_support {
         }
     }
 
+    /// Multi-port implementation of [`ForeignGrandMasterCandidates`] for boundary clock scenarios.
+    ///
+    /// This implementation tracks per-port foreign candidate snapshots and aggregates the best
+    /// qualified candidate across all ports for BMCA decision making. It supports boundary clocks
+    /// where multiple ports may observe different foreign masters.
+    pub struct MultiPortForeignCandidates {
+        by_port: RefCell<BTreeMap<PortNumber, BestForeignSnapshot>>,
+    }
+
+    impl MultiPortForeignCandidates {
+        /// Create a new multi-port foreign candidates store.
+        pub fn new() -> Self {
+            Self {
+                by_port: RefCell::new(BTreeMap::new()),
+            }
+        }
+    }
+
+    impl Default for MultiPortForeignCandidates {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl ForeignGrandMasterCandidates for MultiPortForeignCandidates {
+        fn remember(&self, port: PortNumber, snapshot: BestForeignSnapshot) {
+            match snapshot {
+                BestForeignSnapshot::Qualified { .. } => {
+                    // Port reports qualified candidate - store it
+                    self.by_port.borrow_mut().insert(port, snapshot);
+                }
+                BestForeignSnapshot::Empty => {
+                    // Port explicitly reports empty - remove its entry if it had one
+                    // This allows the store to track when a port's candidate goes stale
+                    self.by_port.borrow_mut().remove(&port);
+                }
+            }
+        }
+
+        fn best(&self) -> BestForeignSnapshot {
+            let by_port = self.by_port.borrow();
+            let mut best_snapshot = BestForeignSnapshot::Empty;
+
+            for snapshot in by_port.values().copied() {
+                let better = match (snapshot, best_snapshot) {
+                    (
+                        BestForeignSnapshot::Qualified { ds: ds1, .. },
+                        BestForeignSnapshot::Qualified { ds: ds2, .. },
+                    ) => ds1.better_than(&ds2),
+                    (BestForeignSnapshot::Qualified { .. }, BestForeignSnapshot::Empty) => true,
+                    (BestForeignSnapshot::Empty, BestForeignSnapshot::Qualified { .. }) => false,
+                    (BestForeignSnapshot::Empty, BestForeignSnapshot::Empty) => false,
+                };
+
+                if better {
+                    best_snapshot = snapshot;
+                }
+            }
+
+            best_snapshot
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::bmca::{BestForeignSnapshot, ForeignGrandMasterCandidates};
         use crate::clock::ClockIdentity;
         use crate::port::{PortIdentity, PortNumber};
         use crate::test_support::TestClockDS;
@@ -283,6 +352,204 @@ pub mod infra_support {
                 "prune_stale should report no removals when nothing is stale"
             );
             assert_eq!(records.len(), 1);
+        }
+
+        #[test]
+        fn multi_port_foreign_candidates_stores_qualified_per_port() {
+            let candidates = MultiPortForeignCandidates::new();
+            let port1 = PortNumber::new(1);
+            let port2 = PortNumber::new(2);
+
+            let high = TestClockDS::default_high_grade();
+            let mid = TestClockDS::default_mid_grade();
+            let high_ds = high.dataset();
+            let mid_ds = mid.dataset();
+
+            let high_port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
+            let mid_port_id = PortIdentity::new(mid.clock_identity(), PortNumber::new(1));
+
+            // Port 1 reports high-grade candidate
+            candidates.remember(
+                port1,
+                BestForeignSnapshot::Qualified {
+                    ds: high_ds,
+                    source_port_identity: high_port_id,
+                    received_on_port: port1,
+                },
+            );
+
+            // Port 2 reports mid-grade candidate
+            candidates.remember(
+                port2,
+                BestForeignSnapshot::Qualified {
+                    ds: mid_ds,
+                    source_port_identity: mid_port_id,
+                    received_on_port: port2,
+                },
+            );
+
+            // Best should be the high-grade candidate from port 1
+            let best = candidates.best();
+            match best {
+                BestForeignSnapshot::Qualified {
+                    ds,
+                    received_on_port,
+                    ..
+                } => {
+                    assert_eq!(ds, high_ds);
+                    assert_eq!(received_on_port, port1);
+                }
+                BestForeignSnapshot::Empty => panic!("expected qualified candidate"),
+            }
+        }
+
+        #[test]
+        fn multi_port_foreign_candidates_removes_port_on_empty() {
+            let candidates = MultiPortForeignCandidates::new();
+            let port1 = PortNumber::new(1);
+            let port2 = PortNumber::new(2);
+
+            let high = TestClockDS::default_high_grade();
+            let mid = TestClockDS::default_mid_grade();
+            let high_ds = high.dataset();
+            let mid_ds = mid.dataset();
+
+            let high_port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
+            let mid_port_id = PortIdentity::new(mid.clock_identity(), PortNumber::new(1));
+
+            // Both ports report candidates
+            candidates.remember(
+                port1,
+                BestForeignSnapshot::Qualified {
+                    ds: high_ds,
+                    source_port_identity: high_port_id,
+                    received_on_port: port1,
+                },
+            );
+            candidates.remember(
+                port2,
+                BestForeignSnapshot::Qualified {
+                    ds: mid_ds,
+                    source_port_identity: mid_port_id,
+                    received_on_port: port2,
+                },
+            );
+
+            // Port 1 reports empty (candidate went stale)
+            candidates.remember(port1, BestForeignSnapshot::Empty);
+
+            // Best should now be the mid-grade candidate from port 2
+            let best = candidates.best();
+            match best {
+                BestForeignSnapshot::Qualified {
+                    ds,
+                    received_on_port,
+                    ..
+                } => {
+                    assert_eq!(ds, mid_ds);
+                    assert_eq!(received_on_port, port2);
+                }
+                BestForeignSnapshot::Empty => panic!("expected qualified candidate from port 2"),
+            }
+        }
+
+        #[test]
+        fn multi_port_foreign_candidates_returns_empty_when_no_qualified() {
+            let candidates = MultiPortForeignCandidates::new();
+            let port1 = PortNumber::new(1);
+
+            // Port reports empty
+            candidates.remember(port1, BestForeignSnapshot::Empty);
+
+            // Best should be empty
+            assert_eq!(candidates.best(), BestForeignSnapshot::Empty);
+        }
+
+        #[test]
+        fn multi_port_foreign_candidates_returns_empty_when_all_ports_empty() {
+            let candidates = MultiPortForeignCandidates::new();
+            let port1 = PortNumber::new(1);
+            let port2 = PortNumber::new(2);
+
+            let high = TestClockDS::default_high_grade();
+            let high_ds = high.dataset();
+            let high_port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
+
+            // Port 1 reports qualified
+            candidates.remember(
+                port1,
+                BestForeignSnapshot::Qualified {
+                    ds: high_ds,
+                    source_port_identity: high_port_id,
+                    received_on_port: port1,
+                },
+            );
+
+            // Both ports report empty
+            candidates.remember(port1, BestForeignSnapshot::Empty);
+            candidates.remember(port2, BestForeignSnapshot::Empty);
+
+            // Best should be empty
+            assert_eq!(candidates.best(), BestForeignSnapshot::Empty);
+        }
+
+        #[test]
+        fn multi_port_foreign_candidates_selects_best_across_ports() {
+            let candidates = MultiPortForeignCandidates::new();
+            let port1 = PortNumber::new(1);
+            let port2 = PortNumber::new(2);
+            let port3 = PortNumber::new(3);
+
+            let high = TestClockDS::default_high_grade();
+            let mid = TestClockDS::default_mid_grade();
+            let low = TestClockDS::default_low_grade_slave_only();
+            let high_ds = high.dataset();
+            let mid_ds = mid.dataset();
+            let low_ds = low.dataset();
+
+            let high_port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
+            let mid_port_id = PortIdentity::new(mid.clock_identity(), PortNumber::new(1));
+            let low_port_id = PortIdentity::new(low.clock_identity(), PortNumber::new(1));
+
+            // Ports report in non-optimal order
+            candidates.remember(
+                port2,
+                BestForeignSnapshot::Qualified {
+                    ds: mid_ds,
+                    source_port_identity: mid_port_id,
+                    received_on_port: port2,
+                },
+            );
+            candidates.remember(
+                port3,
+                BestForeignSnapshot::Qualified {
+                    ds: low_ds,
+                    source_port_identity: low_port_id,
+                    received_on_port: port3,
+                },
+            );
+            candidates.remember(
+                port1,
+                BestForeignSnapshot::Qualified {
+                    ds: high_ds,
+                    source_port_identity: high_port_id,
+                    received_on_port: port1,
+                },
+            );
+
+            // Best should be the high-grade candidate from port 1
+            let best = candidates.best();
+            match best {
+                BestForeignSnapshot::Qualified {
+                    ds,
+                    received_on_port,
+                    ..
+                } => {
+                    assert_eq!(ds, high_ds);
+                    assert_eq!(received_on_port, port1);
+                }
+                BestForeignSnapshot::Empty => panic!("expected qualified candidate"),
+            }
         }
     }
 }
