@@ -86,14 +86,6 @@ impl Default for PortProfile {
 }
 
 impl PortProfile {
-    /// Return the configured `logMinDelayReqInterval`.
-    ///
-    /// This is commonly embedded into outgoing Announce messages so other nodes can understand
-    /// the slave’s expected delay-request pacing.
-    pub(crate) fn log_min_delay_request_interval(&self) -> LogInterval {
-        self.log_min_delay_request_interval
-    }
-
     /// Construct the `INITIALIZING` state.
     ///
     /// This variant is used while infrastructure and BMCA bookkeeping are being brought up.
@@ -131,7 +123,7 @@ impl PortProfile {
 
     /// Construct the `MASTER` state and start the periodic Announce/Sync schedules.
     ///
-    /// Both cycles are started with an initial “send immediately” timeout (`0s`) so a newly
+    /// Both cycles are started with an initial "send immediately" timeout (`0s`) so a newly
     /// elected master begins announcing and synchronizing without waiting for a full interval.
     pub(crate) fn master<P: Port, S: ForeignClockRecords>(
         self,
@@ -151,6 +143,7 @@ impl PortProfile {
             bmca,
             announce_cycle,
             sync_cycle,
+            self.log_min_delay_request_interval,
             self,
         ))
     }
