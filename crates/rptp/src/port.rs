@@ -5,7 +5,8 @@
 //! - identity and addressing types ([`PortIdentity`], [`DomainNumber`], [`PortNumber`]),
 //! - the domain port boundary ([`Port`]) and its supporting infrastructure traits
 //!   ([`PhysicalPort`], [`TimerHost`], [`Timeout`], [`TxTimestamping`](crate::timestamping::TxTimestamping)),
-//! - the ingress surface that `MessageIngress` dispatches into ([`PortIngress`], [`PortMap`]), and
+//! - the ingress surface that `MessageIngress` dispatches into ([`PortIngress`], [`PortMap`]),
+//! - a port finite state machine wrapper ([`PortFsm`]), and
 //! - a default single-domain wiring helper ([`SingleDomainPortMap`]).
 //!
 //! ## Responsibilities
@@ -23,7 +24,7 @@ use crate::bmca::ForeignClockRecords;
 use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
 use crate::log::{PortEvent, PortLog};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-use crate::portstate::PortState;
+use crate::portstate::{PortState, StateDecision};
 use crate::result::{ProtocolError, Result};
 use crate::time::{Duration, Instant, TimeStamp};
 use crate::timestamping::TxTimestamping;
@@ -342,7 +343,7 @@ pub trait PortMap {
 /// `rptp-daemon` and many tests.
 pub struct SingleDomainPortMap<'a, P: Port, S: ForeignClockRecords> {
     domain_number: DomainNumber,
-    port_state: Option<PortState<'a, P, S>>,
+    port_fsm: PortFsm<'a, P, S>,
 }
 
 impl<'a, P: Port, S: ForeignClockRecords> SingleDomainPortMap<'a, P, S> {
@@ -350,7 +351,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SingleDomainPortMap<'a, P, S> {
     pub fn new(domain_number: DomainNumber, port_state: PortState<'a, P, S>) -> Self {
         Self {
             domain_number,
-            port_state: Some(port_state),
+            port_fsm: PortFsm::new(port_state),
         }
     }
 }
@@ -358,7 +359,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SingleDomainPortMap<'a, P, S> {
 impl<'a, P: Port, S: ForeignClockRecords> PortMap for SingleDomainPortMap<'a, P, S> {
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress> {
         if self.domain_number == domain_number {
-            Ok(&mut self.port_state)
+            Ok(&mut self.port_fsm)
         } else {
             Err(ProtocolError::DomainNotFound(domain_number.as_u8()).into())
         }
@@ -388,13 +389,32 @@ pub trait PortIngress {
     fn process_system_message(&mut self, msg: SystemMessage);
 }
 
-/// Default ingress implementation that connects parsing and the port state machine.
+/// Port finite state machine wrapper.
 ///
-/// The state machine is held as an `Option<PortState<...>>` so that transitions can move ownership
-/// of the current state value (take/apply/replace pattern). The `Option` itself is never expected
-/// to remain `None` in normal operation; the representation exists to express transitions as
-/// by-value moves without requiring interior mutability.
-impl<'a, P: Port, S: ForeignClockRecords> PortIngress for Option<PortState<'a, P, S>> {
+/// `PortFsm` wraps a port state and implements [`PortIngress`] to handle message delivery
+/// and state transitions. The state machine is held as an `Option<PortState<...>>` so that
+/// transitions can move ownership of the current state value (take/apply/replace pattern). The
+/// `Option` itself is never expected to remain `None` in normal operation; the representation
+/// exists to express transitions as by-value moves without requiring interior mutability.
+pub struct PortFsm<'a, P: Port, S: ForeignClockRecords> {
+    state: Option<PortState<'a, P, S>>,
+}
+
+impl<'a, P: Port, S: ForeignClockRecords> PortFsm<'a, P, S> {
+    /// Create a new port FSM from an initial port state.
+    pub fn new(state: PortState<'a, P, S>) -> Self {
+        Self { state: Some(state) }
+    }
+
+    /// Apply a state transition decision.
+    fn apply_decision(&mut self, decision: StateDecision) {
+        if let Some(current_state) = self.state.take() {
+            self.state = Some(current_state.apply(decision));
+        }
+    }
+}
+
+impl<'a, P: Port, S: ForeignClockRecords> PortIngress for PortFsm<'a, P, S> {
     fn process_event_message(
         &mut self,
         source_port_identity: PortIdentity,
@@ -402,10 +422,11 @@ impl<'a, P: Port, S: ForeignClockRecords> PortIngress for Option<PortState<'a, P
         timestamp: TimeStamp,
     ) {
         if let Some(decision) = self
+            .state
             .as_mut()
             .and_then(|state| state.dispatch_event(msg, source_port_identity, timestamp))
         {
-            *self = self.take().map(|state| state.apply(decision));
+            self.apply_decision(decision);
         }
     }
 
@@ -416,16 +437,21 @@ impl<'a, P: Port, S: ForeignClockRecords> PortIngress for Option<PortState<'a, P
         now: Instant,
     ) {
         if let Some(decision) = self
+            .state
             .as_mut()
             .and_then(|state| state.dispatch_general(msg, source_port_identity, now))
         {
-            *self = self.take().map(|state| state.apply(decision));
+            self.apply_decision(decision);
         }
     }
 
     fn process_system_message(&mut self, msg: SystemMessage) {
-        if let Some(decision) = self.as_mut().and_then(|state| state.dispatch_system(msg)) {
-            *self = self.take().map(|state| state.apply(decision));
+        if let Some(decision) = self
+            .state
+            .as_mut()
+            .and_then(|state| state.dispatch_system(msg))
+        {
+            self.apply_decision(decision);
         }
     }
 }

@@ -15,7 +15,7 @@
 //! ## Ingress integration
 //!
 //! `MessageIngress` parses datagrams into typed messages and dispatches them into a `PortMap`.
-//! `PortIngress for Option<PortState<...>>` (see `crate::port`) then uses these methods to drive
+//! [`PortFsm`](crate::port::PortFsm) implements [`PortIngress`](crate::port::PortIngress) and uses these methods to drive
 //! the state machine: `dispatch_*` → `StateDecision` → `apply`.
 //!
 //! ## Illegal transitions
