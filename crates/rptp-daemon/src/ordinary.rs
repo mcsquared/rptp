@@ -24,7 +24,7 @@ use rptp::{
 
 use crate::log::TracingPortLog;
 use crate::net::NetworkSocket;
-use crate::node::{TokioPhysicalPort, TokioTimerHost};
+use crate::node::{TokioPhysicalPort, TokioTimeout, TokioTimerHost};
 
 /// Type alias for a fully wired Tokio-backed port state machine.
 pub type TokioPort<'a, C, TS> =
@@ -35,7 +35,7 @@ pub type TokioPort<'a, C, TS> =
 /// This type owns the `rptp` ordinary clock domain object and provides convenience methods for
 /// producing a configured [`TokioPort`].
 pub struct OrdinaryTokioClock<C: SynchronizableClock> {
-    ordinary_clock: OrdinaryClock<C>,
+    ordinary_clock: OrdinaryClock<C, TokioTimeout>,
 }
 
 impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
@@ -68,7 +68,7 @@ impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
     /// - schedules timeouts by sending `(DomainNumber, SystemMessage)` through `system_tx`, and
     /// - uses `timestamping` for egress timestamp feedback integration.
     pub fn port<'a, N, T>(
-        &'a self,
+        &'a mut self,
         physical_port: &'a TokioPhysicalPort<N>,
         system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
         timestamping: T,

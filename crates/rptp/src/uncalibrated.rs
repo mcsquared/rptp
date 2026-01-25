@@ -19,7 +19,9 @@
 //! egress timestamp of that DelayReq is later reported back via `SystemMessage::Timestamp` and
 //! recorded using [`UncalibratedPort::process_delay_request`].
 
-use crate::bmca::{Bmca, BmcaMasterDecision, ForeignClockRecords, ParentTrackingBmca};
+use crate::bmca::{
+    BestForeignDataset, Bmca, BmcaMasterDecision, ForeignClockRecords, ParentTrackingBmca,
+};
 use crate::e2e::EndToEndDelayMechanism;
 use crate::log::PortEvent;
 use crate::message::{
@@ -82,23 +84,18 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
 
     /// Process an incoming Announce message while in `UNCALIBRATED`.
     ///
-    /// This restarts the Announce receipt timeout, feeds the message into BMCA, and returns a
-    /// [`StateDecision`] if BMCA recommends a transition (new parent, become master, etc.).
+    /// This restarts the Announce receipt timeout and feeds the message into BMCA
+    /// (which triggers state decision event if e_rbest changed).
     pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
         now: Instant,
-    ) -> Option<StateDecision> {
+    ) {
         self.port.log(PortEvent::MessageReceived("Announce"));
         self.announce_receipt_timeout.restart();
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
-
-        match self.bmca.decision() {
-            Some(decision) => decision.to_state_decision(),
-            None => None,
-        }
     }
 
     /// Process a received one-step Sync event message.
@@ -243,12 +240,25 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
             .slave(self.port, self.bmca, self.delay_mechanism)
     }
 
+    /// Process a state decision event.
+    pub(crate) fn state_decision_event(
+        &self,
+        best_master_clock: BestForeignDataset,
+    ) -> Option<StateDecision> {
+        match self.bmca.decision(best_master_clock) {
+            Some(decision) => decision.to_state_decision(),
+            None => None,
+        }
+    }
+
     /// Handle Announce receipt timeout expiry while in `UNCALIBRATED`.
     ///
-    /// This transitions to `MASTER` using “current grandmaster tracking”, which (in current
+    /// This transitions to `MASTER` using "current grandmaster tracking", which (in current
     /// single-port setups) resolves to the local grandmaster identity.
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
+        self.bmca.trigger_state_decision_event();
+
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
@@ -289,8 +299,8 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
 
     /// Transition to `FAULTY` upon fault detection.
     pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
-        let (bmca, best_foreign) = self.bmca.into_parts();
-        self.profile.faulty(self.port, bmca, best_foreign)
+        let (bmca, best_foreign, sde) = self.bmca.into_parts();
+        self.profile.faulty(self.port, bmca, best_foreign, sde)
     }
 }
 
@@ -298,20 +308,20 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
 mod tests {
     use super::*;
 
-    use core::cell::Cell;
-
     use crate::bmca::{
-        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, BmcaMasterDecision,
-        BmcaMasterDecisionPoint, ClockDS, ForeignClockRecord,
+        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
+        ForeignClockRecord,
     };
-    use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
+    use crate::clock::{ClockIdentity, LocalClock, TimeScale};
     use crate::e2e::DelayCycle;
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, DelayResponseMessage, SystemMessage};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockDS};
+    use crate::test_support::{
+        FakeClock, FakePort, FakeStateDecisionEvent, FakeTimerHost, FakeTimestamping, TestClockDS,
+    };
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     type UncalibratedTestDomainPort<'a> =
@@ -325,7 +335,7 @@ mod tests {
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
-        foreign_candidates: Cell<BestForeignSnapshot>,
+        state_decision_event: FakeStateDecisionEvent,
     }
 
     impl UncalibratedPortTestSetup {
@@ -339,7 +349,7 @@ mod tests {
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
-                foreign_candidates: Cell::new(BestForeignSnapshot::Empty),
+                state_decision_event: FakeStateDecisionEvent::new(),
             }
         }
 
@@ -367,19 +377,18 @@ mod tests {
             let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
             let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
+            // Initialize initial state from the provided records
+            let best_foreign_record =
+                BestForeignRecord::new(port_number, ForeignClockRecordsVec::from_records(records));
+            let current_e_rbest_snapshot = best_foreign_record.current_e_rbest_snapshot();
+
             UncalibratedPort::new(
                 domain_port,
                 ParentTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(
-                        &self.default_ds,
-                        &self.foreign_candidates,
-                        port_number,
-                    ),
-                    BestForeignRecord::new(
-                        port_number,
-                        ForeignClockRecordsVec::from_records(records),
-                    ),
+                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                    best_foreign_record.with_current_e_rbest(current_e_rbest_snapshot),
                     ParentPortIdentity::new(parent_port),
+                    &self.state_decision_event,
                 ),
                 announce_receipt_timeout,
                 EndToEndDelayMechanism::new(delay_cycle),
@@ -399,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn uncalibrated_port_produces_slave_recommendation_with_new_parent() {
+    fn uncalibrated_port_triggers_state_decision_event_with_new_parent() {
         let setup = UncalibratedPortTestSetup::new(TestClockDS::default_low_grade().dataset());
 
         let parent_port = PortIdentity::new(
@@ -413,14 +422,17 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let mut uncalibrated = setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
+        let mut uncalibrated =
+            setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
 
         // Receive two better announces from another parent port
         let new_parent = PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
             PortNumber::new(1),
         );
-        let decision = uncalibrated.process_announce(
+
+        // First announce - not yet qualified
+        uncalibrated.process_announce(
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
@@ -430,9 +442,15 @@ mod tests {
             new_parent,
             Instant::from_secs(0),
         );
-        assert!(decision.is_none()); // first announce from new parent is ignored
 
-        let decision = uncalibrated.process_announce(
+        // No event on first announce (not qualified yet)
+        assert!(
+            setup.state_decision_event.take_events().is_empty(),
+            "No event expected on first announce from new parent"
+        );
+
+        // Second announce qualifies the new parent
+        uncalibrated.process_announce(
             AnnounceMessage::new(
                 43.into(),
                 LogMessageInterval::new(0),
@@ -440,15 +458,20 @@ mod tests {
                 TimeScale::Ptp,
             ),
             new_parent,
-            Instant::from_secs(0),
+            Instant::from_secs(1),
         );
 
-        // expect a slave recommendation
+        // State decision event should be triggered (new parent is now best and qualified)
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1,);
+        assert_eq!(events[0].0, PortNumber::new(1));
         assert_eq!(
-            decision,
-            Some(StateDecision::RecommendedSlave(ParentPortIdentity::new(
-                new_parent
-            )))
+            events[0].1,
+            BestForeignSnapshot::Qualified {
+                ds: TestClockDS::default_high_grade().dataset(),
+                source_port_identity: new_parent,
+                received_on_port: PortNumber::new(1),
+            }
         );
     }
 
@@ -464,12 +487,14 @@ mod tests {
             LogInterval::new(0),
             Instant::from_secs(0),
         )];
-        let mut uncalibrated = setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
+        let mut uncalibrated =
+            setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
 
-        // pre-feed the delay mechanism with delay req/resp messages so it can calibrate
+        // Pre-feed the delay mechanism with delay req/resp messages so it can calibrate
         let decision = uncalibrated
             .process_delay_request(DelayRequestMessage::new(42.into()), TimeStamp::new(1, 0));
-        assert!(decision.is_none());
+        assert!(decision.is_none(), "No decision expected on DelayReq");
+
         let decision = uncalibrated.process_delay_response(
             DelayResponseMessage::new(
                 42.into(),
@@ -479,18 +504,20 @@ mod tests {
             ),
             parent_port,
         );
-        assert!(decision.is_none());
+        assert!(decision.is_none(), "No decision expected on DelayResp");
 
+        // Process one-step sync from parent - with delay mechanism ready, this should
+        // return MasterClockSelected decision (synchronous decision, not via event)
         let decision = uncalibrated.process_one_step_sync(
             OneStepSyncMessage::new(0.into(), LogMessageInterval::new(0), TimeStamp::new(1, 0)),
-            PortIdentity::fake(),
+            parent_port,
             TimeStamp::new(1, 0),
         );
 
-        assert!(matches!(
-            decision,
-            Some(StateDecision::MasterClockSelected(_))
-        ));
+        assert!(
+            matches!(decision, Some(StateDecision::MasterClockSelected(_))),
+            "Expected MasterClockSelected decision when servo locks"
+        );
     }
 
     #[test]
@@ -505,7 +532,23 @@ mod tests {
     }
 
     #[test]
-    fn uncalibrated_port_produces_m1_master_recommendation_when_local_better_than_foreign() {
+    fn uncalibrated_port_triggers_state_decision_event_on_announce_receipt_timeout() {
+        let setup = UncalibratedPortTestSetup::new(TestClockDS::default_high_grade().dataset());
+
+        let uncalibrated = setup.port_under_test(PortNumber::new(1), PortIdentity::fake(), &[]);
+
+        let _master = uncalibrated.announce_receipt_timeout_expired();
+
+        // Verify that StateDecisionEvent was triggered
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1,);
+        assert_eq!(events[0].0, PortNumber::new(1));
+        // Snapshot should be Empty (no qualified foreign masters)
+        assert_eq!(events[0].1, BestForeignSnapshot::Empty);
+    }
+
+    #[test]
+    fn uncalibrated_port_triggers_state_decision_event_when_local_better_than_foreign() {
         let setup = UncalibratedPortTestSetup::new(TestClockDS::gps_grandmaster().dataset());
 
         let parent_port = PortIdentity::fake();
@@ -517,8 +560,8 @@ mod tests {
             PortNumber::new(1),
         );
 
-        // First announce qualifies the foreign record but yields no decision yet.
-        let decision = uncalibrated.process_announce(
+        // First announce - not yet qualified
+        uncalibrated.process_announce(
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
@@ -528,15 +571,15 @@ mod tests {
             foreign_port,
             Instant::from_secs(0),
         );
-        // as long as the foreign clock is not yet qualified, uncalibrated ports
-        // shall recommend master
-        assert!(matches!(
-            decision,
-            Some(StateDecision::RecommendedMaster(_))
-        ));
 
-        // Second announce from the same foreign clock drives BMCA to a Master(M1) decision.
-        let decision = uncalibrated.process_announce(
+        // No event on first announce (not qualified yet)
+        assert!(
+            setup.state_decision_event.take_events().is_empty(),
+            "No event expected on first announce"
+        );
+
+        // Second announce from the same foreign clock qualifies it
+        uncalibrated.process_announce(
             AnnounceMessage::new(
                 43.into(),
                 LogMessageInterval::new(0),
@@ -544,21 +587,25 @@ mod tests {
                 TimeScale::Ptp,
             ),
             foreign_port,
-            Instant::from_secs(0),
+            Instant::from_secs(1),
         );
 
+        // State decision event should be triggered (Empty → Qualified)
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1,);
+        assert_eq!(events[0].0, PortNumber::new(1));
         assert_eq!(
-            decision,
-            Some(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M1,
-                StepsRemoved::new(0),
-                *setup.local_clock.identity(),
-            )))
+            events[0].1,
+            BestForeignSnapshot::Qualified {
+                ds: foreign_clock,
+                source_port_identity: foreign_port,
+                received_on_port: PortNumber::new(1),
+            }
         );
     }
 
     #[test]
-    fn uncalibrated_port_produces_m2_master_recommendation_when_non_gm_local_better_than_foreign() {
+    fn uncalibrated_port_triggers_state_decision_event_when_non_gm_local_better_than_foreign() {
         let setup = UncalibratedPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
         let parent_port = PortIdentity::fake();
@@ -570,7 +617,8 @@ mod tests {
             PortNumber::new(1),
         );
 
-        let decision = uncalibrated.process_announce(
+        // First announce - not yet qualified
+        uncalibrated.process_announce(
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
@@ -580,12 +628,15 @@ mod tests {
             foreign_port,
             Instant::from_secs(0),
         );
-        assert!(matches!(
-            decision,
-            Some(StateDecision::RecommendedMaster(_))
-        ));
 
-        let decision = uncalibrated.process_announce(
+        // No event on first announce (not qualified yet)
+        assert!(
+            setup.state_decision_event.take_events().is_empty(),
+            "No event expected on first announce"
+        );
+
+        // Second announce qualifies the foreign clock
+        uncalibrated.process_announce(
             AnnounceMessage::new(
                 43.into(),
                 LogMessageInterval::new(0),
@@ -593,16 +644,20 @@ mod tests {
                 TimeScale::Ptp,
             ),
             foreign_port,
-            Instant::from_secs(0),
+            Instant::from_secs(1),
         );
 
+        // State decision event should be triggered (Empty → Qualified)
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1,);
+        assert_eq!(events[0].0, PortNumber::new(1));
         assert_eq!(
-            decision,
-            Some(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M2,
-                StepsRemoved::new(0),
-                *setup.local_clock.identity(),
-            )))
+            events[0].1,
+            BestForeignSnapshot::Qualified {
+                ds: foreign_clock,
+                source_port_identity: foreign_port,
+                received_on_port: PortNumber::new(1),
+            }
         );
     }
 }

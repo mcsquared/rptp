@@ -20,7 +20,7 @@
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
-use crate::bmca::ForeignClockRecords;
+use crate::bmca::{BestForeignSnapshot, ForeignClockRecords};
 use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
 use crate::log::{PortEvent, PortLog};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
@@ -47,6 +47,12 @@ pub type SendResult = core::result::Result<(), SendError>;
 pub trait Timeout {
     /// Restart this timeout with the given delay.
     fn restart(&self, timeout: Duration);
+
+    /// Restart this timeout with a new message and delay.
+    ///
+    /// This allows updating the timeout's message and scheduling it. For immediate
+    /// delivery, use `Duration::from_secs(0)`.
+    fn restart_with_message(&self, msg: SystemMessage, timeout: Duration);
 }
 
 /// Raw I/O surface for sending PTP datagrams.
@@ -58,6 +64,32 @@ pub trait PhysicalPort {
     fn send_event(&self, buf: &[u8]) -> SendResult;
     /// Send a general message datagram (Announce/FollowUp/DelayResp/…).
     fn send_general(&self, buf: &[u8]) -> SendResult;
+}
+
+/// Collaborator for broadcasting state decision events to ports.
+///
+/// Clocks use this to deliver `e_best` snapshots to all ports in a domain.
+/// The broadcast mechanism uses the same infrastructure as timeouts (SystemMessage delivery).
+///
+/// Infrastructure implementations store timeout handles and use their `restart_with_message()`
+/// method to deliver messages immediately (with zero duration).
+///
+/// Generic over the `Timeout` type to avoid trait objects in the domain core.
+pub trait PortBroadcast<T: Timeout> {
+    /// Register a port for state decision event delivery.
+    ///
+    /// Called when a port is created. The timeout handle can send
+    /// `SystemMessage::StateDecisionEvent(e_best)` to this port via `restart_with_message()`.
+    ///
+    /// The timeout is created with a placeholder message; `broadcast()` will update
+    /// and send the actual message with zero duration for immediate delivery.
+    fn add_port(&mut self, timeout: T);
+
+    /// Broadcast a state decision event to all registered ports.
+    ///
+    /// Sends `SystemMessage::StateDecisionEvent(e_best)` to each port,
+    /// ensuring they all evaluate BMCA with the same snapshot.
+    fn broadcast(&self, e_best: BestForeignSnapshot);
 }
 
 /// Factory for domain timeouts.

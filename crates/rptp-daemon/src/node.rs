@@ -95,6 +95,20 @@ impl Timeout for TokioTimeout {
     fn restart(&self, delay: Duration) {
         self.reset(delay);
     }
+
+    fn restart_with_message(&self, msg: SystemMessage, delay: Duration) {
+        // Update the stored message
+        *self.inner.msg.lock().unwrap() = msg;
+
+        if delay.as_u64_nanos() == 0 {
+            // Send immediately without scheduling
+            let msg = *self.inner.msg.lock().unwrap();
+            let _ = self.inner.tx.send((self.inner.domain_number, msg));
+        } else {
+            // Schedule with the updated message
+            self.reset(delay);
+        }
+    }
 }
 
 impl Drop for TokioTimeout {
@@ -372,7 +386,7 @@ mod tests {
     use tokio::time;
 
     use rptp::{
-        bmca::{BestForeignSnapshot, ClockDS, ForeignGrandMasterCandidates, Priority1, Priority2},
+        bmca::{ClockDS, Priority1, Priority2},
         clock::{
             ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
             SynchronizableClock, TimeScale,
@@ -385,7 +399,8 @@ mod tests {
         profile::PortProfile,
         servo::{Servo, SteppingServo},
         test_support::{
-            FakeClock, FakeTimestamping, TestMessage, master_test_port, slave_test_port,
+            FakeClock, FakeStateDecisionEvent, FakeTimestamping, TestMessage, master_test_port,
+            slave_test_port,
         },
         time::{LogInterval, TimeStamp},
     };
@@ -395,7 +410,6 @@ mod tests {
     use crate::timestamping::ClockTxTimestamping;
     use crate::virtualclock::VirtualClock;
 
-    use std::cell::Cell;
     use std::collections::VecDeque;
     use std::net::SocketAddr;
     use std::time::Duration as StdDuration;
@@ -444,10 +458,10 @@ mod tests {
         async fn new(
             local_clock: &'a LocalClock<C>,
             default_ds: &'a ClockDS,
-            foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
             event_socket: Rc<N>,
             general_socket: Rc<N>,
             physical_port: &'a TokioPhysicalPort<N>,
+            state_decision_event: &'a FakeStateDecisionEvent,
         ) -> std::io::Result<Self> {
             let domain_number = DomainNumber::new(0);
 
@@ -468,7 +482,7 @@ mod tests {
                 domain_port,
                 default_ds,
                 ForeignClockRecordsVec::new(),
-                foreign_candidates,
+                state_decision_event,
                 PortProfile::default(),
             );
             let portmap = SingleDomainPortMap::new(domain_number, port_state);
@@ -601,12 +615,12 @@ mod tests {
             domain_number,
             port_number,
         ));
-        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
+        let state_decision_event = FakeStateDecisionEvent::new();
         let port_state = master_test_port(
             domain_port,
             &default_ds,
             ForeignClockRecordsVec::new(),
-            &foreign_candidates,
+            &state_decision_event,
             PortProfile::default(),
         );
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
@@ -700,12 +714,12 @@ mod tests {
             ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
             PortNumber::new(1),
         ));
-        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
+        let state_decision_event = FakeStateDecisionEvent::new();
         let port_state = slave_test_port(
             domain_port,
             &default_ds,
             ForeignClockRecordsVec::new(),
-            &foreign_candidates,
+            &state_decision_event,
             parent_port_identity,
             PortProfile::new(
                 Duration::from_secs(60),
@@ -777,14 +791,14 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
-        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
+        let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
             &local_clock,
             &default_ds,
-            &foreign_candidates,
             event_socket,
             general_socket,
             &physical_port,
+            &state_decision_event,
         )
         .await?;
 
@@ -822,14 +836,14 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
-        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
+        let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
             &local_clock,
             &default_ds,
-            &foreign_candidates,
             event_socket,
             general_socket,
             &physical_port,
+            &state_decision_event,
         )
         .await?;
 
@@ -864,14 +878,14 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
-        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
+        let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
             &local_clock,
             &default_ds,
-            &foreign_candidates,
             event_socket,
             general_socket,
             &physical_port,
+            &state_decision_event,
         )
         .await?;
 
@@ -907,14 +921,14 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
-        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
+        let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
             &local_clock,
             &default_ds,
-            &foreign_candidates,
             event_socket,
             general_socket,
             &physical_port,
+            &state_decision_event,
         )
         .await?;
 
@@ -952,14 +966,14 @@ mod tests {
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
 
-        let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
+        let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
             &local_clock,
             &default_ds,
-            &foreign_candidates,
             event_socket,
             general_socket,
             &physical_port,
+            &state_decision_event,
         )
         .await?;
 

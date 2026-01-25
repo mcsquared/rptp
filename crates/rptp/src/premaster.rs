@@ -11,7 +11,9 @@
 //! master is detected during that window, the port can still transition away (e.g. to
 //! `UNCALIBRATED`).
 
-use crate::bmca::{Bmca, BmcaMasterDecision, ForeignClockRecords, GrandMasterTrackingBmca};
+use crate::bmca::{
+    BestForeignDataset, Bmca, BmcaMasterDecision, ForeignClockRecords, GrandMasterTrackingBmca,
+};
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{ParentPortIdentity, Port, PortIdentity};
@@ -63,22 +65,16 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
 
     /// Process an incoming Announce message while in `PRE_MASTER`.
     ///
-    /// This feeds the Announce into BMCA. If BMCA produces a recommendation (e.g. “become slave”),
-    /// it is returned as a [`StateDecision`] for the port state machine to apply.
+    /// This feeds the Announce into BMCA (which triggers state decision event if e_rbest changed).
     pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
         now: Instant,
-    ) -> Option<StateDecision> {
+    ) {
         self.port.log(PortEvent::MessageReceived("Announce"));
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
-
-        match self.bmca.decision() {
-            Some(decision) => decision.to_state_decision(),
-            None => None,
-        }
     }
 
     /// Transition from `PRE_MASTER` to `MASTER` after the qualification timeout expires.
@@ -125,16 +121,25 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
 
     /// Transition to `FAULTY` upon fault detection.
     pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
-        let (bmca, best_foreign) = self.bmca.into_parts();
-        self.profile.faulty(self.port, bmca, best_foreign)
+        let (bmca, best_foreign, sde) = self.bmca.into_parts();
+        self.profile.faulty(self.port, bmca, best_foreign, sde)
+    }
+
+    /// Process a state decision event.
+    pub(crate) fn state_decision_event(
+        &self,
+        best_master_clock: BestForeignDataset,
+    ) -> Option<StateDecision> {
+        match self.bmca.decision(best_master_clock) {
+            Some(decision) => decision.to_state_decision(),
+            None => None,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use core::cell::Cell;
 
     use crate::bmca::{
         BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
@@ -146,9 +151,10 @@ mod tests {
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
-    use crate::portstate::StateDecision;
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockDS};
+    use crate::test_support::{
+        FakeClock, FakePort, FakeStateDecisionEvent, FakeTimerHost, FakeTimestamping, TestClockDS,
+    };
     use crate::time::{Instant, LogInterval, LogMessageInterval};
 
     type PreMasterTestDomainPort<'a> =
@@ -162,7 +168,7 @@ mod tests {
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
-        foreign_candidates: Cell<BestForeignSnapshot>,
+        state_decision_event: FakeStateDecisionEvent,
     }
 
     impl PreMasterPortTestSetup {
@@ -176,7 +182,7 @@ mod tests {
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
-                foreign_candidates: Cell::new(BestForeignSnapshot::Empty),
+                state_decision_event: FakeStateDecisionEvent::new(),
             }
         }
 
@@ -198,19 +204,18 @@ mod tests {
             let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
             let grandmaster_id = *self.local_clock.identity();
 
+            // Initialize initial state from the provided records
+            let best_foreign_record =
+                BestForeignRecord::new(port_number, ForeignClockRecordsVec::from_records(records));
+            let current_e_rbest_snapshot = best_foreign_record.current_e_rbest_snapshot();
+
             PreMasterPort::new(
                 domain_port,
                 GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(
-                        &self.default_ds,
-                        &self.foreign_candidates,
-                        port_number,
-                    ),
-                    BestForeignRecord::new(
-                        port_number,
-                        ForeignClockRecordsVec::from_records(records),
-                    ),
+                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                    best_foreign_record.with_current_e_rbest(current_e_rbest_snapshot),
                     grandmaster_id,
+                    &self.state_decision_event,
                 ),
                 qualification_timeout,
                 PortProfile::default(),
@@ -240,55 +245,65 @@ mod tests {
     }
 
     #[test]
-    fn pre_master_port_produces_slave_recommendation_on_two_better_announces() {
+    fn premaster_port_triggers_state_decision_event_when_better_foreign_qualifies() {
         use crate::message::AnnounceMessage;
-        use crate::port::{ParentPortIdentity, PortIdentity, PortNumber};
+        use crate::port::{PortIdentity, PortNumber};
 
         let setup = PreMasterPortTestSetup::new(TestClockDS::default_low_grade().dataset());
 
         let foreign_clock = TestClockDS::default_high_grade().dataset();
-        let better_port = PortIdentity::new(
+        let foreign_port = PortIdentity::new(
             TestClockDS::default_high_grade().clock_identity(),
             PortNumber::new(1),
         );
         let mut pre_master = setup.port_under_test(PortNumber::new(1), &[]);
 
         // Receive first better announce
-        let decision = pre_master.process_announce(
+        pre_master.process_announce(
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
                 foreign_clock,
                 TimeScale::Ptp,
             ),
-            better_port,
+            foreign_port,
             Instant::from_secs(0),
         );
-        assert!(decision.is_none());
+
+        // No event on first announce (not qualified yet)
+        assert!(
+            setup.state_decision_event.take_events().is_empty(),
+            "No event expected on first announce"
+        );
 
         // Receive second better announce
-        let decision = pre_master.process_announce(
+        pre_master.process_announce(
             AnnounceMessage::new(
                 43.into(),
                 LogMessageInterval::new(0),
                 foreign_clock,
                 TimeScale::Ptp,
             ),
-            better_port,
-            Instant::from_secs(0),
+            foreign_port,
+            Instant::from_secs(1),
         );
 
-        // expect a slave recommendation
+        // State decision event should be triggered (Empty → Qualified)
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1,);
+        assert_eq!(events[0].0, PortNumber::new(1));
         assert_eq!(
-            decision,
-            Some(StateDecision::RecommendedSlave(ParentPortIdentity::new(
-                better_port
-            )))
+            events[0].1,
+            BestForeignSnapshot::Qualified {
+                ds: foreign_clock,
+                source_port_identity: foreign_port,
+                received_on_port: PortNumber::new(1),
+            }
         );
     }
 
     #[test]
-    fn premaster_port_recommends_passive_when_foreign_better_by_tuple() {
+    fn premaster_port_stays_premaster_on_unchanged_foreign() {
         // Local GPS grandmaster, but foreign has lower priority1 making it better overall
         let setup = PreMasterPortTestSetup::new(TestClockDS::gps_grandmaster().dataset());
 
@@ -308,8 +323,8 @@ mod tests {
 
         let mut pre_master = setup.port_under_test(PortNumber::new(1), &prior_records);
 
-        // Process another announce from the same foreign clock
-        let decision = pre_master.process_announce(
+        // Process another announce from the same foreign clock with same dataset
+        pre_master.process_announce(
             AnnounceMessage::new(
                 1.into(),
                 LogMessageInterval::new(0),
@@ -320,6 +335,11 @@ mod tests {
             Instant::from_secs(1),
         );
 
-        assert!(matches!(decision, Some(StateDecision::RecommendedPassive)));
+        // No state decision event should be triggered because e_rbest doesn't change
+        // (foreign master was already qualified with the same dataset)
+        assert!(
+            setup.state_decision_event.take_events().is_empty(),
+            "No event expected when e_rbest unchanged"
+        );
     }
 }

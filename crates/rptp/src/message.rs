@@ -25,7 +25,7 @@
 //! message types are reported as [`ProtocolError`].
 
 use crate::{
-    bmca::{Bmca, ClockDS},
+    bmca::{BestForeignSnapshot, Bmca, ClockDS},
     clock::TimeScale,
     port::{PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
@@ -163,6 +163,7 @@ pub enum SystemMessage {
     FaultCleared,
     AnnounceReceiptTimeout,
     QualificationTimeout,
+    StateDecisionEvent(crate::bmca::BestForeignSnapshot),
 }
 
 impl EventMessage {
@@ -341,14 +342,16 @@ impl AnnounceMessage {
         bmca: &mut impl Bmca,
         source_port_identity: PortIdentity,
         now: Instant,
-    ) {
+    ) -> Option<BestForeignSnapshot> {
         if let Some(log_interval) = self.log_message_interval.log_interval() {
             bmca.consider(
                 source_port_identity,
                 self.foreign_clock_ds,
                 log_interval,
                 now,
-            );
+            )
+        } else {
+            None
         }
     }
 

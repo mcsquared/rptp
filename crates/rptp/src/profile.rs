@@ -13,7 +13,7 @@
 
 use crate::bmca::{
     BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, GrandMasterTrackingBmca,
-    ListeningBmca, ParentTrackingBmca, PassiveBmca, QualificationTimeoutPolicy,
+    ListeningBmca, ParentTrackingBmca, PassiveBmca, QualificationTimeoutPolicy, StateDecisionEvent,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::faulty::FaultyPort;
@@ -89,13 +89,20 @@ impl PortProfile {
     /// Construct the `INITIALIZING` state.
     ///
     /// This variant is used while infrastructure and BMCA bookkeeping are being brought up.
-    pub(crate) fn initializing<P: Port, S: ForeignClockRecords>(
+    pub(crate) fn initializing<'a, P: Port, S: ForeignClockRecords>(
         self,
         port: P,
-        bmca: BestMasterClockAlgorithm,
+        bmca: BestMasterClockAlgorithm<'a>,
         best_foreign: BestForeignRecord<S>,
-    ) -> PortState<P, S> {
-        PortState::Initializing(InitializingPort::new(port, bmca, best_foreign, self))
+        state_decision_event: &'a dyn StateDecisionEvent,
+    ) -> PortState<'a, P, S> {
+        PortState::Initializing(InitializingPort::new(
+            port,
+            bmca,
+            best_foreign,
+            state_decision_event,
+            self,
+        ))
     }
 
     /// Construct the `LISTENING` state and start the announce receipt timeout.
@@ -225,13 +232,20 @@ impl PortProfile {
     /// Construct the `FAULTY` state.
     ///
     /// This variant is used when the port has detected a fault condition and is not operational.
-    pub(crate) fn faulty<P: Port, S: ForeignClockRecords>(
+    pub(crate) fn faulty<'a, P: Port, S: ForeignClockRecords>(
         self,
         port: P,
-        bmca: BestMasterClockAlgorithm,
+        bmca: BestMasterClockAlgorithm<'a>,
         best_foreign: BestForeignRecord<S>,
-    ) -> PortState<P, S> {
-        PortState::Faulty(FaultyPort::new(port, bmca, best_foreign, self))
+        state_decision_event: &'a dyn StateDecisionEvent,
+    ) -> PortState<'a, P, S> {
+        PortState::Faulty(FaultyPort::new(
+            port,
+            bmca,
+            best_foreign,
+            state_decision_event,
+            self,
+        ))
     }
 
     /// Construct the `PASSIVE` state and start the announce receipt timeout.

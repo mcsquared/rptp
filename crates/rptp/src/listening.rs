@@ -20,7 +20,9 @@
 //! Announce reception is the only message-processing responsibility of this state; event message
 //! processing (Sync/DelayReq/…) is handled in other states.
 
-use crate::bmca::{Bmca, BmcaMasterDecision, ForeignClockRecords, ListeningBmca};
+use crate::bmca::{
+    BestForeignDataset, Bmca, BmcaMasterDecision, ForeignClockRecords, ListeningBmca,
+};
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity};
@@ -109,6 +111,7 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
     /// single-port setups) resolves to the local grandmaster identity.
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
+        self.bmca.trigger_state_decision_event();
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
@@ -117,29 +120,34 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
     ///
     /// This:
     /// - restarts the Announce receipt timeout,
-    /// - feeds the message into BMCA, and
-    /// - returns a [`StateDecision`] if BMCA recommends a transition.
+    /// - feeds the message into BMCA (which triggers state decision event if e_rbest changed).
     pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
         now: Instant,
-    ) -> Option<StateDecision> {
+    ) {
         self.port.log(PortEvent::MessageReceived("Announce"));
         self.announce_receipt_timeout.restart();
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
-
-        match self.bmca.decision() {
-            Some(decision) => decision.to_state_decision(),
-            None => None,
-        }
     }
 
     /// Transition to `FAULTY` upon fault detection.
     pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
-        let (bmca, best_foreign) = self.bmca.into_parts();
-        self.profile.faulty(self.port, bmca, best_foreign)
+        let (bmca, best_foreign, sde) = self.bmca.into_parts();
+        self.profile.faulty(self.port, bmca, best_foreign, sde)
+    }
+
+    /// Process a state decision event.
+    pub(crate) fn state_decision_event(
+        &self,
+        best_master_clock: BestForeignDataset,
+    ) -> Option<StateDecision> {
+        match self.bmca.decision(best_master_clock) {
+            Some(decision) => decision.to_state_decision(),
+            None => None,
+        }
     }
 }
 
@@ -147,19 +155,18 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
 mod tests {
     use super::*;
 
-    use core::cell::Cell;
-
     use crate::bmca::{
-        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, BmcaMasterDecisionPoint,
-        ClockDS, ListeningBmca, Priority1,
+        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS, ListeningBmca,
     };
-    use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
+    use crate::clock::{LocalClock, TimeScale};
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockDS};
+    use crate::test_support::{
+        FakeClock, FakePort, FakeStateDecisionEvent, FakeTimerHost, FakeTimestamping, TestClockDS,
+    };
     use crate::time::{Duration, Instant, LogMessageInterval};
 
     type ListeningTestDomainPort<'a> =
@@ -173,7 +180,7 @@ mod tests {
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
-        foreign_candidates: Cell<BestForeignSnapshot>,
+        state_decision_event: FakeStateDecisionEvent,
     }
 
     impl ListeningPortTestSetup {
@@ -187,12 +194,8 @@ mod tests {
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
-                foreign_candidates: Cell::new(BestForeignSnapshot::Empty),
+                state_decision_event: FakeStateDecisionEvent::new(),
             }
-        }
-
-        fn local_clock_identity(&self) -> &ClockIdentity {
-            self.local_clock.identity()
         }
 
         fn port_under_test(&self, port_number: PortNumber) -> ListeningTestPort<'_> {
@@ -214,12 +217,9 @@ mod tests {
             ListeningPort::new(
                 domain_port,
                 ListeningBmca::new(
-                    BestMasterClockAlgorithm::new(
-                        &self.default_ds,
-                        &self.foreign_candidates,
-                        port_number,
-                    ),
+                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
                     BestForeignRecord::new(port_number, ForeignClockRecordsVec::new()),
+                    &self.state_decision_event,
                 ),
                 announce_receipt_timeout,
                 PortProfile::default(),
@@ -235,6 +235,7 @@ mod tests {
 
         assert!(setup.timer_host.take_system_messages().is_empty());
         assert!(setup.physical_port.is_empty());
+        assert!(setup.state_decision_event.take_events().is_empty());
     }
 
     #[test]
@@ -249,6 +250,22 @@ mod tests {
     }
 
     #[test]
+    fn listening_port_triggers_state_decision_event_on_announce_receipt_timeout() {
+        let setup = ListeningPortTestSetup::new(TestClockDS::default_high_grade().dataset());
+
+        let listening = setup.port_under_test(PortNumber::new(1));
+
+        listening.announce_receipt_timeout_expired();
+
+        // Verify that a state decision event was triggered
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1, "Expected exactly one state decision event");
+        assert_eq!(events[0].0, PortNumber::new(1));
+        // Expect empty snapshot when running into timeout without any announces
+        assert_eq!(events[0].1, BestForeignSnapshot::Empty);
+    }
+
+    #[test]
     fn listening_port_stays_in_listening_on_single_announce() {
         let setup = ListeningPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
 
@@ -256,7 +273,7 @@ mod tests {
 
         let foreign_clock = TestClockDS::default_mid_grade().dataset();
 
-        let decision = listening.process_announce(
+        listening.process_announce(
             AnnounceMessage::new(
                 0.into(),
                 LogMessageInterval::new(0),
@@ -267,265 +284,69 @@ mod tests {
             Instant::from_secs(0),
         );
 
-        assert!(decision.is_none());
+        // First announce does NOT trigger a state decision event because e_rbest remains
+        // Empty (initial state is Empty, and no record should be qualified yet)
+        let events = setup.state_decision_event.take_events();
+        assert!(
+            events.is_empty(),
+            "No state decision event should be triggered (e_rbest stays Empty)"
+        );
 
+        // Verify that the announce receipt timeout was restarted as a side effect
         let system_messages = setup.timer_host.take_system_messages();
         assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
     }
 
     #[test]
-    fn listening_port_recommends_master_on_two_announces() {
+    fn listening_port_triggers_state_decision_event_on_two_announces() {
         let setup = ListeningPortTestSetup::new(TestClockDS::default_high_grade().dataset());
 
         let mut listening = setup.port_under_test(PortNumber::new(1));
 
         let foreign_clock = TestClockDS::default_mid_grade().dataset();
+        let foreign_port = PortIdentity::fake();
 
-        let decision = listening.process_announce(
+        listening.process_announce(
             AnnounceMessage::new(
                 0.into(),
                 LogMessageInterval::new(0),
                 foreign_clock,
-                TimeScale::Ptp,
-            ),
-            PortIdentity::fake(),
-            Instant::from_secs(0),
-        );
-        assert!(decision.is_none());
-
-        let decision = listening.process_announce(
-            AnnounceMessage::new(
-                1.into(),
-                LogMessageInterval::new(0),
-                foreign_clock,
-                TimeScale::Ptp,
-            ),
-            PortIdentity::fake(),
-            Instant::from_secs(0),
-        );
-        assert!(matches!(
-            decision,
-            Some(StateDecision::RecommendedMaster(_))
-        ));
-
-        let system_messages = setup.timer_host.take_system_messages();
-        assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
-    }
-
-    #[test]
-    fn listening_port_recommends_slave_on_two_announces() {
-        let setup = ListeningPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
-
-        let mut listening = setup.port_under_test(PortNumber::new(1));
-
-        let foreign_clock = TestClockDS::default_high_grade().dataset();
-
-        let decision = listening.process_announce(
-            AnnounceMessage::new(
-                0.into(),
-                LogMessageInterval::new(0),
-                foreign_clock,
-                TimeScale::Ptp,
-            ),
-            PortIdentity::fake(),
-            Instant::from_secs(0),
-        );
-        assert!(decision.is_none());
-
-        let decision = listening.process_announce(
-            AnnounceMessage::new(
-                1.into(),
-                LogMessageInterval::new(0),
-                foreign_clock,
-                TimeScale::Ptp,
-            ),
-            PortIdentity::fake(),
-            Instant::from_secs(0),
-        );
-
-        assert!(matches!(decision, Some(StateDecision::RecommendedSlave(_))));
-
-        let system_messages = setup.timer_host.take_system_messages();
-        assert!(system_messages.contains(&SystemMessage::AnnounceReceiptTimeout));
-    }
-
-    #[test]
-    fn listening_port_updates_steps_removed_on_m1_master_recommendation() {
-        let setup = ListeningPortTestSetup::new(TestClockDS::gps_grandmaster().dataset());
-
-        let mut listening = setup.port_under_test(PortNumber::new(1));
-
-        let foreign_clock = TestClockDS::default_mid_grade().dataset();
-
-        let _ = listening.process_announce(
-            AnnounceMessage::new(
-                0.into(),
-                LogMessageInterval::new(0),
-                foreign_clock,
-                TimeScale::Ptp,
-            ),
-            PortIdentity::fake(),
-            Instant::from_secs(0),
-        );
-
-        let decision = listening.process_announce(
-            AnnounceMessage::new(
-                1.into(),
-                LogMessageInterval::new(0),
-                foreign_clock,
-                TimeScale::Ptp,
-            ),
-            PortIdentity::fake(),
-            Instant::from_secs(0),
-        );
-
-        let master_decision = match decision {
-            Some(StateDecision::RecommendedMaster(decision)) => decision,
-            _ => panic!("expected RecommendedMaster decision"),
-        };
-
-        assert_eq!(
-            master_decision,
-            BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M1,
-                StepsRemoved::new(0),
-                *setup.local_clock_identity()
-            )
-        );
-
-        assert!(matches!(
-            listening.recommended_master(master_decision),
-            PortState::PreMaster(_)
-        ));
-    }
-
-    #[test]
-    fn listening_port_updates_steps_removed_on_m2_master_recommendation() {
-        let setup = ListeningPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
-
-        let mut listening = setup.port_under_test(PortNumber::new(1));
-
-        let foreign_clock = TestClockDS::default_low_grade_slave_only().dataset();
-
-        let _ = listening.process_announce(
-            AnnounceMessage::new(
-                0.into(),
-                LogMessageInterval::new(0),
-                foreign_clock,
-                TimeScale::Ptp,
-            ),
-            PortIdentity::fake(),
-            Instant::from_secs(0),
-        );
-
-        let decision = listening.process_announce(
-            AnnounceMessage::new(
-                1.into(),
-                LogMessageInterval::new(0),
-                foreign_clock,
-                TimeScale::Ptp,
-            ),
-            PortIdentity::fake(),
-            Instant::from_secs(0),
-        );
-
-        let master_decision = match decision {
-            Some(StateDecision::RecommendedMaster(decision)) => decision,
-            _ => panic!("expected RecommendedMaster decision"),
-        };
-
-        assert_eq!(
-            master_decision,
-            BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M2,
-                StepsRemoved::new(0),
-                *setup.local_clock_identity()
-            )
-        );
-
-        assert!(matches!(
-            listening.recommended_master(master_decision),
-            PortState::PreMaster(_)
-        ));
-    }
-
-    #[test]
-    fn listening_port_updates_steps_removed_on_s1_slave_recommendation() {
-        let setup = ListeningPortTestSetup::new(TestClockDS::default_mid_grade().dataset());
-
-        let mut listening = setup.port_under_test(PortNumber::new(1));
-
-        let foreign_clock = TestClockDS::default_high_grade().dataset();
-
-        setup.timer_host.take_system_messages();
-
-        let _ = listening.process_announce(
-            AnnounceMessage::new(
-                0.into(),
-                LogMessageInterval::new(0),
-                foreign_clock,
-                TimeScale::Ptp,
-            ),
-            PortIdentity::fake(),
-            Instant::from_secs(0),
-        );
-
-        let transition = listening.process_announce(
-            AnnounceMessage::new(
-                1.into(),
-                LogMessageInterval::new(0),
-                foreign_clock,
-                TimeScale::Ptp,
-            ),
-            PortIdentity::fake(),
-            Instant::from_secs(0),
-        );
-
-        let decision = match transition {
-            Some(StateDecision::RecommendedSlave(decision)) => decision,
-            _ => panic!("expected RecommendedSlave decision"),
-        };
-
-        assert!(matches!(
-            listening.recommended_slave(decision),
-            PortState::Uncalibrated(_)
-        ));
-    }
-
-    #[test]
-    fn listening_port_recommends_passive_when_foreign_better_by_tuple() {
-        // Local GPS grandmaster, but foreign has lower priority1 making it better overall
-        let setup = ListeningPortTestSetup::new(TestClockDS::gps_grandmaster().dataset());
-
-        let mut listening = setup.port_under_test(PortNumber::new(1));
-
-        // Foreign uses lower priority1 so it is better, even though clock class is worse
-        let foreign = TestClockDS::default_low_grade_slave_only().with_priority1(Priority1::new(1));
-        let foreign_port = PortIdentity::new(foreign.clock_identity(), PortNumber::new(1));
-
-        let decision = listening.process_announce(
-            AnnounceMessage::new(
-                0.into(),
-                LogMessageInterval::new(0),
-                foreign.dataset(),
-                TimeScale::Ptp,
-            ),
-            foreign_port,
-            Instant::from_secs(0),
-        );
-        assert!(decision.is_none());
-
-        let decision = listening.process_announce(
-            AnnounceMessage::new(
-                1.into(),
-                LogMessageInterval::new(0),
-                foreign.dataset(),
                 TimeScale::Ptp,
             ),
             foreign_port,
             Instant::from_secs(0),
         );
 
-        assert!(matches!(decision, Some(StateDecision::RecommendedPassive)));
+        // First announce doesn't trigger event (e_rbest stays Empty)
+        assert!(setup.state_decision_event.take_events().is_empty());
+
+        listening.process_announce(
+            AnnounceMessage::new(
+                1.into(),
+                LogMessageInterval::new(0),
+                foreign_clock,
+                TimeScale::Ptp,
+            ),
+            foreign_port,
+            Instant::from_secs(1),
+        );
+
+        // Second announce qualifies the foreign master and triggers event
+        // (e_rbest: Empty → Qualified)
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1);
+
+        let (port_number, snapshot) = &events[0];
+        assert_eq!(*port_number, PortNumber::new(1));
+
+        // Verify the snapshot contains the qualified foreign master
+        assert_eq!(
+            *snapshot,
+            BestForeignSnapshot::Qualified {
+                ds: foreign_clock,
+                source_port_identity: foreign_port,
+                received_on_port: PortNumber::new(1),
+            }
+        );
     }
 }

@@ -17,8 +17,8 @@
 use std::cell::Cell;
 
 use crate::bmca::{
-    ClockDS, ForeignGrandMasterCandidates, GrandMasterTrackingBmca, ParentTrackingBmca, Priority1,
-    Priority2,
+    BestForeignSnapshot, ClockDS, GrandMasterTrackingBmca, ParentTrackingBmca, Priority1,
+    Priority2, StateDecisionEvent,
 };
 use crate::clock::{
     Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved,
@@ -216,6 +216,42 @@ impl TestClockDS {
     }
 }
 
+/// A test double for [`StateDecisionEvent`] that records all triggered events.
+///
+/// Tests can call [`take_events`](Self::take_events) to drain and inspect the recorded
+/// port numbers and snapshots.
+pub struct FakeStateDecisionEvent {
+    events: RefCell<Vec<(PortNumber, BestForeignSnapshot)>>,
+}
+
+impl FakeStateDecisionEvent {
+    /// Create a new empty event recorder.
+    pub fn new() -> Self {
+        Self {
+            events: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Drain and return all recorded state decision events.
+    ///
+    /// Each tuple contains the port number and the best foreign snapshot that triggered the event.
+    pub fn take_events(&self) -> Vec<(PortNumber, BestForeignSnapshot)> {
+        self.events.borrow_mut().drain(..).collect()
+    }
+}
+
+impl Default for FakeStateDecisionEvent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StateDecisionEvent for FakeStateDecisionEvent {
+    fn trigger(&self, port_number: PortNumber, e_rbest: BestForeignSnapshot) {
+        self.events.borrow_mut().push((port_number, e_rbest));
+    }
+}
+
 /// A deterministic clock implementation for tests.
 ///
 /// - `step()` sets the current time (`now`) directly.
@@ -287,14 +323,15 @@ pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
     port: P,
     local_candidate: &'a dyn LocalGrandMasterCandidate,
     foreign_clock_records: S,
-    foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
+    state_decision_event: &'a dyn StateDecisionEvent,
     profile: PortProfile,
 ) -> PortState<'a, P, S> {
     let grandmaster_id = *port.local_clock().identity();
     let bmca = GrandMasterTrackingBmca::new(
-        BestMasterClockAlgorithm::new(local_candidate, foreign_candidates, PortNumber::new(1)),
+        BestMasterClockAlgorithm::new(local_candidate, PortNumber::new(1)),
         BestForeignRecord::new(PortNumber::new(1), foreign_clock_records),
         grandmaster_id,
+        state_decision_event,
     );
     profile.master(port, bmca)
 }
@@ -307,14 +344,15 @@ pub fn slave_test_port<'a, P: Port, S: ForeignClockRecords>(
     port: P,
     local_candidate: &'a dyn LocalGrandMasterCandidate,
     foreign_clock_records: S,
-    foreign_candidates: &'a dyn ForeignGrandMasterCandidates,
+    state_decision_event: &'a dyn StateDecisionEvent,
     parent_port_identity: ParentPortIdentity,
     profile: PortProfile,
 ) -> PortState<'a, P, S> {
     let bmca = ParentTrackingBmca::new(
-        BestMasterClockAlgorithm::new(local_candidate, foreign_candidates, PortNumber::new(1)),
+        BestMasterClockAlgorithm::new(local_candidate, PortNumber::new(1)),
         BestForeignRecord::new(PortNumber::new(1), foreign_clock_records),
         parent_port_identity,
+        state_decision_event,
     );
     let delay_timeout = port.timeout(SystemMessage::DelayRequestTimeout);
     delay_timeout.restart(Duration::from_secs(0));
@@ -407,6 +445,10 @@ impl FakeTimeout {
 impl Timeout for FakeTimeout {
     fn restart(&self, _timeout: Duration) {
         let msg = *self.msg.borrow();
+        self.system_messages.borrow_mut().push(msg);
+    }
+
+    fn restart_with_message(&self, msg: SystemMessage, _timeout: Duration) {
         self.system_messages.borrow_mut().push(msg);
     }
 }

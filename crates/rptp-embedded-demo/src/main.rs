@@ -364,6 +364,27 @@ impl<'a> Timeout for DemoTimeout<'a> {
             }
         }
     }
+
+    fn restart_with_message(&self, msg: SystemMessage, timeout: Duration) {
+        // Safety: single-core, slots only mutated here and in main loop.
+        unsafe {
+            let slots = &mut *TIMER_SLOTS.slots.get();
+            if let Some(slot) = slots.get_mut(self.slot) {
+                // Update the message in the slot
+                slot.msg = msg;
+                
+                if timeout.as_u64_nanos() == 0 {
+                    // Schedule with deadline = now so it fires immediately in the same loop iteration
+                    let now = self.instant_clock.now();
+                    slot.deadline = now;
+                    slot.active = true;
+                } else {
+                    // Schedule with the updated message
+                    slot.restart(self.instant_clock, timeout);
+                }
+            }
+        }
+    }
 }
 
 impl<'a> Drop for DemoTimeout<'a> {
@@ -484,7 +505,7 @@ fn main() -> ! {
 
     let default_ds = demo_default_ds();
 
-    let ordinary_clock = OrdinaryClock::new(
+    let mut ordinary_clock = OrdinaryClock::new(
         LocalClock::new(
             &demo_clock,
             *default_ds.identity(),
@@ -495,6 +516,7 @@ fn main() -> ! {
         PortNumber::new(1),
     );
 
+    let domain_number = ordinary_clock.domain_number();
     let physical_port = DemoPhysicalPort {
         inner: network.physical_port(),
     };
@@ -505,7 +527,7 @@ fn main() -> ! {
         DemoPortLog,
         HeaplessForeignClockRecords::<4>::new(),
     );
-    let mut port_map = SingleDomainPortMap::new(ordinary_clock.domain_number(), port);
+    let mut port_map = SingleDomainPortMap::new(domain_number, port);
     port_map
         .port_by_domain(DomainNumber::new(0))
         .map(|port| port.process_system_message(SystemMessage::Initialized))
@@ -532,15 +554,17 @@ fn main() -> ! {
 
         // Drive timers: for any expired timer, inject the corresponding
         // SystemMessage into the port state machine.
+        // Zero-duration timers (deadline = now) will fire in this same loop iteration.
         unsafe {
             let slots = &mut *TIMER_SLOTS.slots.get();
             for slot in slots.iter_mut() {
                 if slot.active && now >= slot.deadline {
                     slot.active = false;
-                    hprintln!("[timer] fire slot msg={:?}", slot.msg);
+                    let msg = slot.msg;
+                    hprintln!("[timer] fire slot msg={:?}", msg);
                     port_map
                         .port_by_domain(DomainNumber::new(0))
-                        .map(|port| port.process_system_message(slot.msg))
+                        .map(|port| port.process_system_message(msg))
                         .ok();
                 }
             }

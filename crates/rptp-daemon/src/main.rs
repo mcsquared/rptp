@@ -68,7 +68,7 @@ async fn main() -> std::io::Result<()> {
     let general_socket = Rc::new(MulticastSocket::general().await?);
     let (system_tx, system_rx) = mpsc::unbounded_channel();
 
-    let ordinary_clock = OrdinaryTokioClock::new(
+    let mut ordinary_clock = OrdinaryTokioClock::new(
         LocalClock::new(
             &virtual_clock,
             *default_ds.identity(),
@@ -80,18 +80,15 @@ async fn main() -> std::io::Result<()> {
     );
 
     let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
+    let domain_number = ordinary_clock.domain_number();
 
     let port = ordinary_clock.port(
         &physical_port,
         system_tx.clone(),
-        ClockTxTimestamping::new(
-            &virtual_clock,
-            system_tx.clone(),
-            ordinary_clock.domain_number(),
-        ),
+        ClockTxTimestamping::new(&virtual_clock, system_tx.clone(), domain_number),
     );
 
-    let portmap = SingleDomainPortMap::new(ordinary_clock.domain_number(), port);
+    let portmap = SingleDomainPortMap::new(domain_number, port);
 
     let ports_loop = TokioPortsLoop::new(
         portmap,

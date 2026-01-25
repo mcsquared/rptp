@@ -17,6 +17,7 @@
 
 use crate::bmca::{
     BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, ListeningBmca,
+    StateDecisionEvent,
 };
 use crate::log::PortEvent;
 use crate::port::Port;
@@ -41,6 +42,7 @@ pub struct InitializingPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: BestMasterClockAlgorithm<'a>,
     best_foreign: BestForeignRecord<S>,
+    state_decision_event: &'a dyn StateDecisionEvent,
     profile: PortProfile,
 }
 
@@ -54,6 +56,7 @@ impl<'a, P: Port, S: ForeignClockRecords> InitializingPort<'a, P, S> {
         port: P,
         bmca: BestMasterClockAlgorithm<'a>,
         best_foreign: BestForeignRecord<S>,
+        state_decision_event: &'a dyn StateDecisionEvent,
         profile: PortProfile,
     ) -> Self {
         port.log(PortEvent::Static("Become InitializingPort"));
@@ -62,6 +65,7 @@ impl<'a, P: Port, S: ForeignClockRecords> InitializingPort<'a, P, S> {
             port,
             bmca,
             best_foreign,
+            state_decision_event,
             profile,
         }
     }
@@ -74,7 +78,7 @@ impl<'a, P: Port, S: ForeignClockRecords> InitializingPort<'a, P, S> {
     pub(crate) fn initialized(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::Initialized);
 
-        let bmca = ListeningBmca::new(self.bmca, self.best_foreign);
+        let bmca = ListeningBmca::new(self.bmca, self.best_foreign, self.state_decision_event);
 
         self.profile.listening(self.port, bmca)
     }
@@ -84,19 +88,18 @@ impl<'a, P: Port, S: ForeignClockRecords> InitializingPort<'a, P, S> {
 mod tests {
     use super::*;
 
-    use core::cell::Cell;
-
     use crate::clock::LocalClock;
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::port::{DomainNumber, DomainPort, PortNumber};
     use crate::portstate::PortState;
     use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakePort, FakeTimerHost, FakeTimestamping, TestClockDS};
+    use crate::test_support::{
+        FakeClock, FakePort, FakeStateDecisionEvent, FakeTimerHost, FakeTimestamping, TestClockDS,
+    };
 
     #[test]
     fn initializing_port_to_listening_transition() {
-        let foreign_candidates = Cell::new(crate::bmca::BestForeignSnapshot::Empty);
         let default_ds = TestClockDS::default_mid_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
@@ -104,6 +107,7 @@ mod tests {
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let physical_port = FakePort::new();
+        let state_decision_event = FakeStateDecisionEvent::new();
         let initializing = InitializingPort::new(
             DomainPort::new(
                 &local_clock,
@@ -114,8 +118,9 @@ mod tests {
                 DomainNumber::new(0),
                 PortNumber::new(1),
             ),
-            BestMasterClockAlgorithm::new(&default_ds, &foreign_candidates, PortNumber::new(1)),
+            BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
+            &state_decision_event,
             PortProfile::default(),
         );
 

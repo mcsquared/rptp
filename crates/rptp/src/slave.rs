@@ -15,7 +15,9 @@
 //! timestamp of that DelayReq is later reported back via `SystemMessage::Timestamp` and recorded
 //! using [`SlavePort::process_delay_request`].
 
-use crate::bmca::{Bmca, BmcaMasterDecision, ForeignClockRecords, ParentTrackingBmca};
+use crate::bmca::{
+    BestForeignDataset, Bmca, BmcaMasterDecision, ForeignClockRecords, ParentTrackingBmca,
+};
 use crate::e2e::EndToEndDelayMechanism;
 use crate::log::PortEvent;
 use crate::message::{
@@ -82,23 +84,18 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
 
     /// Process an incoming Announce message while in `SLAVE`.
     ///
-    /// This restarts the Announce receipt timeout, feeds the message into BMCA, and returns a
-    /// [`StateDecision`] if BMCA recommends a transition.
+    /// This restarts the Announce receipt timeout and feeds the message into BMCA
+    /// (which triggers state decision event if e_rbest changed).
     pub(crate) fn process_announce(
         &mut self,
         msg: AnnounceMessage,
         source_port_identity: PortIdentity,
         now: Instant,
-    ) -> Option<StateDecision> {
+    ) {
         self.port.log(PortEvent::MessageReceived("Announce"));
         self.announce_receipt_timeout.restart();
 
         msg.feed_bmca(&mut self.bmca, source_port_identity, now);
-
-        match self.bmca.decision() {
-            Some(decision) => decision.to_state_decision(),
-            None => None,
-        }
     }
 
     /// Process a received one-step Sync event message.
@@ -213,6 +210,17 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         None
     }
 
+    /// Process a state decision event.
+    pub(crate) fn state_decision_event(
+        &self,
+        best_master_clock: BestForeignDataset,
+    ) -> Option<StateDecision> {
+        match self.bmca.decision(best_master_clock) {
+            Some(decision) => decision.to_state_decision(),
+            None => None,
+        }
+    }
+
     /// Send a DelayReq event message.
     ///
     /// The delay-request sequencing and scheduling is owned by the E2E delay mechanism. The egress
@@ -227,10 +235,12 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
 
     /// Handle Announce receipt timeout expiry while in `SLAVE`.
     ///
-    /// This transitions to `MASTER` using “current grandmaster tracking”, which (in current
+    /// This transitions to `MASTER` using "current grandmaster tracking", which (in current
     /// single-port setups) resolves to the local grandmaster identity.
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
+        self.bmca.trigger_state_decision_event();
+
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
@@ -286,8 +296,8 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
 
     /// Transition to `FAULTY` upon fault detection.
     pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
-        let (bmca, best_foreign) = self.bmca.into_parts();
-        self.profile.faulty(self.port, bmca, best_foreign)
+        let (bmca, best_foreign, sde) = self.bmca.into_parts();
+        self.profile.faulty(self.port, bmca, best_foreign, sde)
     }
 }
 
@@ -295,13 +305,11 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
 mod tests {
     use super::*;
 
-    use core::cell::Cell;
-
     use crate::bmca::{
-        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, BmcaMasterDecision,
-        BmcaMasterDecisionPoint, ClockDS, ForeignClockRecord,
+        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
+        ForeignClockRecord,
     };
-    use crate::clock::{ClockIdentity, LocalClock, StepsRemoved, TimeScale};
+    use crate::clock::{ClockIdentity, LocalClock, TimeScale};
     use crate::e2e::DelayCycle;
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
@@ -309,7 +317,8 @@ mod tests {
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{
-        FakeClock, FakePort, FakeTimeout, FakeTimerHost, FakeTimestamping, TestClockDS,
+        FakeClock, FakePort, FakeStateDecisionEvent, FakeTimeout, FakeTimerHost, FakeTimestamping,
+        TestClockDS,
     };
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
@@ -323,7 +332,7 @@ mod tests {
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
-        foreign_candidates: Cell<BestForeignSnapshot>,
+        state_decision_event: FakeStateDecisionEvent,
     }
 
     impl SlavePortTestSetup {
@@ -341,7 +350,7 @@ mod tests {
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
-                foreign_candidates: Cell::new(BestForeignSnapshot::Empty),
+                state_decision_event: FakeStateDecisionEvent::new(),
             }
         }
 
@@ -363,19 +372,18 @@ mod tests {
 
             let delay_request_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
 
+            // Initialize initial state from the provided records
+            let best_foreign_record =
+                BestForeignRecord::new(port_number, ForeignClockRecordsVec::from_records(records));
+            let current_e_rbest_snapshot = best_foreign_record.current_e_rbest_snapshot();
+
             SlavePort::new(
                 domain_port,
                 ParentTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(
-                        &self.default_ds,
-                        &self.foreign_candidates,
-                        port_number,
-                    ),
-                    BestForeignRecord::new(
-                        port_number,
-                        ForeignClockRecordsVec::from_records(records),
-                    ),
+                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                    best_foreign_record.with_current_e_rbest(current_e_rbest_snapshot),
                     ParentPortIdentity::new(parent),
+                    &self.state_decision_event,
                 ),
                 AnnounceReceiptTimeout::new(
                     FakeTimeout::new(SystemMessage::AnnounceReceiptTimeout),
@@ -493,6 +501,25 @@ mod tests {
         let master = slave.announce_receipt_timeout_expired();
 
         assert!(matches!(master, PortState::Master(_)));
+    }
+
+    #[test]
+    fn slave_port_triggers_state_decision_event_on_announce_receipt_timeout() {
+        let setup = SlavePortTestSetup::new();
+
+        let slave = setup.port_under_test(PortNumber::new(1), PortIdentity::fake(), &[]);
+
+        let _master = slave.announce_receipt_timeout_expired();
+
+        // Verify that StateDecisionEvent was triggered
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1,);
+        assert_eq!(events[0].0, PortNumber::new(1));
+        // Snapshot should be Empty (no qualified foreign masters)
+        assert!(
+            matches!(events[0].1, BestForeignSnapshot::Empty),
+            "Expected Empty snapshot on timeout with no qualified foreign masters"
+        );
     }
 
     #[test]
@@ -644,7 +671,7 @@ mod tests {
     }
 
     #[test]
-    fn slave_port_produces_no_decision_on_updated_same_parent() {
+    fn slave_port_triggers_state_decision_event_on_updated_parent() {
         let setup = SlavePortTestSetup::new_with_ds(TestClockDS::default_low_grade().dataset());
 
         let parent_port = PortIdentity::new(
@@ -661,8 +688,8 @@ mod tests {
 
         let mut slave = setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
 
-        // Receive a better announce from the same parent port
-        let decision = slave.process_announce(
+        // Receive a better announce from the same parent port (dataset changes)
+        slave.process_announce(
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
@@ -670,17 +697,25 @@ mod tests {
                 TimeScale::Ptp,
             ),
             parent_port,
-            Instant::from_secs(0),
+            Instant::from_secs(1),
         );
 
-        // expect a no decision since parent is unchanged
-        assert_eq!(decision, None);
+        // State decision event should be triggered because the dataset changed
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1,);
+        assert_eq!(events[0].0, PortNumber::new(1));
+        assert_eq!(
+            events[0].1,
+            BestForeignSnapshot::Qualified {
+                ds: TestClockDS::default_high_grade().dataset(),
+                source_port_identity: parent_port,
+                received_on_port: PortNumber::new(1),
+            }
+        );
     }
 
     #[test]
-    fn slave_port_produces_slave_recommendation_with_new_parent() {
-        use crate::bmca::ForeignClockRecord;
-
+    fn slave_port_triggers_state_decision_event_with_new_parent() {
         let setup = SlavePortTestSetup::new_with_ds(TestClockDS::default_low_grade().dataset());
 
         let parent_port = PortIdentity::new(
@@ -702,7 +737,9 @@ mod tests {
             ClockIdentity::new(&[0x00, 0x1A, 0xC5, 0xFF, 0xFE, 0x00, 0x00, 0x02]),
             PortNumber::new(1),
         );
-        let decision = slave.process_announce(
+
+        // First announce - not yet qualified
+        slave.process_announce(
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
@@ -712,9 +749,15 @@ mod tests {
             new_parent,
             Instant::from_secs(0),
         );
-        assert!(decision.is_none()); // first announce from new parent is ignored
 
-        let decision = slave.process_announce(
+        // No event on first announce (not qualified yet)
+        assert!(
+            setup.state_decision_event.take_events().is_empty(),
+            "No event expected on first announce from new parent"
+        );
+
+        // Second announce qualifies the new parent
+        slave.process_announce(
             AnnounceMessage::new(
                 43.into(),
                 LogMessageInterval::new(0),
@@ -722,20 +765,25 @@ mod tests {
                 TimeScale::Ptp,
             ),
             new_parent,
-            Instant::from_secs(0),
+            Instant::from_secs(1),
         );
 
-        // expect a slave recommendation
+        // State decision event should be triggered (new parent is now best and qualified)
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1,);
+        assert_eq!(events[0].0, PortNumber::new(1));
         assert_eq!(
-            decision,
-            Some(StateDecision::RecommendedSlave(ParentPortIdentity::new(
-                new_parent
-            )))
+            events[0].1,
+            BestForeignSnapshot::Qualified {
+                ds: TestClockDS::default_high_grade().dataset(),
+                source_port_identity: new_parent,
+                received_on_port: PortNumber::new(1),
+            }
         );
     }
 
     #[test]
-    fn slave_port_produces_master_recommendation_on_worse_announces() {
+    fn slave_port_triggers_state_decision_event_on_worse_parent() {
         let setup = SlavePortTestSetup::new_with_ds(TestClockDS::default_mid_grade().dataset());
 
         let parent_port = PortIdentity::new(
@@ -752,8 +800,8 @@ mod tests {
 
         let mut slave = setup.port_under_test(PortNumber::new(1), parent_port, &prior_records);
 
-        // Receive a worse announce from the current parent
-        let decision = slave.process_announce(
+        // Receive a worse announce from the current parent (dataset degrades)
+        slave.process_announce(
             AnnounceMessage::new(
                 42.into(),
                 LogMessageInterval::new(0),
@@ -761,17 +809,20 @@ mod tests {
                 TimeScale::Ptp,
             ),
             parent_port,
-            Instant::from_secs(0),
+            Instant::from_secs(1),
         );
 
-        // expect a master M2 recommendation since non-gm local clock is better
+        // State decision event should be triggered because the parent dataset changed
+        let events = setup.state_decision_event.take_events();
+        assert_eq!(events.len(), 1,);
+        assert_eq!(events[0].0, PortNumber::new(1));
         assert_eq!(
-            decision,
-            Some(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M2,
-                StepsRemoved::new(0),
-                *setup.local_clock.identity(),
-            )))
+            events[0].1,
+            BestForeignSnapshot::Qualified {
+                ds: TestClockDS::default_low_grade_slave_only().dataset(),
+                source_port_identity: parent_port,
+                received_on_port: PortNumber::new(1),
+            }
         );
     }
 }
