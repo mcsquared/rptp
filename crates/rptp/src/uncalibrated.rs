@@ -20,7 +20,7 @@
 //! recorded using [`UncalibratedPort::process_delay_request`].
 
 use crate::bmca::{
-    BestForeignDataset, Bmca, BmcaMasterDecision, ForeignClockRecords, ParentTrackingBmca,
+    BestForeignSnapshot, Bmca, BmcaMasterDecision, ForeignClockRecords, ParentTrackingBmca,
 };
 use crate::e2e::EndToEndDelayMechanism;
 use crate::log::PortEvent;
@@ -243,7 +243,7 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
     /// Process a state decision event.
     pub(crate) fn state_decision_event(
         &self,
-        best_master_clock: BestForeignDataset,
+        best_master_clock: &BestForeignSnapshot,
     ) -> Option<StateDecision> {
         match self.bmca.decision(best_master_clock) {
             Some(decision) => decision.to_state_decision(),
@@ -380,7 +380,7 @@ mod tests {
             // Initialize initial state from the provided records
             let best_foreign_record =
                 BestForeignRecord::new(port_number, ForeignClockRecordsVec::from_records(records));
-            let current_e_rbest_snapshot = best_foreign_record.current_e_rbest_snapshot();
+            let current_e_rbest_snapshot = best_foreign_record.snapshot();
 
             UncalibratedPort::new(
                 domain_port,

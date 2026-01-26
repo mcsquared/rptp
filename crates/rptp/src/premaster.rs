@@ -12,7 +12,7 @@
 //! `UNCALIBRATED`).
 
 use crate::bmca::{
-    BestForeignDataset, Bmca, BmcaMasterDecision, ForeignClockRecords, GrandMasterTrackingBmca,
+    BestForeignSnapshot, Bmca, BmcaMasterDecision, ForeignClockRecords, GrandMasterTrackingBmca,
 };
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
@@ -128,7 +128,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
     /// Process a state decision event.
     pub(crate) fn state_decision_event(
         &self,
-        best_master_clock: BestForeignDataset,
+        best_master_clock: &BestForeignSnapshot,
     ) -> Option<StateDecision> {
         match self.bmca.decision(best_master_clock) {
             Some(decision) => decision.to_state_decision(),
@@ -207,7 +207,7 @@ mod tests {
             // Initialize initial state from the provided records
             let best_foreign_record =
                 BestForeignRecord::new(port_number, ForeignClockRecordsVec::from_records(records));
-            let current_e_rbest_snapshot = best_foreign_record.current_e_rbest_snapshot();
+            let current_e_rbest_snapshot = best_foreign_record.snapshot();
 
             PreMasterPort::new(
                 domain_port,

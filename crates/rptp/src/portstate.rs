@@ -325,22 +325,22 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
             }
             (Faulty(_), FaultCleared) => Some(StateDecision::FaultCleared),
             (Listening(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(e_best_snapshot.as_best_foreign_dataset())
+                port.state_decision_event(&e_best_snapshot)
             }
             (Slave(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(e_best_snapshot.as_best_foreign_dataset())
+                port.state_decision_event(&e_best_snapshot)
             }
             (Master(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(e_best_snapshot.as_best_foreign_dataset())
+                port.state_decision_event(&e_best_snapshot)
             }
             (Uncalibrated(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(e_best_snapshot.as_best_foreign_dataset())
+                port.state_decision_event(&e_best_snapshot)
             }
             (Passive(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(e_best_snapshot.as_best_foreign_dataset())
+                port.state_decision_event(&e_best_snapshot)
             }
             (PreMaster(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(e_best_snapshot.as_best_foreign_dataset())
+                port.state_decision_event(&e_best_snapshot)
             }
             _ => None,
         }

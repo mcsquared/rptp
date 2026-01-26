@@ -21,7 +21,7 @@
 //! processing (Sync/DelayReq/…) is handled in other states.
 
 use crate::bmca::{
-    BestForeignDataset, Bmca, BmcaMasterDecision, ForeignClockRecords, ListeningBmca,
+    BestForeignSnapshot, Bmca, BmcaMasterDecision, ForeignClockRecords, ListeningBmca,
 };
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
@@ -142,7 +142,7 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
     /// Process a state decision event.
     pub(crate) fn state_decision_event(
         &self,
-        best_master_clock: BestForeignDataset,
+        best_master_clock: &BestForeignSnapshot,
     ) -> Option<StateDecision> {
         match self.bmca.decision(best_master_clock) {
             Some(decision) => decision.to_state_decision(),
