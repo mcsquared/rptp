@@ -60,7 +60,7 @@ pub(crate) trait Bmca {
         foreign_clock_ds: ClockDS,
         log_announce_interval: LogInterval,
         now: Instant,
-    ) -> Option<BestForeignSnapshot>;
+    );
 
     /// Return the latest BMCA decision, if one should be acted upon.
     ///
@@ -258,7 +258,7 @@ impl<'a, S: ForeignClockRecords> Bmca for ListeningBmca<'a, S> {
         foreign_clock_ds: ClockDS,
         log_announce_interval: LogInterval,
         now: Instant,
-    ) -> Option<BestForeignSnapshot> {
+    ) {
         let result = self.best_foreign.consider(
             source_port_identity,
             foreign_clock_ds,
@@ -269,7 +269,6 @@ impl<'a, S: ForeignClockRecords> Bmca for ListeningBmca<'a, S> {
             self.state_decision_event
                 .trigger(self.best_foreign.received_on_port(), e_rbest);
         }
-        result
     }
 
     /// Return a decision in listening mode only if there is a qualified foreign dataset, as in
@@ -389,7 +388,7 @@ impl<'a, S: ForeignClockRecords> Bmca for GrandMasterTrackingBmca<'a, S> {
         foreign_clock_ds: ClockDS,
         log_announce_interval: LogInterval,
         now: Instant,
-    ) -> Option<BestForeignSnapshot> {
+    ) {
         let result = self.best_foreign.consider(
             source_port_identity,
             foreign_clock_ds,
@@ -400,7 +399,6 @@ impl<'a, S: ForeignClockRecords> Bmca for GrandMasterTrackingBmca<'a, S> {
             self.state_decision_event
                 .trigger(self.best_foreign.received_on_port(), e_rbest);
         }
-        result
     }
 
     /// Return a decision while suppressing identical master decisions.
@@ -517,7 +515,7 @@ impl<'a, S: ForeignClockRecords> Bmca for ParentTrackingBmca<'a, S> {
         foreign_clock_ds: ClockDS,
         log_announce_interval: LogInterval,
         now: Instant,
-    ) -> Option<BestForeignSnapshot> {
+    ) {
         let result = self.best_foreign.consider(
             source_port_identity,
             foreign_clock_ds,
@@ -528,7 +526,6 @@ impl<'a, S: ForeignClockRecords> Bmca for ParentTrackingBmca<'a, S> {
             self.state_decision_event
                 .trigger(self.best_foreign.received_on_port(), e_rbest);
         }
-        result
     }
 
     /// Return a decision while suppressing identical decisions with the same parent.
@@ -636,7 +633,7 @@ impl<'a, S: ForeignClockRecords> Bmca for PassiveBmca<'a, S> {
         foreign_clock_ds: ClockDS,
         log_announce_interval: LogInterval,
         now: Instant,
-    ) -> Option<BestForeignSnapshot> {
+    ) {
         let result = self.best_foreign.consider(
             source_port_identity,
             foreign_clock_ds,
@@ -647,7 +644,6 @@ impl<'a, S: ForeignClockRecords> Bmca for PassiveBmca<'a, S> {
             self.state_decision_event
                 .trigger(self.best_foreign.received_on_port(), e_rbest);
         }
-        result
     }
 
     /// Return a decision while suppressing passive decisions.
@@ -903,8 +899,8 @@ impl Bmca for NoopBmca {
         _foreign_clock_ds: ClockDS,
         _log_announce_interval: LogInterval,
         _now: Instant,
-    ) -> Option<BestForeignSnapshot> {
-        None // NoopBmca never changes state
+    ) {
+        // NoopBmca never changes state
     }
 
     fn decision(&self, _e_best: &BestForeignSnapshot) -> Option<BmcaDecision> {

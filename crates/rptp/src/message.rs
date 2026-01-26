@@ -342,7 +342,7 @@ impl AnnounceMessage {
         bmca: &mut impl Bmca,
         source_port_identity: PortIdentity,
         now: Instant,
-    ) -> Option<BestForeignSnapshot> {
+    ) {
         if let Some(log_interval) = self.log_message_interval.log_interval() {
             bmca.consider(
                 source_port_identity,
@@ -350,8 +350,6 @@ impl AnnounceMessage {
                 log_interval,
                 now,
             )
-        } else {
-            None
         }
     }
 
