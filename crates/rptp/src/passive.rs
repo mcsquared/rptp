@@ -23,7 +23,9 @@
 //! Announce reception is the only message-processing responsibility of this state; event message
 //! processing (Sync/DelayReq/…) is handled in other states.
 
-use crate::bmca::{BestForeignSnapshot, Bmca, BmcaMasterDecision, ForeignClockRecords, PassiveBmca};
+use crate::bmca::{
+    BestForeignSnapshot, Bmca, BmcaMasterDecision, ForeignClockRecords, PassiveBmca,
+};
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity};
@@ -272,7 +274,7 @@ mod tests {
         // Start with a qualified foreign clock record (mid grade, worse than local high grade)
         let foreign_port = PortIdentity::fake();
         let foreign_clock_ds = TestClockDS::default_mid_grade().dataset();
-        let prior_records = [ForeignClockRecord::qualified(
+        let prior_records = [ForeignClockRecord::new_qualified(
             foreign_port,
             foreign_clock_ds,
             LogInterval::new(0),

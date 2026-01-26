@@ -81,7 +81,7 @@ pub trait ForeignClockRecords {
     /// Remember (insert or update) a record.
     fn remember(&mut self, record: ForeignClockRecord);
     /// Return the best *qualified* record, if any.
-    fn best_qualified(&self) -> Option<&ForeignClockRecord>;
+    fn best_qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>>;
     /// Prune stale records and return `true` if any were removed.
     fn prune_stale(&mut self, now: Instant) -> bool;
 }
@@ -158,13 +158,7 @@ impl<S: ForeignClockRecords> BestForeignRecord<S> {
     /// Return the best qualified foreign dataset snapshot observed so far.
     pub(crate) fn snapshot(&self) -> BestForeignSnapshot {
         match self.foreign_clock_records.best_qualified() {
-            Some(record) => BestForeignSnapshot::Qualified {
-                ds: *record
-                    .qualified_ds()
-                    .expect("best_qualified must return a qualified record"),
-                source_port_identity: *record.source_port_identity(),
-                received_on_port: self.received_on_port,
-            },
+            Some(qualified) => qualified.snapshot(self.received_on_port),
             None => BestForeignSnapshot::Empty,
         }
     }
@@ -1069,7 +1063,7 @@ impl ForeignClockRecord {
     /// useful for tests, where we want to set up qualified foreign clock records directly.
     #[cfg(test)]
     #[allow(dead_code)]
-    pub(crate) fn qualified(
+    pub(crate) fn new_qualified(
         source_port_identity: PortIdentity,
         foreign_clock_ds: ClockDS,
         log_announce_interval: LogInterval,
@@ -1125,11 +1119,13 @@ impl ForeignClockRecord {
         }
     }
 
-    /// Return the underlying data set if this record has become qualified as
-    /// a foreign master candidate, or `None` otherwise.
-    pub(crate) fn qualified_ds(&self) -> Option<&ClockDS> {
+    /// Return a qualified foreign clock record if this record has become qualified.
+    pub(crate) fn qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>> {
         if self.qualification.is_qualified() {
-            Some(&self.foreign_clock_ds)
+            Some(QualifiedForeignClockRecord::new(
+                &self.foreign_clock_ds,
+                &self.source_port_identity,
+            ))
         } else {
             None
         }
@@ -1143,6 +1139,30 @@ impl ForeignClockRecord {
     /// Return `true` if this record is stale at the given time.
     pub(crate) fn is_stale(&self, now: Instant) -> bool {
         self.qualification.is_stale(now)
+    }
+}
+
+/// A qualified foreign clock record, guaranteed to have a valid dataset.
+#[derive(Debug, PartialEq, Eq)]
+pub struct QualifiedForeignClockRecord<'a> {
+    dataset: &'a ClockDS,
+    source_port_identity: &'a PortIdentity,
+}
+
+impl<'a> QualifiedForeignClockRecord<'a> {
+    pub(crate) fn new(dataset: &'a ClockDS, source_port_identity: &'a PortIdentity) -> Self {
+        Self {
+            dataset,
+            source_port_identity,
+        }
+    }
+
+    pub(crate) fn snapshot(&self, port_number: PortNumber) -> BestForeignSnapshot {
+        BestForeignSnapshot::Qualified {
+            ds: *self.dataset,
+            source_port_identity: *self.source_port_identity,
+            received_on_port: port_number,
+        }
     }
 }
 
@@ -1500,7 +1520,7 @@ mod tests {
         let better = TestClockDS::atomic_grandmaster();
         let better_port_id = PortIdentity::new(better.clock_identity(), PortNumber::new(1));
         let better_ds = better.dataset();
-        let records = [ForeignClockRecord::qualified(
+        let records = [ForeignClockRecord::new_qualified(
             better_port_id,
             better_ds,
             LogInterval::new(0),
@@ -1538,7 +1558,7 @@ mod tests {
         let better = TestClockDS::default_high_grade();
         let better_port_id = PortIdentity::new(better.clock_identity(), PortNumber::new(1));
         let better_ds = better.dataset();
-        let records = [ForeignClockRecord::qualified(
+        let records = [ForeignClockRecord::new_qualified(
             better_port_id,
             better_ds,
             LogInterval::new(0),
@@ -1623,7 +1643,7 @@ mod tests {
         let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
 
         // First Announce: record is created, still unqualified.
-        assert!(record.qualified_ds().is_none());
+        assert!(record.qualified().is_none());
 
         // Second Announce within the window makes it qualified.
         let new_record = ForeignClockRecord::new(
@@ -1633,7 +1653,7 @@ mod tests {
             Instant::from_secs(1),
         );
         record.update_from(&new_record);
-        assert!(record.qualified_ds().is_some());
+        assert!(record.qualified().is_some());
     }
 
     #[test]
@@ -1652,7 +1672,7 @@ mod tests {
             Instant::from_secs(1),
         );
         record.update_from(&new_record);
-        assert!(record.qualified_ds().is_some());
+        assert!(record.qualified().is_some());
 
         // After a long gap, a single announce is not enough to stay qualified.
         let updated_record = ForeignClockRecord::new(
@@ -1662,7 +1682,7 @@ mod tests {
             Instant::from_secs(10),
         );
         record.update_from(&updated_record);
-        assert!(record.qualified_ds().is_none());
+        assert!(record.qualified().is_none());
     }
 
     #[test]
@@ -1682,7 +1702,7 @@ mod tests {
             Instant::from_secs(5),
         );
         record.update_from(&updated_record);
-        assert!(record.qualified_ds().is_none());
+        assert!(record.qualified().is_none());
 
         let updated_record = ForeignClockRecord::new(
             port_id,
@@ -1691,7 +1711,7 @@ mod tests {
             Instant::from_secs(10),
         );
         record.update_from(&updated_record);
-        assert!(record.qualified_ds().is_none());
+        assert!(record.qualified().is_none());
 
         let updated_record = ForeignClockRecord::new(
             port_id,
@@ -1700,7 +1720,7 @@ mod tests {
             Instant::from_secs(15),
         );
         record.update_from(&updated_record);
-        assert!(record.qualified_ds().is_none());
+        assert!(record.qualified().is_none());
     }
 
     #[test]
@@ -1720,7 +1740,7 @@ mod tests {
             Instant::from_secs(1),
         );
         record.update_from(&new_record);
-        assert!(record.qualified_ds().is_some());
+        assert!(record.qualified().is_some());
 
         // Change dataset while still qualified.
         let updated_record = ForeignClockRecord::new(
@@ -1731,7 +1751,14 @@ mod tests {
         );
         let status = record.update_from(&updated_record);
         assert_eq!(status, ForeignClockStatus::Updated);
-        assert_eq!(record.qualified_ds(), Some(&foreign_low));
+        assert_eq!(
+            record.qualified().map(|q| q.snapshot(PortNumber::new(1))),
+            Some(BestForeignSnapshot::Qualified {
+                ds: foreign_low,
+                source_port_identity: port_id,
+                received_on_port: PortNumber::new(1),
+            })
+        );
     }
 
     #[test]
@@ -1751,7 +1778,7 @@ mod tests {
             Instant::from_secs(10),
         );
         let _ = record.update_from(&updated_record);
-        assert!(record.qualified_ds().is_none());
+        assert!(record.qualified().is_none());
 
         // Second slow Announce with changed dataset: still unqualified and should report Unchanged.
         let updated_record = ForeignClockRecord::new(
@@ -1762,7 +1789,7 @@ mod tests {
         );
         let status = record.update_from(&updated_record);
         assert_eq!(status, ForeignClockStatus::Unchanged);
-        assert!(record.qualified_ds().is_none());
+        assert!(record.qualified().is_none());
     }
 
     #[test]
@@ -1781,7 +1808,7 @@ mod tests {
             Instant::from_secs(1),
         );
         record.update_from(&new_record);
-        assert!(record.qualified_ds().is_some());
+        assert!(record.qualified().is_some());
 
         // Next Announce spaced just beyond the window drops qualification
         // but the record is not stale yet.
@@ -1789,7 +1816,7 @@ mod tests {
         let updated_record =
             ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), now);
         let _ = record.update_from(&updated_record);
-        assert!(record.qualified_ds().is_none());
+        assert!(record.qualified().is_none());
         assert!(!record.is_stale(now));
     }
 
@@ -1884,19 +1911,19 @@ mod tests {
         let gm = TestClockDS::gps_grandmaster();
 
         let stale_records = vec![
-            ForeignClockRecord::qualified(
+            ForeignClockRecord::new_qualified(
                 PortIdentity::new(high.clock_identity(), PortNumber::new(1)),
                 high.dataset(),
                 LogInterval::new(0),
                 Instant::from_secs(0),
             ),
-            ForeignClockRecord::qualified(
+            ForeignClockRecord::new_qualified(
                 PortIdentity::new(mid.clock_identity(), PortNumber::new(1)),
                 mid.dataset(),
                 LogInterval::new(0),
                 Instant::from_secs(1),
             ),
-            ForeignClockRecord::qualified(
+            ForeignClockRecord::new_qualified(
                 PortIdentity::new(mid.clock_identity(), PortNumber::new(1)),
                 low.dataset(),
                 LogInterval::new(0),
@@ -1940,8 +1967,14 @@ mod tests {
             .foreign_clock_records
             .best_qualified()
             .expect("record should be qualified after two announces");
-        assert_eq!(best.source_port_identity(), &gm_port_id);
-        assert_eq!(best.qualified_ds(), Some(&gm_foreign));
+        assert_eq!(
+            best.snapshot(PortNumber::new(1)),
+            BestForeignSnapshot::Qualified {
+                ds: gm_foreign,
+                source_port_identity: gm_port_id,
+                received_on_port: PortNumber::new(1),
+            }
+        );
     }
 
     #[test]

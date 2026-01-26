@@ -116,7 +116,7 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
         // Register port with broadcast before creating port state
         // Create a timeout handle for state decision events (we'll update the message when broadcasting)
         let state_decision_timeout = timer_host.timeout(SystemMessage::StateDecisionEvent(
-            crate::bmca::BestForeignSnapshot::Empty,
+            BestForeignSnapshot::Empty,
         ));
         self.port_broadcast.add_port(state_decision_timeout);
 

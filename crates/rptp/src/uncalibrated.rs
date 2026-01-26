@@ -416,7 +416,7 @@ mod tests {
             PortNumber::new(1),
         );
         let foreign_clock_ds = TestClockDS::default_mid_grade().dataset();
-        let prior_records = [ForeignClockRecord::qualified(
+        let prior_records = [ForeignClockRecord::new_qualified(
             parent_port,
             foreign_clock_ds,
             LogInterval::new(0),
@@ -481,7 +481,7 @@ mod tests {
 
         let parent_port = PortIdentity::fake();
         let foreign_clock_ds = TestClockDS::default_high_grade().dataset();
-        let prior_records = [ForeignClockRecord::qualified(
+        let prior_records = [ForeignClockRecord::new_qualified(
             parent_port,
             foreign_clock_ds,
             LogInterval::new(0),

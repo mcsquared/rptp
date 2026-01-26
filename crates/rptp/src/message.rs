@@ -163,7 +163,7 @@ pub enum SystemMessage {
     FaultCleared,
     AnnounceReceiptTimeout,
     QualificationTimeout,
-    StateDecisionEvent(crate::bmca::BestForeignSnapshot),
+    StateDecisionEvent(BestForeignSnapshot),
 }
 
 impl EventMessage {

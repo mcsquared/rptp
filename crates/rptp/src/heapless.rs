@@ -15,7 +15,9 @@
 
 use heapless::Vec;
 
-use crate::bmca::{ForeignClockRecord, ForeignClockRecords, ForeignClockStatus};
+use crate::bmca::{
+    ForeignClockRecord, ForeignClockRecords, ForeignClockStatus, QualifiedForeignClockRecord,
+};
 
 /// Heapless implementation of [`ForeignClockRecords`] backed by a bounded
 /// `heapless::Vec`.
@@ -112,10 +114,8 @@ impl<const N: usize> ForeignClockRecords for HeaplessForeignClockRecords<N> {
         }
     }
 
-    fn best_qualified(&self) -> Option<&ForeignClockRecord> {
-        self.records
-            .first()
-            .filter(|record| record.qualified_ds().is_some())
+    fn best_qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>> {
+        self.records.first().and_then(|record| record.qualified())
     }
 
     fn prune_stale(&mut self, now: crate::time::Instant) -> bool {
@@ -180,7 +180,7 @@ mod tests {
         let low_port_id = new_port_identity(3);
 
         let records = HeaplessForeignClockRecords::<4>::from_records(&[
-            ForeignClockRecord::qualified(
+            ForeignClockRecord::new_qualified(
                 high_port_id,
                 high_clock,
                 LogInterval::new(0),
@@ -200,10 +200,11 @@ mod tests {
             ),
         ]);
 
-        let best_clock = records
-            .best_qualified()
-            .and_then(|record| record.qualified_ds());
-        assert_eq!(best_clock, Some(&high_clock));
+        let best_clock = records.best_qualified();
+        assert_eq!(
+            best_clock,
+            Some(QualifiedForeignClockRecord::new(&high_clock, &high_port_id))
+        );
     }
 
     fn same_dataset(a: &ForeignClockRecord, b: &ForeignClockRecord) -> bool {
@@ -222,13 +223,13 @@ mod tests {
 
         // Start with mid and low, both qualified.
         let mut records = HeaplessForeignClockRecords::<2>::from_records(&[
-            ForeignClockRecord::qualified(
+            ForeignClockRecord::new_qualified(
                 mid_port_id,
                 mid_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
             ),
-            ForeignClockRecord::qualified(
+            ForeignClockRecord::new_qualified(
                 low_port_id,
                 low_clock,
                 LogInterval::new(0),
@@ -295,13 +296,13 @@ mod tests {
 
         // Start with high and mid, both qualified.
         let mut records = HeaplessForeignClockRecords::<2>::from_records(&[
-            ForeignClockRecord::qualified(
+            ForeignClockRecord::new_qualified(
                 high_port_id,
                 high_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
             ),
-            ForeignClockRecord::qualified(
+            ForeignClockRecord::new_qualified(
                 mid_port_id,
                 mid_clock,
                 LogInterval::new(0),

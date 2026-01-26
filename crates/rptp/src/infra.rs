@@ -24,7 +24,7 @@ pub mod infra_support {
 
     use crate::bmca::{
         BestForeignSnapshot, ForeignClockRecord, ForeignClockRecords, ForeignClockStatus,
-        ForeignGrandMasterCandidates,
+        ForeignGrandMasterCandidates, QualifiedForeignClockRecord,
     };
     use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
     use crate::log::PortEvent;
@@ -139,10 +139,8 @@ pub mod infra_support {
         }
 
         /// Return the best qualified record, if any.
-        fn best_qualified(&self) -> Option<&ForeignClockRecord> {
-            self.records
-                .first()
-                .filter(|record| record.qualified_ds().is_some())
+        fn best_qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>> {
+            self.records.first().and_then(|record| record.qualified())
         }
 
         /// Prune stale records and report whether any were removed.
@@ -159,7 +157,7 @@ pub mod infra_support {
             (*self).remember(record);
         }
 
-        fn best_qualified(&self) -> Option<&ForeignClockRecord> {
+        fn best_qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>> {
             (**self).best_qualified()
         }
 
@@ -300,10 +298,11 @@ pub mod infra_support {
                 Instant::from_secs(0),
             ));
 
-            let best_clock = records
-                .best_qualified()
-                .and_then(|record| record.qualified_ds());
-            assert_eq!(best_clock, Some(&high_clock));
+            let best_clock = records.best_qualified();
+            assert_eq!(
+                best_clock,
+                Some(QualifiedForeignClockRecord::new(&high_clock, &high_port_id))
+            );
         }
 
         #[test]

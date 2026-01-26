@@ -314,7 +314,7 @@ mod tests {
         );
         // Foreign uses lower priority1 so it is better, even though clock class is worse
         let foreign = TestClockDS::default_low_grade_slave_only().with_priority1(Priority1::new(1));
-        let prior_records = [ForeignClockRecord::qualified(
+        let prior_records = [ForeignClockRecord::new_qualified(
             foreign_port,
             foreign.dataset(),
             LogInterval::new(0),
