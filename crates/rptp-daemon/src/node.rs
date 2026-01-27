@@ -480,6 +480,7 @@ mod tests {
             ));
             let port_state = master_test_port(
                 domain_port,
+                PortNumber::new(1),
                 default_ds,
                 ForeignClockRecordsVec::new(),
                 state_decision_event,
@@ -618,6 +619,7 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let port_state = master_test_port(
             domain_port,
+            PortNumber::new(1),
             &default_ds,
             ForeignClockRecordsVec::new(),
             &state_decision_event,
@@ -717,6 +719,7 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let port_state = slave_test_port(
             domain_port,
+            PortNumber::new(1),
             &default_ds,
             ForeignClockRecordsVec::new(),
             &state_decision_event,

@@ -111,7 +111,6 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
     /// single-port setups) resolves to the local grandmaster identity.
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
-        self.bmca.trigger_state_decision_event();
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
@@ -135,8 +134,9 @@ impl<'a, P: Port, S: ForeignClockRecords> ListeningPort<'a, P, S> {
 
     /// Transition to `FAULTY` upon fault detection.
     pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
-        let (bmca, best_foreign, sde) = self.bmca.into_parts();
-        self.profile.faulty(self.port, bmca, best_foreign, sde)
+        let (bmca, best_foreign, state_decision_trigger) = self.bmca.into_parts();
+        self.profile
+            .faulty(self.port, bmca, best_foreign, state_decision_trigger)
     }
 
     /// Process a state decision event.
@@ -157,6 +157,7 @@ mod tests {
 
     use crate::bmca::{
         BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS, ListeningBmca,
+        StateDecisionEventTrigger,
     };
     use crate::clock::{LocalClock, TimeScale};
     use crate::infra::infra_support::ForeignClockRecordsVec;
@@ -214,16 +215,25 @@ mod tests {
                 Duration::from_secs(5),
             );
 
-            ListeningPort::new(
-                domain_port,
-                ListeningBmca::new(
-                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
-                    BestForeignRecord::new(port_number, ForeignClockRecordsVec::new()),
+            {
+                let best_foreign =
+                    BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+                let state_decision_trigger = StateDecisionEventTrigger::new(
                     &self.state_decision_event,
-                ),
-                announce_receipt_timeout,
-                PortProfile::default(),
-            )
+                    best_foreign.snapshot(),
+                    port_number,
+                );
+                ListeningPort::new(
+                    domain_port,
+                    ListeningBmca::new(
+                        BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                        best_foreign,
+                        state_decision_trigger,
+                    ),
+                    announce_receipt_timeout,
+                    PortProfile::default(),
+                )
+            }
         }
     }
 

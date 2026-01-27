@@ -121,8 +121,9 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
 
     /// Transition to `FAULTY` upon fault detection.
     pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
-        let (bmca, best_foreign, sde) = self.bmca.into_parts();
-        self.profile.faulty(self.port, bmca, best_foreign, sde)
+        let (bmca, best_foreign, state_decision_trigger) = self.bmca.into_parts();
+        self.profile
+            .faulty(self.port, bmca, best_foreign, state_decision_trigger)
     }
 
     /// Process a state decision event.
@@ -143,7 +144,7 @@ mod tests {
 
     use crate::bmca::{
         BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
-        ForeignClockRecord, GrandMasterTrackingBmca, Priority1,
+        ForeignClockRecord, GrandMasterTrackingBmca, Priority1, StateDecisionEventTrigger,
     };
     use crate::clock::{ClockIdentity, LocalClock, TimeScale};
     use crate::infra::infra_support::ForeignClockRecordsVec;
@@ -207,15 +208,19 @@ mod tests {
             // Initialize initial state from the provided records
             let best_foreign_record =
                 BestForeignRecord::new(port_number, ForeignClockRecordsVec::from_records(records));
-            let current_e_rbest_snapshot = best_foreign_record.snapshot();
+            let state_decision_trigger = StateDecisionEventTrigger::new(
+                &self.state_decision_event,
+                best_foreign_record.snapshot(),
+                port_number,
+            );
 
             PreMasterPort::new(
                 domain_port,
                 GrandMasterTrackingBmca::new(
                     BestMasterClockAlgorithm::new(&self.default_ds, port_number),
-                    best_foreign_record.with_current_e_rbest(current_e_rbest_snapshot),
+                    best_foreign_record,
                     grandmaster_id,
-                    &self.state_decision_event,
+                    state_decision_trigger,
                 ),
                 qualification_timeout,
                 PortProfile::default(),

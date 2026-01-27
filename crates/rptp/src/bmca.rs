@@ -40,6 +40,72 @@ pub trait StateDecisionEvent {
     fn trigger(&self, port_number: PortNumber, e_rbest: BestForeignSnapshot);
 }
 
+/// Encapsulates change detection and state decision event triggering.
+///
+/// Tracks the previous `e_rbest` snapshot and triggers a state decision event
+/// when the snapshot changes. Also provides a plain `trigger()` method for
+/// manual triggering with the current snapshot.
+pub(crate) struct StateDecisionEventTrigger<'a> {
+    previous_best_foreign: BestForeignSnapshot,
+    state_decision_event: &'a dyn StateDecisionEvent,
+    received_on_port: PortNumber,
+}
+
+impl<'a> StateDecisionEventTrigger<'a> {
+    /// Create a new trigger starting from the given previous snapshot.
+    ///
+    /// `previous_best_foreign` is the initial snapshot state. Use `BestForeignSnapshot::Empty`
+    /// for a fresh start, or pass the current snapshot from `BestForeignRecord` when
+    /// initializing with pre-existing records to avoid spurious change events.
+    ///
+    /// `received_on_port` identifies the port this trigger is associated with.
+    pub fn new(
+        state_decision_event: &'a dyn StateDecisionEvent,
+        previous_best_foreign: BestForeignSnapshot,
+        received_on_port: PortNumber,
+    ) -> Self {
+        Self {
+            previous_best_foreign,
+            state_decision_event,
+            received_on_port,
+        }
+    }
+
+    /// Trigger the state decision event with the current snapshot.
+    ///
+    /// This method always triggers the event, regardless of whether the snapshot
+    /// has changed. It also updates the internal change-tracking state so that
+    /// a subsequent `gated_trigger()` with the same snapshot will not
+    /// produce a redundant event.
+    ///
+    /// Common use cases include:
+    /// - Before converting BMCA roles (e.g., in `into_current_grandmaster_tracking()`)
+    /// - After timeouts or explicit state transitions
+    /// - When forcing a state decision evaluation
+    pub fn trigger(&mut self, current: BestForeignSnapshot) {
+        self.previous_best_foreign = current;
+        self.state_decision_event
+            .trigger(self.received_on_port, current);
+    }
+
+    /// Check if the current snapshot differs from the previous, and trigger
+    /// the event only if it changed.
+    ///
+    /// This method is used during normal BMCA operation (e.g., in `Bmca::consider()`)
+    /// to avoid redundant state decision events when the best foreign snapshot
+    /// hasn't changed.
+    ///
+    /// Unlike `trigger()`, this method only invokes the event when the snapshot
+    /// has actually changed; both methods update the internal change-tracking state.
+    pub fn gated_trigger(&mut self, current: BestForeignSnapshot) {
+        if self.previous_best_foreign != current {
+            self.previous_best_foreign = current;
+            self.state_decision_event
+                .trigger(self.received_on_port, current);
+        }
+    }
+}
+
 /// Incremental Best Master Clock Algorithm interface.
 ///
 /// The BMCA is driven by Announce reception: each received Announce contributes a new observation
@@ -51,9 +117,8 @@ pub(crate) trait Bmca {
     /// `log_announce_interval` should be the interval announced by the sender, and is used for
     /// qualification and staleness decisions.
     ///
-    /// Returns `Some(BestForeignSnapshot)` if the port's e_rbest changed, `None` otherwise.
-    /// This allows ports to conditionally trigger state decision events only when BMCA state
-    /// actually changes.
+    /// Implementations should check for changes in the best foreign dataset and trigger state
+    /// decision events when changes occur.
     fn consider(
         &mut self,
         source_port_identity: PortIdentity,
@@ -89,52 +154,28 @@ pub trait ForeignClockRecords {
 pub struct BestForeignRecord<S: ForeignClockRecords> {
     received_on_port: PortNumber,
     foreign_clock_records: S,
-    /// Track previous e_rbest to detect changes.
-    previous_e_rbest: BestForeignSnapshot,
 }
 
 impl<S: ForeignClockRecords> BestForeignRecord<S> {
+    /// Create a new best foreign record collection.
+    ///
+    /// `received_on_port` identifies the port this record collection is associated with.
+    /// It is used when creating snapshots to identify which port received the foreign clock data.
     pub fn new(received_on_port: PortNumber, foreign_clock_records: S) -> Self {
         Self {
             received_on_port,
             foreign_clock_records,
-            previous_e_rbest: BestForeignSnapshot::Empty,
-        }
-    }
-
-    /// Initialize the change detection tracker to a specific state.
-    ///
-    /// This is useful when creating a `BestForeignRecord` with pre-existing
-    /// records where you want to avoid a spurious change event. Call
-    /// `snapshot()` first to compute the snapshot from the
-    /// records, then pass it here to initialize the tracker.
-    #[cfg(test)]
-    pub(crate) fn with_current_e_rbest(self, current_e_rbest: BestForeignSnapshot) -> Self {
-        Self {
-            previous_e_rbest: current_e_rbest,
-            ..self
         }
     }
 
     /// Consider a new foreign clock record observation.
-    ///
-    /// Returns `Some(BestForeignSnapshot)` if e_rbest changed, `None` otherwise.
-    /// Changes can occur when:
-    /// - A record becomes qualified
-    /// - A qualified record's dataset changes
-    /// - Records become stale and are pruned (best_qualified() might change)
-    /// - A new better record is added
     pub(crate) fn consider(
         &mut self,
         source_port_identity: PortIdentity,
         foreign_clock_ds: ClockDS,
         log_announce_interval: LogInterval,
         now: Instant,
-    ) -> Option<BestForeignSnapshot> {
-        // Capture previous state
-        let previous = self.previous_e_rbest;
-
-        // Update records
+    ) {
         self.foreign_clock_records.prune_stale(now);
         self.foreign_clock_records.remember(ForeignClockRecord::new(
             source_port_identity,
@@ -142,17 +183,6 @@ impl<S: ForeignClockRecords> BestForeignRecord<S> {
             log_announce_interval,
             now,
         ));
-
-        // Compute new e_rbest
-        let current = self.snapshot();
-
-        // Detect change
-        if previous != current {
-            self.previous_e_rbest = current;
-            Some(current)
-        } else {
-            None
-        }
     }
 
     /// Return the best qualified foreign dataset snapshot observed so far.
@@ -161,11 +191,6 @@ impl<S: ForeignClockRecords> BestForeignRecord<S> {
             Some(qualified) => qualified.snapshot(self.received_on_port),
             None => BestForeignSnapshot::Empty,
         }
-    }
-
-    /// Return the port number this record is associated with.
-    pub(crate) fn received_on_port(&self) -> PortNumber {
-        self.received_on_port
     }
 }
 
@@ -178,19 +203,19 @@ impl<S: ForeignClockRecords> BestForeignRecord<S> {
 pub(crate) struct ListeningBmca<'a, S: ForeignClockRecords> {
     bmca: BestMasterClockAlgorithm<'a>,
     best_foreign: BestForeignRecord<S>,
-    state_decision_event: &'a dyn StateDecisionEvent,
+    state_decision_trigger: StateDecisionEventTrigger<'a>,
 }
 
 impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
     pub fn new(
         bmca: BestMasterClockAlgorithm<'a>,
         best_foreign: BestForeignRecord<S>,
-        state_decision_event: &'a dyn StateDecisionEvent,
+        state_decision_trigger: StateDecisionEventTrigger<'a>,
     ) -> Self {
         Self {
             bmca,
             best_foreign,
-            state_decision_event,
+            state_decision_trigger,
         }
     }
 
@@ -203,7 +228,7 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
             self.bmca,
             self.best_foreign,
             parent_port_identity,
-            self.state_decision_event,
+            self.state_decision_trigger,
         )
     }
 
@@ -216,19 +241,24 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
             self.bmca,
             self.best_foreign,
             grandmaster_id,
-            self.state_decision_event,
+            self.state_decision_trigger,
         )
     }
 
     /// Convert to a GrandMasterTrackingBmca that tracks the currently known grandmaster.
-    pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<'a, S> {
+    ///
+    /// Triggers a state decision event before converting to ensure the clock is notified
+    /// of the current best foreign snapshot.
+    pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<'a, S> {
+        let current = self.best_foreign.snapshot();
+        self.state_decision_trigger.trigger(current);
         let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 
     /// Convert to a PassiveBmca for transitioning to passive state.
     pub(crate) fn into_passive(self) -> PassiveBmca<'a, S> {
-        PassiveBmca::new(self.bmca, self.best_foreign, self.state_decision_event)
+        PassiveBmca::new(self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 
     /// Decompose ListeningBmca into its parts.
@@ -237,17 +267,9 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
     ) -> (
         BestMasterClockAlgorithm<'a>,
         BestForeignRecord<S>,
-        &'a dyn StateDecisionEvent,
+        StateDecisionEventTrigger<'a>,
     ) {
-        (self.bmca, self.best_foreign, self.state_decision_event)
-    }
-
-    /// Trigger a state decision event.
-    pub(crate) fn trigger_state_decision_event(&self) {
-        self.state_decision_event.trigger(
-            self.best_foreign.received_on_port(),
-            self.best_foreign.snapshot(),
-        );
+        (self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 }
 
@@ -259,16 +281,14 @@ impl<'a, S: ForeignClockRecords> Bmca for ListeningBmca<'a, S> {
         log_announce_interval: LogInterval,
         now: Instant,
     ) {
-        let result = self.best_foreign.consider(
+        self.best_foreign.consider(
             source_port_identity,
             foreign_clock_ds,
             log_announce_interval,
             now,
         );
-        if let Some(e_rbest) = result {
-            self.state_decision_event
-                .trigger(self.best_foreign.received_on_port(), e_rbest);
-        }
+        let current = self.best_foreign.snapshot();
+        self.state_decision_trigger.gated_trigger(current);
     }
 
     /// Return a decision in listening mode only if there is a qualified foreign dataset, as in
@@ -320,7 +340,7 @@ pub(crate) struct GrandMasterTrackingBmca<'a, S: ForeignClockRecords> {
     bmca: BestMasterClockAlgorithm<'a>,
     best_foreign: BestForeignRecord<S>,
     grandmaster_id: ClockIdentity,
-    state_decision_event: &'a dyn StateDecisionEvent,
+    state_decision_trigger: StateDecisionEventTrigger<'a>,
 }
 
 impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
@@ -328,13 +348,13 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
         bmca: BestMasterClockAlgorithm<'a>,
         best_foreign: BestForeignRecord<S>,
         grandmaster_id: ClockIdentity,
-        state_decision_event: &'a dyn StateDecisionEvent,
+        state_decision_trigger: StateDecisionEventTrigger<'a>,
     ) -> Self {
         Self {
             bmca,
             best_foreign,
             grandmaster_id,
-            state_decision_event,
+            state_decision_trigger,
         }
     }
 
@@ -360,13 +380,13 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
             self.bmca,
             self.best_foreign,
             parent_port_identity,
-            self.state_decision_event,
+            self.state_decision_trigger,
         )
     }
 
     /// Convert to a PassiveBmca for transitioning to passive state.
     pub(crate) fn into_passive(self) -> PassiveBmca<'a, S> {
-        PassiveBmca::new(self.bmca, self.best_foreign, self.state_decision_event)
+        PassiveBmca::new(self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 
     /// Decompose GrandMasterTrackingBmca into its parts.
@@ -375,9 +395,9 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
     ) -> (
         BestMasterClockAlgorithm<'a>,
         BestForeignRecord<S>,
-        &'a dyn StateDecisionEvent,
+        StateDecisionEventTrigger<'a>,
     ) {
-        (self.bmca, self.best_foreign, self.state_decision_event)
+        (self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 }
 
@@ -389,16 +409,14 @@ impl<'a, S: ForeignClockRecords> Bmca for GrandMasterTrackingBmca<'a, S> {
         log_announce_interval: LogInterval,
         now: Instant,
     ) {
-        let result = self.best_foreign.consider(
+        self.best_foreign.consider(
             source_port_identity,
             foreign_clock_ds,
             log_announce_interval,
             now,
         );
-        if let Some(e_rbest) = result {
-            self.state_decision_event
-                .trigger(self.best_foreign.received_on_port(), e_rbest);
-        }
+        let current = self.best_foreign.snapshot();
+        self.state_decision_trigger.gated_trigger(current);
     }
 
     /// Return a decision while suppressing identical master decisions.
@@ -432,7 +450,7 @@ pub(crate) struct ParentTrackingBmca<'a, S: ForeignClockRecords> {
     bmca: BestMasterClockAlgorithm<'a>,
     best_foreign: BestForeignRecord<S>,
     parent_port_identity: ParentPortIdentity,
-    state_decision_event: &'a dyn StateDecisionEvent,
+    state_decision_trigger: StateDecisionEventTrigger<'a>,
 }
 
 impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
@@ -440,13 +458,13 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
         bmca: BestMasterClockAlgorithm<'a>,
         best_foreign: BestForeignRecord<S>,
         parent_port_identity: ParentPortIdentity,
-        state_decision_event: &'a dyn StateDecisionEvent,
+        state_decision_trigger: StateDecisionEventTrigger<'a>,
     ) -> Self {
         Self {
             bmca,
             best_foreign,
             parent_port_identity,
-            state_decision_event,
+            state_decision_trigger,
         }
     }
 
@@ -473,19 +491,24 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
             self.bmca,
             self.best_foreign,
             grandmaster_id,
-            self.state_decision_event,
+            self.state_decision_trigger,
         )
     }
 
     /// Convert to a GrandMasterTrackingBmca that tracks the currently known grandmaster.
-    pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<'a, S> {
+    ///
+    /// Triggers a state decision event before converting to ensure the clock is notified
+    /// of the current best foreign snapshot.
+    pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<'a, S> {
+        let current = self.best_foreign.snapshot();
+        self.state_decision_trigger.trigger(current);
         let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 
     /// Convert to a PassiveBmca for transitioning to passive state.
     pub(crate) fn into_passive(self) -> PassiveBmca<'a, S> {
-        PassiveBmca::new(self.bmca, self.best_foreign, self.state_decision_event)
+        PassiveBmca::new(self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 
     /// Decompose ParentTrackingBmca into its parts.
@@ -494,17 +517,9 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
     ) -> (
         BestMasterClockAlgorithm<'a>,
         BestForeignRecord<S>,
-        &'a dyn StateDecisionEvent,
+        StateDecisionEventTrigger<'a>,
     ) {
-        (self.bmca, self.best_foreign, self.state_decision_event)
-    }
-
-    /// Trigger a state decision event.
-    pub(crate) fn trigger_state_decision_event(&self) {
-        self.state_decision_event.trigger(
-            self.best_foreign.received_on_port(),
-            self.best_foreign.snapshot(),
-        );
+        (self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 }
 
@@ -516,16 +531,14 @@ impl<'a, S: ForeignClockRecords> Bmca for ParentTrackingBmca<'a, S> {
         log_announce_interval: LogInterval,
         now: Instant,
     ) {
-        let result = self.best_foreign.consider(
+        self.best_foreign.consider(
             source_port_identity,
             foreign_clock_ds,
             log_announce_interval,
             now,
         );
-        if let Some(e_rbest) = result {
-            self.state_decision_event
-                .trigger(self.best_foreign.received_on_port(), e_rbest);
-        }
+        let current = self.best_foreign.snapshot();
+        self.state_decision_trigger.gated_trigger(current);
     }
 
     /// Return a decision while suppressing identical decisions with the same parent.
@@ -558,19 +571,19 @@ impl<'a, S: ForeignClockRecords> Bmca for ParentTrackingBmca<'a, S> {
 pub(crate) struct PassiveBmca<'a, S: ForeignClockRecords> {
     bmca: BestMasterClockAlgorithm<'a>,
     best_foreign: BestForeignRecord<S>,
-    state_decision_event: &'a dyn StateDecisionEvent,
+    state_decision_trigger: StateDecisionEventTrigger<'a>,
 }
 
 impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
     pub fn new(
         bmca: BestMasterClockAlgorithm<'a>,
         best_foreign: BestForeignRecord<S>,
-        state_decision_event: &'a dyn StateDecisionEvent,
+        state_decision_trigger: StateDecisionEventTrigger<'a>,
     ) -> Self {
         Self {
             bmca,
             best_foreign,
-            state_decision_event,
+            state_decision_trigger,
         }
     }
 
@@ -583,7 +596,7 @@ impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
             self.bmca,
             self.best_foreign,
             parent_port_identity,
-            self.state_decision_event,
+            self.state_decision_trigger,
         )
     }
 
@@ -596,12 +609,17 @@ impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
             self.bmca,
             self.best_foreign,
             grandmaster_id,
-            self.state_decision_event,
+            self.state_decision_trigger,
         )
     }
 
     /// Convert to a GrandMasterTrackingBmca that tracks the currently known grandmaster.
-    pub(crate) fn into_current_grandmaster_tracking(self) -> GrandMasterTrackingBmca<'a, S> {
+    ///
+    /// Triggers a state decision event before converting to ensure the clock is notified
+    /// of the current best foreign snapshot.
+    pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<'a, S> {
+        let current = self.best_foreign.snapshot();
+        self.state_decision_trigger.trigger(current);
         let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
@@ -612,17 +630,9 @@ impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
     ) -> (
         BestMasterClockAlgorithm<'a>,
         BestForeignRecord<S>,
-        &'a dyn StateDecisionEvent,
+        StateDecisionEventTrigger<'a>,
     ) {
-        (self.bmca, self.best_foreign, self.state_decision_event)
-    }
-
-    /// Trigger a state decision event.
-    pub(crate) fn trigger_state_decision_event(&self) {
-        self.state_decision_event.trigger(
-            self.best_foreign.received_on_port(),
-            self.best_foreign.snapshot(),
-        );
+        (self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 }
 
@@ -634,16 +644,14 @@ impl<'a, S: ForeignClockRecords> Bmca for PassiveBmca<'a, S> {
         log_announce_interval: LogInterval,
         now: Instant,
     ) {
-        let result = self.best_foreign.consider(
+        self.best_foreign.consider(
             source_port_identity,
             foreign_clock_ds,
             log_announce_interval,
             now,
         );
-        if let Some(e_rbest) = result {
-            self.state_decision_event
-                .trigger(self.best_foreign.received_on_port(), e_rbest);
-        }
+        let current = self.best_foreign.snapshot();
+        self.state_decision_trigger.gated_trigger(current);
     }
 
     /// Return a decision while suppressing passive decisions.
@@ -1458,10 +1466,131 @@ mod tests {
     use crate::clock::LocalClock;
     use crate::infra::infra_support::{ForeignClockRecordsVec, MultiPortForeignCandidates};
     use crate::log::NOOP_CLOCK_METRICS;
-    use crate::port::PortNumber;
+    use crate::port::{PortIdentity, PortNumber};
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakeStateDecisionEvent, TestClockDS};
     use crate::time::{Duration, Instant};
+
+    #[test]
+    fn trigger_always_fires_and_uses_received_on_port() {
+        let event = FakeStateDecisionEvent::new();
+        let mut trigger =
+            StateDecisionEventTrigger::new(&event, BestForeignSnapshot::Empty, PortNumber::new(2));
+        let snapshot = BestForeignSnapshot::Qualified {
+            ds: TestClockDS::default_high_grade().dataset(),
+            source_port_identity: PortIdentity::fake(),
+            received_on_port: PortNumber::new(2),
+        };
+
+        trigger.trigger(snapshot);
+
+        let events = event.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, PortNumber::new(2));
+        assert_eq!(events[0].1, snapshot);
+    }
+
+    #[test]
+    fn trigger_updates_state_so_gated_trigger_same_snapshot_does_not_fire_again() {
+        let event = FakeStateDecisionEvent::new();
+        let mut trigger =
+            StateDecisionEventTrigger::new(&event, BestForeignSnapshot::Empty, PortNumber::new(1));
+        let snapshot = BestForeignSnapshot::Qualified {
+            ds: TestClockDS::default_high_grade().dataset(),
+            source_port_identity: PortIdentity::fake(),
+            received_on_port: PortNumber::new(1),
+        };
+
+        trigger.trigger(snapshot);
+        trigger.gated_trigger(snapshot);
+
+        let events = event.take_events();
+        assert_eq!(
+            events.len(),
+            1,
+            "gated_trigger(same) must not produce a redundant event"
+        );
+    }
+
+    #[test]
+    fn gated_trigger_fires_only_when_snapshot_changes() {
+        let event = FakeStateDecisionEvent::new();
+        let mut trigger =
+            StateDecisionEventTrigger::new(&event, BestForeignSnapshot::Empty, PortNumber::new(1));
+
+        trigger.gated_trigger(BestForeignSnapshot::Empty);
+        trigger.gated_trigger(BestForeignSnapshot::Empty);
+
+        let events = event.take_events();
+        assert_eq!(
+            events.len(),
+            0,
+            "identical Empty snapshots must not trigger"
+        );
+    }
+
+    #[test]
+    fn gated_trigger_fires_when_snapshot_changes() {
+        let event = FakeStateDecisionEvent::new();
+        let mut trigger =
+            StateDecisionEventTrigger::new(&event, BestForeignSnapshot::Empty, PortNumber::new(1));
+        let snapshot = BestForeignSnapshot::Qualified {
+            ds: TestClockDS::default_high_grade().dataset(),
+            source_port_identity: PortIdentity::fake(),
+            received_on_port: PortNumber::new(1),
+        };
+
+        trigger.gated_trigger(BestForeignSnapshot::Empty);
+        trigger.gated_trigger(snapshot);
+
+        let events = event.take_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1, snapshot);
+    }
+
+    #[test]
+    fn gated_trigger_second_call_with_same_value_does_not_fire() {
+        let event = FakeStateDecisionEvent::new();
+        let mut trigger =
+            StateDecisionEventTrigger::new(&event, BestForeignSnapshot::Empty, PortNumber::new(1));
+        let snapshot = BestForeignSnapshot::Qualified {
+            ds: TestClockDS::default_high_grade().dataset(),
+            source_port_identity: PortIdentity::fake(),
+            received_on_port: PortNumber::new(1),
+        };
+
+        trigger.gated_trigger(snapshot);
+        trigger.gated_trigger(snapshot);
+
+        let events = event.take_events();
+        assert_eq!(events.len(), 1, "second gated_trigger(same) must not fire");
+    }
+
+    #[test]
+    fn trigger_methods_update_state_consistently() {
+        let event = FakeStateDecisionEvent::new();
+        let mut trigger =
+            StateDecisionEventTrigger::new(&event, BestForeignSnapshot::Empty, PortNumber::new(1));
+        let snapshot_a = BestForeignSnapshot::Qualified {
+            ds: TestClockDS::default_high_grade().dataset(),
+            source_port_identity: PortIdentity::fake(),
+            received_on_port: PortNumber::new(1),
+        };
+        let snapshot_b = BestForeignSnapshot::Empty;
+
+        trigger.trigger(snapshot_a);
+        trigger.gated_trigger(snapshot_a);
+        trigger.gated_trigger(snapshot_b);
+
+        let events = event.take_events();
+        assert_eq!(
+            events.len(),
+            2,
+            "trigger(snap_a) and gated_trigger(snap_b) should fire; gated_trigger(snap_a) should not"
+        );
+        assert_eq!(events[0].1, snapshot_a);
+        assert_eq!(events[1].1, snapshot_b);
+    }
 
     #[test]
     fn grandmaster_tracking_bmca_gates_when_grandmaster_id_matches() {
@@ -1477,7 +1606,11 @@ mod tests {
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
             *local_clock.identity(),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         assert_eq!(bmca.decision(&BestForeignSnapshot::Empty), None);
@@ -1493,7 +1626,11 @@ mod tests {
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
             other_grandmaster_id,
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         assert!(matches!(
@@ -1531,7 +1668,11 @@ mod tests {
                 ForeignClockRecordsVec::from_records(&records),
             ),
             *local_clock.identity(),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         assert_eq!(
@@ -1569,7 +1710,11 @@ mod tests {
                 ForeignClockRecordsVec::from_records(&records),
             ),
             *local_clock.identity(),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         // In a single-port scenario, e_best equals e_rbest (the qualified record on this port)
@@ -1937,7 +2082,11 @@ mod tests {
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), records),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
         bmca.consider(
             gm_port_id,
@@ -1980,7 +2129,11 @@ mod tests {
         let bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         assert_eq!(bmca.decision(&BestForeignSnapshot::Empty), None);
@@ -1993,7 +2146,11 @@ mod tests {
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         // Foreign uses lower priority1 so it is better, even though clock class is worse.
@@ -2028,7 +2185,11 @@ mod tests {
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         // Foreign is worse (higher priority1), so local GM-capable should become Master(M1).
@@ -2059,7 +2220,11 @@ mod tests {
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         // Foreign is slightly worse quality; local should be better and take M2.
@@ -2089,7 +2254,11 @@ mod tests {
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         let foreign = TestClockDS::default_high_grade().dataset();
@@ -2120,7 +2289,11 @@ mod tests {
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         let high = TestClockDS::default_high_grade();
@@ -2178,7 +2351,11 @@ mod tests {
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         let high = TestClockDS::default_high_grade();
@@ -2236,7 +2413,11 @@ mod tests {
         let bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         assert_eq!(bmca.decision(&BestForeignSnapshot::Empty), None);
@@ -2249,7 +2430,11 @@ mod tests {
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         let foreign_high = TestClockDS::default_high_grade().dataset();
@@ -2271,7 +2456,11 @@ mod tests {
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new()),
-            &state_decision_event,
+            StateDecisionEventTrigger::new(
+                &state_decision_event,
+                BestForeignSnapshot::Empty,
+                PortNumber::new(1),
+            ),
         );
 
         let high = TestClockDS::default_high_grade();

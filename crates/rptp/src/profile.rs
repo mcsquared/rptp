@@ -13,7 +13,8 @@
 
 use crate::bmca::{
     BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, GrandMasterTrackingBmca,
-    ListeningBmca, ParentTrackingBmca, PassiveBmca, QualificationTimeoutPolicy, StateDecisionEvent,
+    ListeningBmca, ParentTrackingBmca, PassiveBmca, QualificationTimeoutPolicy,
+    StateDecisionEventTrigger,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::faulty::FaultyPort;
@@ -94,13 +95,13 @@ impl PortProfile {
         port: P,
         bmca: BestMasterClockAlgorithm<'a>,
         best_foreign: BestForeignRecord<S>,
-        state_decision_event: &'a dyn StateDecisionEvent,
+        state_decision_trigger: StateDecisionEventTrigger<'a>,
     ) -> PortState<'a, P, S> {
         PortState::Initializing(InitializingPort::new(
             port,
             bmca,
             best_foreign,
-            state_decision_event,
+            state_decision_trigger,
             self,
         ))
     }
@@ -237,13 +238,13 @@ impl PortProfile {
         port: P,
         bmca: BestMasterClockAlgorithm<'a>,
         best_foreign: BestForeignRecord<S>,
-        state_decision_event: &'a dyn StateDecisionEvent,
+        state_decision_trigger: StateDecisionEventTrigger<'a>,
     ) -> PortState<'a, P, S> {
         PortState::Faulty(FaultyPort::new(
             port,
             bmca,
             best_foreign,
-            state_decision_event,
+            state_decision_trigger,
             self,
         ))
     }

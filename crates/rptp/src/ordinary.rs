@@ -14,7 +14,7 @@ use core::cell::{Cell, RefCell};
 
 use crate::bmca::{
     BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS, ForeignClockRecords,
-    ForeignGrandMasterCandidates, StateDecisionEvent,
+    ForeignGrandMasterCandidates, StateDecisionEvent, StateDecisionEventTrigger,
 };
 use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
@@ -137,8 +137,10 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
         let bmca = BestMasterClockAlgorithm::new(default_ds, port_number);
 
         let best_foreign = BestForeignRecord::new(port_number, foreign_clock_records);
+        let state_decision_trigger =
+            StateDecisionEventTrigger::new(self, best_foreign.snapshot(), port_number);
 
-        PortProfile::default().initializing(domain_port, bmca, best_foreign, self)
+        PortProfile::default().initializing(domain_port, bmca, best_foreign, state_decision_trigger)
     }
 }
 

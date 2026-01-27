@@ -202,8 +202,9 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
     }
 
     pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
-        let (bmca, best_foreign, sde) = self.bmca.into_parts();
-        self.profile.faulty(self.port, bmca, best_foreign, sde)
+        let (bmca, best_foreign, state_decision_trigger) = self.bmca.into_parts();
+        self.profile
+            .faulty(self.port, bmca, best_foreign, state_decision_trigger)
     }
 }
 
@@ -292,7 +293,7 @@ mod tests {
 
     use crate::bmca::{
         BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
-        ForeignClockRecord, GrandMasterTrackingBmca,
+        ForeignClockRecord, GrandMasterTrackingBmca, StateDecisionEventTrigger,
     };
     use crate::clock::{LocalClock, TimeScale};
     use crate::infra::infra_support::ForeignClockRecordsVec;
@@ -372,15 +373,19 @@ mod tests {
             // Initialize initial state from the provided records
             let best_foreign_record =
                 BestForeignRecord::new(port_number, ForeignClockRecordsVec::from_records(records));
-            let current_e_rbest_snapshot = best_foreign_record.snapshot();
+            let state_decision_trigger = StateDecisionEventTrigger::new(
+                &self.state_decision_event,
+                best_foreign_record.snapshot(),
+                port_number,
+            );
 
             MasterPort::new(
                 domain_port,
                 GrandMasterTrackingBmca::new(
                     BestMasterClockAlgorithm::new(&self.default_ds, port_number),
-                    best_foreign_record.with_current_e_rbest(current_e_rbest_snapshot),
+                    best_foreign_record,
                     grandmaster_id,
-                    &self.state_decision_event,
+                    state_decision_trigger,
                 ),
                 announce_cycle,
                 sync_cycle,

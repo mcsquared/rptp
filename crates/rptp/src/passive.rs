@@ -105,7 +105,6 @@ impl<'a, P: Port, S: ForeignClockRecords> PassivePort<'a, P, S> {
     /// single-port setups) resolves to the local grandmaster identity.
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
-        self.bmca.trigger_state_decision_event();
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
@@ -129,8 +128,9 @@ impl<'a, P: Port, S: ForeignClockRecords> PassivePort<'a, P, S> {
 
     /// Transition to `FAULTY` upon fault detection.
     pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
-        let (bmca, best_foreign, sde) = self.bmca.into_parts();
-        self.profile.faulty(self.port, bmca, best_foreign, sde)
+        let (bmca, best_foreign, state_decision_trigger) = self.bmca.into_parts();
+        self.profile
+            .faulty(self.port, bmca, best_foreign, state_decision_trigger)
     }
 
     /// Process a state decision event.
@@ -151,7 +151,7 @@ mod tests {
 
     use crate::bmca::{
         BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
-        ForeignClockRecord, PassiveBmca,
+        ForeignClockRecord, PassiveBmca, StateDecisionEventTrigger,
     };
     use crate::clock::{LocalClock, TimeScale};
     use crate::infra::infra_support::ForeignClockRecordsVec;
@@ -215,14 +215,18 @@ mod tests {
             // Initialize initial state from the provided records
             let best_foreign_record =
                 BestForeignRecord::new(port_number, ForeignClockRecordsVec::from_records(records));
-            let current_e_rbest_snapshot = best_foreign_record.snapshot();
+            let state_decision_trigger = StateDecisionEventTrigger::new(
+                &self.state_decision_event,
+                best_foreign_record.snapshot(),
+                port_number,
+            );
 
             PassivePort::new(
                 domain_port,
                 PassiveBmca::new(
                     BestMasterClockAlgorithm::new(&self.default_ds, port_number),
-                    best_foreign_record.with_current_e_rbest(current_e_rbest_snapshot),
-                    &self.state_decision_event,
+                    best_foreign_record,
+                    state_decision_trigger,
                 ),
                 announce_receipt_timeout,
                 PortProfile::default(),

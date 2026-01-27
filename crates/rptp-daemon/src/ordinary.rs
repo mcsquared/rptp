@@ -56,11 +56,6 @@ impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
         self.ordinary_clock.domain_number()
     }
 
-    /// Return the configured port number.
-    pub fn port_number(&self) -> PortNumber {
-        self.ordinary_clock.port_number()
-    }
-
     /// Create a fully wired port state machine for this ordinary clock.
     ///
     /// The returned port:

@@ -18,7 +18,7 @@ use std::cell::Cell;
 
 use crate::bmca::{
     BestForeignSnapshot, ClockDS, GrandMasterTrackingBmca, ParentTrackingBmca, Priority1,
-    Priority2, StateDecisionEvent,
+    Priority2, StateDecisionEvent, StateDecisionEventTrigger,
 };
 use crate::clock::{
     Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved,
@@ -321,17 +321,21 @@ impl SynchronizableClock for FakeClock {
 /// [`PortState::Master`] built via the provided [`PortProfile`].
 pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
     port: P,
+    port_number: PortNumber,
     local_candidate: &'a dyn LocalGrandMasterCandidate,
     foreign_clock_records: S,
     state_decision_event: &'a dyn StateDecisionEvent,
     profile: PortProfile,
 ) -> PortState<'a, P, S> {
     let grandmaster_id = *port.local_clock().identity();
+    let best_foreign = BestForeignRecord::new(port_number, foreign_clock_records);
+    let state_decision_trigger =
+        StateDecisionEventTrigger::new(state_decision_event, best_foreign.snapshot(), port_number);
     let bmca = GrandMasterTrackingBmca::new(
-        BestMasterClockAlgorithm::new(local_candidate, PortNumber::new(1)),
-        BestForeignRecord::new(PortNumber::new(1), foreign_clock_records),
+        BestMasterClockAlgorithm::new(local_candidate, port_number),
+        best_foreign,
         grandmaster_id,
-        state_decision_event,
+        state_decision_trigger,
     );
     profile.master(port, bmca)
 }
@@ -342,17 +346,21 @@ pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
 /// timeout is started immediately so tests can drive `DelayRequestTimeout` behaviour.
 pub fn slave_test_port<'a, P: Port, S: ForeignClockRecords>(
     port: P,
+    port_number: PortNumber,
     local_candidate: &'a dyn LocalGrandMasterCandidate,
     foreign_clock_records: S,
     state_decision_event: &'a dyn StateDecisionEvent,
     parent_port_identity: ParentPortIdentity,
     profile: PortProfile,
 ) -> PortState<'a, P, S> {
+    let best_foreign = BestForeignRecord::new(port_number, foreign_clock_records);
+    let state_decision_trigger =
+        StateDecisionEventTrigger::new(state_decision_event, best_foreign.snapshot(), port_number);
     let bmca = ParentTrackingBmca::new(
-        BestMasterClockAlgorithm::new(local_candidate, PortNumber::new(1)),
-        BestForeignRecord::new(PortNumber::new(1), foreign_clock_records),
+        BestMasterClockAlgorithm::new(local_candidate, port_number),
+        best_foreign,
         parent_port_identity,
-        state_decision_event,
+        state_decision_trigger,
     );
     let delay_timeout = port.timeout(SystemMessage::DelayRequestTimeout);
     delay_timeout.restart(Duration::from_secs(0));

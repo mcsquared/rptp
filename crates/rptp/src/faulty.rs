@@ -8,7 +8,7 @@
 //!   re-initialize the port when the fault is cleared.
 
 use crate::bmca::{
-    BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, StateDecisionEvent,
+    BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, StateDecisionEventTrigger,
 };
 use crate::log::PortEvent;
 use crate::port::Port;
@@ -25,7 +25,7 @@ pub struct FaultyPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: BestMasterClockAlgorithm<'a>,
     best_foreign: BestForeignRecord<S>,
-    state_decision_event: &'a dyn StateDecisionEvent,
+    state_decision_trigger: StateDecisionEventTrigger<'a>,
     profile: PortProfile,
 }
 
@@ -34,7 +34,7 @@ impl<'a, P: Port, S: ForeignClockRecords> FaultyPort<'a, P, S> {
         port: P,
         bmca: BestMasterClockAlgorithm<'a>,
         best_foreign: BestForeignRecord<S>,
-        state_decision_event: &'a dyn StateDecisionEvent,
+        state_decision_trigger: StateDecisionEventTrigger<'a>,
         profile: PortProfile,
     ) -> Self {
         port.log(PortEvent::Static("Become FaultyPort"));
@@ -43,7 +43,7 @@ impl<'a, P: Port, S: ForeignClockRecords> FaultyPort<'a, P, S> {
             port,
             bmca,
             best_foreign,
-            state_decision_event,
+            state_decision_trigger,
             profile,
         }
     }
@@ -53,7 +53,7 @@ impl<'a, P: Port, S: ForeignClockRecords> FaultyPort<'a, P, S> {
             self.port,
             self.bmca,
             self.best_foreign,
-            self.state_decision_event,
+            self.state_decision_trigger,
         )
     }
 }
