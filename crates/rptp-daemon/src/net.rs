@@ -5,13 +5,17 @@
 //!
 //! [`MulticastSocket`] binds UDP port 319 (event) or 320 (general) and joins the standard PTPv2
 //! IPv4 multicast group (`224.0.1.129`) with TTL 1 and multicast loopback disabled.
+//!
+//! [`LoopbackSocket`] provides an in-memory pair of sockets for demos and tests: sends on one
+//! are received on the other, with no real network I/O.
 
-use std::future::Future;
+use std::future::{Future, pending};
 use std::io::Result;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::rc::Rc;
 
 use tokio::net::UdpSocket;
+use tokio::sync::{Mutex, mpsc};
 
 /// Minimal async UDP socket interface used by the daemon IO loop.
 ///
@@ -82,6 +86,65 @@ impl NetworkSocket for MulticastSocket {
     fn try_send(&self, bytes: &[u8]) -> Result<usize> {
         let dest = SocketAddr::V4(self.dest);
         self.socket.try_send_to(bytes, dest)
+    }
+}
+
+/// In-memory socket pair for demos and in-process tests.
+///
+/// `pair()` returns two sockets: bytes sent on one are received on the other. Uses channels
+/// under the hood, so no real network I/O. Useful for multi-node scenarios (e.g. GM and slave,
+/// or boundary clock topologies) without binding to multicast or multiple interfaces.
+#[derive(Debug)]
+pub struct LoopbackSocket {
+    rx: Mutex<mpsc::UnboundedReceiver<Vec<u8>>>,
+    tx: mpsc::UnboundedSender<Vec<u8>>,
+}
+
+impl LoopbackSocket {
+    /// Create a connected pair. Sends on the first are received on the second, and vice versa.
+    pub fn pair() -> (Self, Self) {
+        let (a_tx, a_rx) = mpsc::unbounded_channel();
+        let (b_tx, b_rx) = mpsc::unbounded_channel();
+
+        let a = LoopbackSocket {
+            rx: Mutex::new(a_rx),
+            tx: b_tx,
+        };
+        let b = LoopbackSocket {
+            rx: Mutex::new(b_rx),
+            tx: a_tx,
+        };
+        (a, b)
+    }
+}
+
+impl NetworkSocket for LoopbackSocket {
+    async fn recv(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
+        loop {
+            let mut rx = self.rx.lock().await;
+            if let Some(msg) = rx.recv().await {
+                let len = msg.len().min(buf.len());
+                buf[..len].copy_from_slice(&msg[..len]);
+                return Ok((
+                    len,
+                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
+                ));
+            } else {
+                // Peer gone: park until task is cancelled by shutdown/ctrl-C.
+                pending::<()>().await;
+            }
+        }
+    }
+
+    async fn send(&self, bytes: &[u8]) -> Result<usize> {
+        self.try_send(bytes)
+    }
+
+    fn try_send(&self, bytes: &[u8]) -> Result<usize> {
+        let len = bytes.len();
+        // Best-effort: drop silently if receiver has gone away.
+        let _ = self.tx.send(bytes.to_vec());
+        Ok(len)
     }
 }
 

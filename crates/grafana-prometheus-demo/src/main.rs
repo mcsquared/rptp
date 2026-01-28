@@ -1,4 +1,3 @@
-mod loopback;
 mod metrics;
 mod node;
 
@@ -11,8 +10,8 @@ use rptp::port::DomainNumber;
 use rptp::profile::PortProfile;
 use rptp::servo::{Drift, ServoThreshold};
 use rptp::time::{TimeInterval, TimeStamp};
+use rptp_daemon::net::LoopbackSocket;
 
-use crate::loopback::LoopbackSocket;
 use crate::metrics::run_metrics_server;
 use crate::node::{PiServoConfig, PrometheusNode, PrometheusNodeConfig};
 
