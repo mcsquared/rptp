@@ -201,3 +201,17 @@ impl NetworkSocket for Rc<FakeNetworkSocket> {
         self.as_ref().try_send(bytes)
     }
 }
+
+impl NetworkSocket for Rc<LoopbackSocket> {
+    async fn recv(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
+        self.as_ref().recv(buf).await
+    }
+
+    async fn send(&self, bytes: &[u8]) -> Result<usize> {
+        self.as_ref().send(bytes).await
+    }
+
+    fn try_send(&self, bytes: &[u8]) -> Result<usize> {
+        self.as_ref().try_send(bytes)
+    }
+}

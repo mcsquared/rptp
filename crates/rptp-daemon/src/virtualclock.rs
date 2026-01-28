@@ -19,7 +19,7 @@
 //! `adjust()` calls. If a computed value would overflow the representable [`TimeStamp`] range,
 //! the implementation falls back to returning the current base timestamp.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant as StdInstant;
 
 use rptp::{
@@ -116,6 +116,31 @@ impl SynchronizableClock for &VirtualClock {
 
     fn adjust(&self, rate: f64) {
         (*self).adjust(rate)
+    }
+}
+
+/// Shared ownership of a [`VirtualClock`] for use where [`SynchronizableClock`] is needed with
+/// owned types (e.g. [`LocalClock`], [`OrdinaryTokioClock`]).
+#[derive(Clone)]
+pub struct SharedVirtualClock(pub Arc<VirtualClock>);
+
+impl Clock for SharedVirtualClock {
+    fn now(&self) -> TimeStamp {
+        self.0.now()
+    }
+
+    fn time_scale(&self) -> TimeScale {
+        self.0.time_scale()
+    }
+}
+
+impl SynchronizableClock for SharedVirtualClock {
+    fn step(&self, to: TimeStamp) {
+        self.0.step(to)
+    }
+
+    fn adjust(&self, rate: f64) {
+        self.0.adjust(rate)
     }
 }
 
