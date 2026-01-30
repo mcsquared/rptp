@@ -17,7 +17,7 @@ use rptp::{
     infra::infra_support::ForeignClockRecordsVec,
     message::SystemMessage,
     ordinary::OrdinaryClock,
-    port::{DomainNumber, DomainPort, PortIdentity, PortNumber},
+    port::{DomainNumber, DomainPort},
     portstate::PortState,
     timestamping::TxTimestamping,
 };
@@ -39,15 +39,14 @@ pub struct OrdinaryTokioClock<C: SynchronizableClock> {
 }
 
 impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
-    /// Create a new ordinary clock for a specific domain and port number.
+    /// Create a new ordinary clock for a specific domain.
     pub fn new(
         local_clock: LocalClock<C>,
         default_ds: ClockDS,
         domain_number: DomainNumber,
-        port_number: PortNumber,
     ) -> Self {
         OrdinaryTokioClock {
-            ordinary_clock: OrdinaryClock::new(local_clock, default_ds, domain_number, port_number),
+            ordinary_clock: OrdinaryClock::new(local_clock, default_ds, domain_number),
         }
     }
 
@@ -58,6 +57,7 @@ impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
 
     /// Create a fully wired port state machine for this ordinary clock.
     ///
+    /// Returns `Some(port)` the first time (the clock's single port) and `None` if called again.
     /// The returned port:
     /// - uses the provided `physical_port` for UDP transmission,
     /// - schedules timeouts by sending `(DomainNumber, SystemMessage)` through `system_tx`, and
@@ -67,7 +67,7 @@ impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
         physical_port: &'a TokioPhysicalPort<N>,
         system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
         timestamping: T,
-    ) -> TokioPort<'a, C, T>
+    ) -> Option<TokioPort<'a, C, T>>
     where
         N: NetworkSocket,
         T: TxTimestamping,
@@ -76,10 +76,7 @@ impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
             physical_port,
             TokioTimerHost::new(self.ordinary_clock.domain_number(), system_tx.clone()),
             timestamping,
-            TracingPortLog::new(PortIdentity::new(
-                *self.ordinary_clock.local_clock().identity(),
-                self.ordinary_clock.port_number(),
-            )),
+            TracingPortLog::new(),
             ForeignClockRecordsVec::new(),
         )
     }

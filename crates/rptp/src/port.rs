@@ -3,6 +3,7 @@
 //! This module defines the core port-facing adapter surfaces of `rptp`:
 //!
 //! - identity and addressing types ([`PortIdentity`], [`DomainNumber`], [`PortNumber`]),
+//! - port enumeration for sequential port creation ([`PortEnumeration`]),
 //! - the domain port boundary ([`Port`]) and its supporting infrastructure traits
 //!   ([`PhysicalPort`], [`TimerHost`], [`Timeout`], [`TxTimestamping`](crate::timestamping::TxTimestamping)),
 //! - the ingress surface that `MessageIngress` dispatches into ([`PortIngress`], [`PortMap`]),
@@ -158,6 +159,53 @@ impl From<u16> for PortNumber {
 impl From<PortNumber> for u16 {
     fn from(value: PortNumber) -> Self {
         value.0
+    }
+}
+
+/// Consecutive sequence of port numbers 1..=N for exhaustive port creation.
+///
+/// Yields each port number at most once via [`next`](PortEnumeration::next). Once exhausted,
+/// `next()` returns `None`, so a clock cannot hand out more ports than it has.
+#[derive(Debug, Clone)]
+pub struct PortEnumeration {
+    /// Number of ports (1..=count).
+    count: u16,
+    /// Next port index to yield (1-based). When next > count, enumeration is exhausted.
+    next: u16,
+}
+
+impl PortEnumeration {
+    /// Create an enumeration of ports 1..=n.
+    ///
+    /// # Panics
+    /// Panics if `n` is zero (a clock must have at least one port).
+    pub fn sequential(n: u16) -> Self {
+        assert!(n >= 1, "PortEnumeration must have at least one port");
+        Self { count: n, next: 1 }
+    }
+
+    /// Create an enumeration of a single port (port number 1).
+    pub fn single() -> Self {
+        Self::sequential(1)
+    }
+}
+
+impl Iterator for PortEnumeration {
+    type Item = PortNumber;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next <= self.count {
+            let n = self.next;
+            self.next += 1;
+            Some(PortNumber::new(n))
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = (self.count.saturating_sub(self.next - 1)) as usize;
+        (remaining, Some(remaining))
     }
 }
 
@@ -357,7 +405,8 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> P
     }
 
     fn log(&self, event: PortEvent) {
-        self.log.port_event(event);
+        let port_identity = PortIdentity::new(*self.local_clock.identity(), self.port_number);
+        self.log.port_event(port_identity, event);
     }
 }
 
@@ -616,5 +665,28 @@ mod tests {
             &bytes[20..30],
             &crate::port::PortIdentity::new(identity, port_number).to_wire()
         );
+    }
+
+    #[test]
+    fn port_enumeration_sequential_yields_1_to_n() {
+        let mut e = PortEnumeration::sequential(3);
+        assert_eq!(e.next(), Some(PortNumber::new(1)));
+        assert_eq!(e.next(), Some(PortNumber::new(2)));
+        assert_eq!(e.next(), Some(PortNumber::new(3)));
+        assert_eq!(e.next(), None);
+        assert_eq!(e.next(), None);
+    }
+
+    #[test]
+    fn port_enumeration_single_yields_one_then_none() {
+        let mut e = PortEnumeration::single();
+        assert_eq!(e.next(), Some(PortNumber::new(1)));
+        assert_eq!(e.next(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "at least one port")]
+    fn port_enumeration_sequential_zero_panics() {
+        _ = PortEnumeration::sequential(0);
     }
 }

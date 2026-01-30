@@ -10,58 +10,52 @@ use rptp::{log::PortEvent, log::PortLog, port::PortIdentity};
 ///
 /// This is a simple “human readable” sink intended for the daemon binary and tests. It preserves
 /// the port identity as context and maps events to `info`/`warn`/`debug` levels.
-#[derive(Clone, Copy, Debug)]
-pub struct TracingPortLog {
-    port_identity: PortIdentity,
-}
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TracingPortLog;
 
 impl TracingPortLog {
-    /// Create a tracing log sink for a specific port.
-    pub fn new(port_identity: PortIdentity) -> Self {
-        Self { port_identity }
+    /// Create a tracing log sink.
+    pub fn new() -> Self {
+        Self
     }
 }
 
 impl PortLog for TracingPortLog {
-    fn port_event(&self, event: PortEvent) {
+    fn port_event(&self, port_identity: PortIdentity, event: PortEvent) {
         match event {
             PortEvent::Initialized => {
-                tracing::info!("{}: Initialized", self.port_identity);
+                tracing::info!("{}: Initialized", port_identity);
             }
             PortEvent::RecommendedSlave { parent } => {
-                tracing::info!(
-                    "{}: Recommended Slave, parent {}",
-                    self.port_identity,
-                    parent
-                );
+                tracing::info!("{}: Recommended Slave, parent {}", port_identity, parent);
             }
             PortEvent::RecommendedMaster => {
-                tracing::info!("{}: Recommended Master", self.port_identity);
+                tracing::info!("{}: Recommended Master", port_identity);
             }
             PortEvent::MasterClockSelected { parent } => {
                 tracing::info!(
                     "{}: Master Clock Selected, parent {}",
-                    self.port_identity,
+                    port_identity,
                     parent
                 );
             }
             PortEvent::AnnounceReceiptTimeout => {
-                tracing::info!("{}: Announce Receipt Timeout", self.port_identity);
+                tracing::info!("{}: Announce Receipt Timeout", port_identity);
             }
             PortEvent::QualifiedMaster => {
-                tracing::info!("{}: Qualified Master", self.port_identity);
+                tracing::info!("{}: Qualified Master", port_identity);
             }
             PortEvent::SynchronizationFault => {
-                tracing::warn!("{}: Synchronization Fault", self.port_identity);
+                tracing::warn!("{}: Synchronization Fault", port_identity);
             }
             PortEvent::MessageReceived(msg) => {
-                tracing::debug!("{}: Message Received: {}", self.port_identity, msg);
+                tracing::debug!("{}: Message Received: {}", port_identity, msg);
             }
             PortEvent::MessageSent(msg) => {
-                tracing::debug!("{}: Message Sent: {}", self.port_identity, msg);
+                tracing::debug!("{}: Message Sent: {}", port_identity, msg);
             }
             PortEvent::Static(desc) => {
-                tracing::info!("{}: {}", self.port_identity, desc);
+                tracing::info!("{}: {}", port_identity, desc);
             }
         }
     }

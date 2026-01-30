@@ -30,7 +30,6 @@ async fn main() -> std::io::Result<()> {
     let slave_gen_sock = Rc::new(slave_gen_sock);
 
     let master_config = PrometheusNodeConfig {
-        port_number: 1.into(),
         clock_start: TimeStamp::new(2, 0),
         clock_rate: 1.0,
         default_ds: ClockDS::new(
@@ -63,7 +62,6 @@ async fn main() -> std::io::Result<()> {
     };
 
     let slave_config = PrometheusNodeConfig {
-        port_number: 2.into(),
         clock_start: TimeStamp::new(0, 0),
         clock_rate: 1.0,
         default_ds: ClockDS::new(

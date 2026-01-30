@@ -468,13 +468,12 @@ mod tests {
             let (system_tx, system_rx) = mpsc::unbounded_channel();
             let tx_timestamping = FakeTimestamping::new();
             let port_number = PortNumber::new(1);
-            let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
             let domain_port = Box::new(DomainPort::new(
                 local_clock,
                 physical_port,
                 TokioTimerHost::new(domain_number, system_tx.clone()),
                 tx_timestamping,
-                TracingPortLog::new(port_identity),
+                TracingPortLog::new(),
                 domain_number,
                 port_number,
             ));
@@ -606,13 +605,12 @@ mod tests {
             ClockTxTimestamping::new(&virtual_clock, system_tx.clone(), domain_number);
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         let port_number = PortNumber::new(1);
-        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
             &physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             &timestamping,
-            TracingPortLog::new(port_identity),
+            TracingPortLog::new(),
             domain_number,
             port_number,
         ));
@@ -702,13 +700,12 @@ mod tests {
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         let port_number = PortNumber::new(1);
         let timer_host = TokioTimerHost::new(domain_number, system_tx.clone());
-        let port_identity = PortIdentity::new(*local_clock.identity(), port_number);
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
             &physical_port,
             timer_host,
             FakeTimestamping::new(),
-            TracingPortLog::new(port_identity),
+            TracingPortLog::new(),
             domain_number,
             port_number,
         ));

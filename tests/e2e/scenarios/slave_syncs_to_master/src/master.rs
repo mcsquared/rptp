@@ -10,7 +10,7 @@ use rptp::{
         ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, TimeScale,
     },
     log::NOOP_CLOCK_METRICS,
-    port::{DomainNumber, PortNumber, SingleDomainPortMap},
+    port::{DomainNumber, SingleDomainPortMap},
     servo::{Servo, SteppingServo},
     test_support::FakeClock,
     time::TimeStamp,
@@ -45,20 +45,21 @@ async fn main() -> std::io::Result<()> {
         ),
         default_ds,
         DomainNumber::new(0),
-        PortNumber::new(1),
     );
 
     let domain_number = ordinary_clock.domain_number();
     let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-    let port = ordinary_clock.port(
-        &physical_port,
-        system_tx.clone(),
-        ClockTxTimestamping::new(
-            &fake_clock,
+    let port = ordinary_clock
+        .port(
+            &physical_port,
             system_tx.clone(),
-            domain_number,
-        ),
-    );
+            ClockTxTimestamping::new(
+                &fake_clock,
+                system_tx.clone(),
+                domain_number,
+            ),
+        )
+        .expect("ordinary clock has one port");
     let portmap = SingleDomainPortMap::new(domain_number, port);
 
     let ports_loop = TokioPortsLoop::new(

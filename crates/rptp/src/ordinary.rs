@@ -20,7 +20,8 @@ use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::SystemMessage;
 use crate::port::{
-    DomainNumber, DomainPort, PhysicalPort, PortBroadcast, PortNumber, Timeout, TimerHost,
+    DomainNumber, DomainPort, PhysicalPort, PortBroadcast, PortEnumeration, PortNumber, Timeout,
+    TimerHost,
 };
 use crate::portstate::PortState;
 use crate::profile::PortProfile;
@@ -37,11 +38,13 @@ use crate::timestamping::TxTimestamping;
 /// - a shared store for best-foreign snapshots (`E_best` in BMCA terms).
 ///
 /// The returned port state machine is constructed by [`OrdinaryClock::port`].
+/// Port creation is exhaustive: [`port`](Self::port) returns `None` once the clock's single port
+/// has been handed out.
 pub struct OrdinaryClock<C: SynchronizableClock, T: Timeout> {
     local_clock: LocalClock<C>,
     default_ds: ClockDS,
     domain_number: DomainNumber,
-    port_number: PortNumber,
+    port_enumeration: PortEnumeration,
     foreign_candidates: Cell<BestForeignSnapshot>,
     port_broadcast: SinglePortBroadcast<T>,
 }
@@ -50,14 +53,12 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
     /// Create a new ordinary clock configuration.
     ///
     /// `default_ds` is the local clock dataset used by BMCA as the local candidate (`D_0`).
-    /// The `domain_number` and `port_number` identify the single port constructed by
-    /// [`port`](Self::port).
-    /// `port_broadcast` is used to deliver state decision events to ports.
+    /// An ordinary clock has exactly one port (port number 1); the enumeration is fixed to
+    /// [`PortEnumeration::single`] internally.
     pub fn new(
         local_clock: LocalClock<C>,
         default_ds: ClockDS,
         domain_number: DomainNumber,
-        port_number: PortNumber,
     ) -> Self {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
 
@@ -65,7 +66,7 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
             local_clock,
             default_ds,
             domain_number,
-            port_number,
+            port_enumeration: PortEnumeration::single(),
             foreign_candidates,
             port_broadcast: SinglePortBroadcast::new(),
         }
@@ -81,13 +82,9 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
         self.domain_number
     }
 
-    /// Return the configured PTP port number.
-    pub fn port_number(&self) -> PortNumber {
-        self.port_number
-    }
-
     /// Construct the port state machine for this ordinary clock.
     ///
+    /// Yields `Some(port_state)` the first time (the clock's single port) and `None` thereafter.
     /// This performs the domain assembly:
     /// - wraps infrastructure-provided boundaries into a [`DomainPort`],
     /// - constructs the BMCA evaluator ([`BestMasterClockAlgorithm`]) using the local dataset and
@@ -106,15 +103,16 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
         timestamping: TS,
         log: L,
         foreign_clock_records: S,
-    ) -> PortState<'a, DomainPort<'a, C, TH, TS, L>, S>
+    ) -> Option<PortState<'a, DomainPort<'a, C, TH, TS, L>, S>>
     where
         TH: TimerHost<Timeout = T>,
         TS: TxTimestamping,
         S: ForeignClockRecords,
         L: PortLog,
     {
+        let port_number = self.port_enumeration.next()?;
+
         // Register port with broadcast before creating port state
-        // Create a timeout handle for state decision events (we'll update the message when broadcasting)
         let state_decision_timeout = timer_host.timeout(SystemMessage::StateDecisionEvent(
             BestForeignSnapshot::Empty,
         ));
@@ -127,20 +125,21 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
             timestamping,
             log,
             self.domain_number,
-            self.port_number,
+            port_number,
         );
 
-        // Extract values we need
         let default_ds = &self.default_ds;
-        let port_number = self.port_number;
-
         let bmca = BestMasterClockAlgorithm::new(default_ds, port_number);
-
         let best_foreign = BestForeignRecord::new(port_number, foreign_clock_records);
         let state_decision_trigger =
             StateDecisionEventTrigger::new(self, best_foreign.snapshot(), port_number);
 
-        PortProfile::default().initializing(domain_port, bmca, best_foreign, state_decision_trigger)
+        Some(PortProfile::default().initializing(
+            domain_port,
+            bmca,
+            best_foreign,
+            state_decision_trigger,
+        ))
     }
 }
 

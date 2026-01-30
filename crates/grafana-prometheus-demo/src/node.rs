@@ -8,7 +8,7 @@ use crate::metrics::offset_gauge;
 use rptp::bmca::ClockDS;
 use rptp::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
 use rptp::log::ClockMetrics;
-use rptp::port::{DomainNumber, PortNumber, SingleDomainPortMap};
+use rptp::port::{DomainNumber, SingleDomainPortMap};
 use rptp::profile::PortProfile;
 use rptp::servo::{
     Drift, PiLoop, PiServo, Servo, ServoDriftEstimate, ServoState, ServoThreshold, StepPolicy,
@@ -56,7 +56,6 @@ impl PiServoConfig {
 }
 
 pub struct PrometheusNodeConfig {
-    pub port_number: PortNumber,
     pub clock_start: TimeStamp,
     pub clock_rate: f64,
     pub default_ds: ClockDS,
@@ -95,7 +94,6 @@ impl<N: NetworkSocket> PrometheusNode<N> {
             general_socket,
             config:
                 PrometheusNodeConfig {
-                    port_number,
                     clock_start,
                     clock_rate,
                     default_ds,
@@ -129,8 +127,10 @@ impl<N: NetworkSocket> PrometheusNode<N> {
         let timestamping = ClockTxTimestamping::new(&*virtual_clock, system_tx.clone(), domain);
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let mut ordinary = OrdinaryTokioClock::new(local_clock, default_ds, domain, port_number);
-        let port_state = ordinary.port(&physical_port, system_tx, &timestamping);
+        let mut ordinary = OrdinaryTokioClock::new(local_clock, default_ds, domain);
+        let port_state = ordinary
+            .port(&physical_port, system_tx, &timestamping)
+            .expect("ordinary clock has one port");
         let portmap = SingleDomainPortMap::new(domain, port_state);
 
         let ports_loop = TokioPortsLoop::new(

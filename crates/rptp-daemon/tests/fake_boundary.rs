@@ -30,7 +30,7 @@ use rptp::{
     },
     infra::infra_support::ForeignClockRecordsVec,
     log::NOOP_CLOCK_METRICS,
-    port::{DomainNumber, DomainPort, PortNumber, SingleDomainPortMap},
+    port::{DomainNumber, DomainPort, SingleDomainPortMap},
     servo::{Servo, SteppingServo},
     time::TimeStamp,
 };
@@ -72,14 +72,13 @@ impl Node {
         default_ds: ClockDS,
     ) -> Self {
         const DOMAIN: DomainNumber = DomainNumber::new(0); // test assumes domain 0 only
-        const PORT_NUMBER: PortNumber = PortNumber::new(1); // test assumes port 1 only
         let shared_clock = SharedVirtualClock(clock);
         let local_clock = LocalClock::new(
             shared_clock.clone(),
             *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
-        let ordinary = OrdinaryTokioClock::new(local_clock, default_ds, DOMAIN, PORT_NUMBER);
+        let ordinary = OrdinaryTokioClock::new(local_clock, default_ds, DOMAIN);
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         Self {
             shared_clock,
@@ -102,7 +101,8 @@ impl Node {
             ClockTxTimestamping::new(self.shared_clock.clone(), system_tx.clone(), domain);
         let port = self
             .ordinary
-            .port(&self.physical_port, system_tx, timestamping);
+            .port(&self.physical_port, system_tx, timestamping)
+            .expect("ordinary clock has one port");
         let portmap = SingleDomainPortMap::new(domain, port);
         let rx_timestamping = ClockRxTimestamping::new(self.shared_clock.clone());
         TokioPortsLoop::new(

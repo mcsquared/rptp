@@ -21,8 +21,8 @@ use rptp::{
     message::{EventMessage, MessageIngress, SystemMessage, TimestampMessage},
     ordinary::OrdinaryClock,
     port::{
-        DomainNumber, PhysicalPort, PortMap, PortNumber, SendResult, SingleDomainPortMap, Timeout,
-        TimerHost,
+        DomainNumber, PhysicalPort, PortIdentity, PortMap, SendResult, SingleDomainPortMap,
+        Timeout, TimerHost,
     },
     result::Error as RptpError,
     servo::{Servo, SteppingServo},
@@ -372,7 +372,7 @@ impl<'a> Timeout for DemoTimeout<'a> {
             if let Some(slot) = slots.get_mut(self.slot) {
                 // Update the message in the slot
                 slot.msg = msg;
-                
+
                 if timeout.as_u64_nanos() == 0 {
                     // Schedule with deadline = now so it fires immediately in the same loop iteration
                     let now = self.instant_clock.now();
@@ -414,37 +414,45 @@ impl<'a> TxTimestamping for DemoTimestamping<'a> {
 struct DemoPortLog;
 
 impl PortLog for DemoPortLog {
-    fn port_event(&self, event: PortEvent) {
+    fn port_event(&self, port_identity: PortIdentity, event: PortEvent) {
         match event {
             PortEvent::Initialized => {
-                hprintln!("[event] Initialized");
+                hprintln!("[event] {} Initialized", port_identity);
             }
             PortEvent::RecommendedSlave { parent } => {
-                hprintln!("[event] RecommendedSlave parent={}", parent);
+                hprintln!(
+                    "[event] {} RecommendedSlave parent={}",
+                    port_identity,
+                    parent
+                );
             }
             PortEvent::RecommendedMaster => {
-                hprintln!("[event] RecommendedMaster");
+                hprintln!("[event] {} RecommendedMaster", port_identity);
             }
             PortEvent::MasterClockSelected { parent } => {
-                hprintln!("[event] MasterClockSelected parent={}", parent);
+                hprintln!(
+                    "[event] {} MasterClockSelected parent={}",
+                    port_identity,
+                    parent
+                );
             }
             PortEvent::AnnounceReceiptTimeout => {
-                hprintln!("[event] AnnounceReceiptTimeout");
+                hprintln!("[event] {} AnnounceReceiptTimeout", port_identity);
             }
             PortEvent::QualifiedMaster => {
-                hprintln!("[event] QualifiedMaster");
+                hprintln!("[event] {} QualifiedMaster", port_identity);
             }
             PortEvent::SynchronizationFault => {
-                hprintln!("[event] SynchronizationFault");
+                hprintln!("[event] {} SynchronizationFault", port_identity);
             }
             PortEvent::MessageReceived(msg) => {
-                hprintln!("[event] MessageReceived {}", msg);
+                hprintln!("[event] {} MessageReceived {}", port_identity, msg);
             }
             PortEvent::MessageSent(msg) => {
-                hprintln!("[event] MessageSent {}", msg);
+                hprintln!("[event] {} MessageSent {}", port_identity, msg);
             }
             PortEvent::Static(msg) => {
-                hprintln!("[event] {}", msg);
+                hprintln!("[event] {} {}", port_identity, msg);
             }
         }
     }
@@ -513,20 +521,21 @@ fn main() -> ! {
         ),
         default_ds,
         DomainNumber::new(0),
-        PortNumber::new(1),
     );
 
     let domain_number = ordinary_clock.domain_number();
     let physical_port = DemoPhysicalPort {
         inner: network.physical_port(),
     };
-    let port = ordinary_clock.port(
-        &physical_port,
-        DemoTimerHost::new(&instant_clock),
-        DemoTimestamping::new(&demo_clock),
-        DemoPortLog,
-        HeaplessForeignClockRecords::<4>::new(),
-    );
+    let port = ordinary_clock
+        .port(
+            &physical_port,
+            DemoTimerHost::new(&instant_clock),
+            DemoTimestamping::new(&demo_clock),
+            DemoPortLog,
+            HeaplessForeignClockRecords::<4>::new(),
+        )
+        .expect("ordinary clock has one port");
     let mut port_map = SingleDomainPortMap::new(domain_number, port);
     port_map
         .port_by_domain(DomainNumber::new(0))

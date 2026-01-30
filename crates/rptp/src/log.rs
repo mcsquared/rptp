@@ -10,7 +10,7 @@
 //!
 //! The provided `Noop*` implementations are convenient defaults for tests and examples.
 
-use crate::port::ParentPortIdentity;
+use crate::port::{ParentPortIdentity, PortIdentity};
 use crate::time::TimeInterval;
 
 /// Logging sink for port-level events.
@@ -22,7 +22,7 @@ use crate::time::TimeInterval;
 /// deferred to the infrastructure logging backend.
 pub trait PortLog {
     /// Record a port event.
-    fn port_event(&self, event: PortEvent);
+    fn port_event(&self, port_identity: PortIdentity, event: PortEvent);
 }
 
 /// `PortLog` implementation that drops all events.
@@ -32,7 +32,7 @@ pub trait PortLog {
 pub(crate) struct NoopPortLog;
 
 impl PortLog for NoopPortLog {
-    fn port_event(&self, _event: PortEvent) {}
+    fn port_event(&self, _port_identity: PortIdentity, _event: PortEvent) {}
 }
 
 /// Discrete events emitted by the port state machine.
