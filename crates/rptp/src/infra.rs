@@ -29,8 +29,8 @@ pub mod infra_support {
     use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
     use crate::log::PortEvent;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-    use crate::port::{Port, PortNumber, SendResult};
-    use crate::time::TimeStamp;
+    use crate::port::{Port, PortNotification, PortNumber, SendResult, Timeout};
+    use crate::time::{Duration, TimeStamp};
 
     impl Clock for Rc<dyn SynchronizableClock> {
         fn now(&self) -> TimeStamp {
@@ -229,13 +229,50 @@ pub mod infra_support {
         }
     }
 
+    /// Multi-port implementation of [`PortNotification`] for boundary clock scenarios.
+    ///
+    /// Holds a collection of timeout handles and notifies all registered ports when
+    /// [`notify_all`](PortNotification::notify_all) is called.
+    pub struct MultiPortNotification<T: Timeout> {
+        timeouts: RefCell<Vec<T>>,
+    }
+
+    impl<T: Timeout> MultiPortNotification<T> {
+        /// Create a new empty notification handler.
+        pub fn new() -> Self {
+            Self {
+                timeouts: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl<T: Timeout> Default for MultiPortNotification<T> {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl<T: Timeout> PortNotification<T> for MultiPortNotification<T> {
+        fn add_port(&mut self, timeout: T) {
+            self.timeouts.get_mut().push(timeout);
+        }
+
+        fn notify_all(&self, e_best: BestForeignSnapshot) {
+            let msg = SystemMessage::StateDecisionEvent(e_best);
+            let delay = Duration::from_secs(0);
+            for timeout in self.timeouts.borrow().iter() {
+                timeout.restart_with_message(msg, delay);
+            }
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
         use crate::bmca::{BestForeignSnapshot, ForeignGrandMasterCandidates};
         use crate::clock::ClockIdentity;
         use crate::port::{PortIdentity, PortNumber};
-        use crate::test_support::TestClockDS;
+        use crate::test_support::{FakeTimeout, TestClockDS};
         use crate::time::{Instant, LogInterval};
 
         #[test]
@@ -549,6 +586,34 @@ pub mod infra_support {
                 }
                 BestForeignSnapshot::Empty => panic!("expected qualified candidate"),
             }
+        }
+
+        #[test]
+        fn multi_port_notification_delivers_to_all_registered_ports() {
+            let snapshot = BestForeignSnapshot::Empty;
+
+            let timeout1 = Rc::new(FakeTimeout::new(SystemMessage::StateDecisionEvent(
+                snapshot,
+            )));
+            let timeout2 = Rc::new(FakeTimeout::new(SystemMessage::StateDecisionEvent(
+                snapshot,
+            )));
+
+            let mut notification = MultiPortNotification::new();
+            notification.add_port(timeout1.clone());
+            notification.add_port(timeout2.clone());
+
+            let e_best = BestForeignSnapshot::Empty;
+            notification.notify_all(e_best);
+
+            assert_eq!(
+                timeout1.take_system_messages()[0],
+                SystemMessage::StateDecisionEvent(snapshot)
+            );
+            assert_eq!(
+                timeout2.take_system_messages()[0],
+                SystemMessage::StateDecisionEvent(snapshot)
+            );
         }
     }
 }

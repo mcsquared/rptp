@@ -444,6 +444,11 @@ impl FakeTimeout {
         }
     }
 
+    /// Drain and return all recorded system messages.
+    pub fn take_system_messages(&self) -> Vec<SystemMessage> {
+        self.system_messages.borrow_mut().drain(..).collect()
+    }
+
     /// Return the currently scheduled system message so tests can simulate firing the timeout.
     pub fn fire(&self) -> SystemMessage {
         *self.msg.borrow()
@@ -458,6 +463,16 @@ impl Timeout for FakeTimeout {
 
     fn restart_with_message(&self, msg: SystemMessage, _timeout: Duration) {
         self.system_messages.borrow_mut().push(msg);
+    }
+}
+
+impl Timeout for Rc<FakeTimeout> {
+    fn restart(&self, _timeout: Duration) {
+        self.as_ref().restart(_timeout);
+    }
+
+    fn restart_with_message(&self, msg: SystemMessage, _timeout: Duration) {
+        self.as_ref().restart_with_message(msg, _timeout);
     }
 }
 

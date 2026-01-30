@@ -20,7 +20,7 @@ use crate::clock::{LocalClock, SynchronizableClock};
 use crate::log::PortLog;
 use crate::message::SystemMessage;
 use crate::port::{
-    DomainNumber, DomainPort, PhysicalPort, PortBroadcast, PortEnumeration, PortNumber, Timeout,
+    DomainNumber, DomainPort, PhysicalPort, PortEnumeration, PortNotification, PortNumber, Timeout,
     TimerHost,
 };
 use crate::portstate::PortState;
@@ -46,7 +46,7 @@ pub struct OrdinaryClock<C: SynchronizableClock, T: Timeout> {
     domain_number: DomainNumber,
     port_enumeration: PortEnumeration,
     foreign_candidates: Cell<BestForeignSnapshot>,
-    port_broadcast: SinglePortBroadcast<T>,
+    port_notification: SinglePortNotification<T>,
 }
 
 impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
@@ -68,7 +68,7 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
             domain_number,
             port_enumeration: PortEnumeration::single(),
             foreign_candidates,
-            port_broadcast: SinglePortBroadcast::new(),
+            port_notification: SinglePortNotification::new(),
         }
     }
 
@@ -91,7 +91,7 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
     ///   shared best-foreign snapshot store, and
     /// - constructs a per-port best-foreign record store ([`BestForeignRecord`]) using
     ///   `foreign_clock_records`.
-    /// - registers the port with `PortBroadcast` for state decision event delivery
+    /// - registers the port with `PortNotification` for state decision event delivery
     ///
     /// The initial state is `INITIALIZING` as assembled by the default [`PortProfile`]. The caller
     /// is responsible for delivering `SystemMessage::Initialized` to start the state machine (see
@@ -112,11 +112,11 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
     {
         let port_number = self.port_enumeration.next()?;
 
-        // Register port with broadcast before creating port state
+        // Register port with notification before creating port state
         let state_decision_timeout = timer_host.timeout(SystemMessage::StateDecisionEvent(
             BestForeignSnapshot::Empty,
         ));
-        self.port_broadcast.add_port(state_decision_timeout);
+        self.port_notification.add_port(state_decision_timeout);
 
         let domain_port = DomainPort::new(
             &self.local_clock,
@@ -149,16 +149,16 @@ impl<C: SynchronizableClock, T: Timeout> StateDecisionEvent for OrdinaryClock<C,
         self.foreign_candidates.remember(port_number, e_rbest);
         let e_best = self.foreign_candidates.best();
 
-        // Broadcast to all ports (for ordinary clocks, this is just one port)
-        self.port_broadcast.broadcast(e_best);
+        // Notify all ports (for ordinary clocks, this is just one port)
+        self.port_notification.notify_all(e_best);
     }
 }
 
-struct SinglePortBroadcast<T: Timeout> {
+struct SinglePortNotification<T: Timeout> {
     timeout: RefCell<Option<T>>,
 }
 
-impl<T: Timeout> SinglePortBroadcast<T> {
+impl<T: Timeout> SinglePortNotification<T> {
     fn new() -> Self {
         Self {
             timeout: RefCell::new(None),
@@ -166,12 +166,12 @@ impl<T: Timeout> SinglePortBroadcast<T> {
     }
 }
 
-impl<T: Timeout> PortBroadcast<T> for SinglePortBroadcast<T> {
+impl<T: Timeout> PortNotification<T> for SinglePortNotification<T> {
     fn add_port(&mut self, timeout: T) {
         *self.timeout.borrow_mut() = Some(timeout);
     }
 
-    fn broadcast(&self, e_best: BestForeignSnapshot) {
+    fn notify_all(&self, e_best: BestForeignSnapshot) {
         if let Some(timeout) = self.timeout.borrow().as_ref() {
             timeout.restart_with_message(
                 SystemMessage::StateDecisionEvent(e_best),
