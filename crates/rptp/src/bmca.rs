@@ -112,7 +112,7 @@ impl BmcaDecision {
 ///
 /// ## Known limitations:
 ///  - M3 topology-only comparison is not yet implemented; see TODO in
-///    `e_best_better_by_topology_than_e_rbest`.
+///    `BetterByTopologyDecision::decision`.
 pub(crate) struct BestMasterClockAlgorithm<'a> {
     local_candidate: &'a dyn LocalGrandMasterCandidate,
     port_number: PortNumber,
@@ -152,55 +152,116 @@ impl<'a> BestMasterClockAlgorithm<'a> {
     ) -> BmcaDecision {
         let d_0 = self.local_candidate.snapshot();
         if d_0.is_authoritative() {
-            Self::d0_better_or_better_by_topology_than_e_rbest(&d_0, e_rbest)
+            AuthoritativeDecision::new(&d_0, e_rbest).decision()
         } else {
-            self.d0_better_or_better_by_topology_than_e_best(&d_0, e_best, e_rbest)
+            NonAuthoritativeDecision::new(
+                &d_0,
+                e_best,
+                ReceivedOnPortDecision::new(
+                    self.port_number,
+                    BetterByTopologyDecision::new(e_rbest),
+                ),
+            )
+            .decision()
         }
     }
+}
 
-    fn d0_better_or_better_by_topology_than_e_rbest(
-        d_0: &ClockDS,
-        e_rbest: &BestForeignSnapshot,
-    ) -> BmcaDecision {
-        if d_0.better_than_foreign(e_rbest) {
+/// Decision between M1 and P1
+struct AuthoritativeDecision<'a> {
+    d_0: &'a ClockDS,
+    e_rbest: &'a BestForeignSnapshot,
+}
+
+impl<'a> AuthoritativeDecision<'a> {
+    fn new(d_0: &'a ClockDS, e_rbest: &'a BestForeignSnapshot) -> Self {
+        Self { d_0, e_rbest }
+    }
+
+    fn decision(&self) -> BmcaDecision {
+        if self.d_0.better_than_foreign(self.e_rbest) {
             BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M1,
                 StepsRemoved::new(0), // IEEE 1588-2019 §3.9.5; Tbl. 30 (stepsRemoved=0 when acting as GM)
-                *d_0.identity(),
+                *self.d_0.identity(),
             ))
         } else {
             BmcaDecision::Passive // Passive decision point P1
         }
     }
+}
 
-    fn d0_better_or_better_by_topology_than_e_best(
-        &self,
-        d_0: &ClockDS,
-        e_best: &BestForeignSnapshot,
-        e_rbest: &BestForeignSnapshot,
-    ) -> BmcaDecision {
-        if d_0.better_than_foreign(e_best) {
-            BmcaDecision::Master(BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M2,
-                StepsRemoved::new(0), // IEEE 1588-2019 §3.9.5; Tbl. 30 (stepsRemoved=0 when acting as master)
-                *d_0.identity(),
-            ))
-        } else if let Some(parent) = e_best.parent_if_received_on_port(self.port_number) {
-            BmcaDecision::Slave(parent) // Slave decision point S1
-        } else {
-            // Only a qualified e_best can reach this point (IEEE 1588-2019 §9.3.3; Fig. 33).
-            debug_assert!(matches!(e_best, BestForeignSnapshot::Qualified { .. }));
-            Self::e_best_better_by_topology_than_e_rbest(e_best, e_rbest)
+/// Decision between M2 and the S1/P2/M3 alternatives (IEEE 1588-2019 §9.3.3; Fig. 33).
+struct NonAuthoritativeDecision<'a> {
+    d_0: &'a ClockDS,
+    e_best: &'a BestForeignSnapshot,
+    received_on_port: ReceivedOnPortDecision<'a>,
+}
+
+impl<'a> NonAuthoritativeDecision<'a> {
+    fn new(
+        d_0: &'a ClockDS,
+        e_best: &'a BestForeignSnapshot,
+        received_on_port: ReceivedOnPortDecision<'a>,
+    ) -> Self {
+        Self {
+            d_0,
+            e_best,
+            received_on_port,
         }
     }
 
-    fn e_best_better_by_topology_than_e_rbest(
-        e_best: &BestForeignSnapshot,
-        e_rbest: &BestForeignSnapshot,
-    ) -> BmcaDecision {
+    fn decision(&self) -> BmcaDecision {
+        if self.d_0.better_than_foreign(self.e_best) {
+            BmcaDecision::Master(BmcaMasterDecision::new(
+                BmcaMasterDecisionPoint::M2,
+                StepsRemoved::new(0), // IEEE 1588-2019 §3.9.5; Tbl. 30 (stepsRemoved=0 when acting as master)
+                *self.d_0.identity(),
+            ))
+        } else {
+            self.received_on_port.decision(self.e_best)
+        }
+    }
+}
+
+/// Decision between S1 when e_best was received on this port, and P2/M3 when e_best was not
+/// received on this port (IEEE 1588-2019 §9.3.3; Fig. 33).
+struct ReceivedOnPortDecision<'a> {
+    port_number: PortNumber,
+    better_by_topology: BetterByTopologyDecision<'a>,
+}
+
+impl<'a> ReceivedOnPortDecision<'a> {
+    fn new(port_number: PortNumber, better_by_topology: BetterByTopologyDecision<'a>) -> Self {
+        Self {
+            port_number,
+            better_by_topology,
+        }
+    }
+
+    fn decision(&self, e_best: &BestForeignSnapshot) -> BmcaDecision {
+        if let Some(parent) = e_best.parent_if_received_on_port(self.port_number) {
+            BmcaDecision::Slave(parent) // Slave decision point S1
+        } else {
+            self.better_by_topology.decision(e_best)
+        }
+    }
+}
+
+/// Decision between P2 and M3 (IEEE 1588-2019 §9.3.3; Fig. 33).
+struct BetterByTopologyDecision<'a> {
+    e_rbest: &'a BestForeignSnapshot,
+}
+
+impl<'a> BetterByTopologyDecision<'a> {
+    fn new(e_rbest: &'a BestForeignSnapshot) -> Self {
+        Self { e_rbest }
+    }
+
+    fn decision(&self, e_best: &BestForeignSnapshot) -> BmcaDecision {
         // TODO: this comparison shall be topology-only, as the method name suggests.
         // See IEEE 1588-2019 §9.3.3; Fig. 33, diamond for decision point P2 vs M3.
-        if e_best.better_than(e_rbest) {
+        if e_best.better_than(self.e_rbest) {
             BmcaDecision::Passive // Passive decision point P2
         } else {
             BmcaDecision::Master(BmcaMasterDecision::new(
