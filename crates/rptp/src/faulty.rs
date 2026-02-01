@@ -7,9 +7,8 @@
 //! - it preserves the ownership of the minimal set of port collaborators required to
 //!   re-initialize the port when the fault is cleared.
 
-use crate::bmca::{
-    BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, StateDecisionEventTrigger,
-};
+use crate::bmca::{BestMasterClockAlgorithm, StateDecisionEventTrigger};
+use crate::foreign::{BestForeignRecord, ForeignClockRecords};
 use crate::log::PortEvent;
 use crate::port::Port;
 use crate::portstate::PortState;

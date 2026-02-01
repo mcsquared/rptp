@@ -424,28 +424,6 @@ impl<C: SynchronizableClock> LocalClock<C> {
     }
 }
 
-/// The PTP `stepsRemoved` dataset field.
-///
-/// This counts the number of communication paths between the local clock and the grandmaster. It
-/// participates in BMCA comparisons and is carried in Announce messages.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct StepsRemoved(u16);
-
-impl StepsRemoved {
-    /// Create a `StepsRemoved` value from the raw counter.
-    pub fn new(steps_removed: u16) -> Self {
-        Self(steps_removed)
-    }
-
-    pub(crate) fn as_u16(&self) -> u16 {
-        self.0
-    }
-
-    pub(crate) fn to_be_bytes(self) -> [u8; 2] {
-        self.0.to_be_bytes()
-    }
-}
-
 /// The time scale used by a clock.
 ///
 /// PTP distinguishes between the PTP timescale and an arbitrary/application-defined timescale.

@@ -15,36 +15,30 @@
 //! public API surface.
 
 use std::cell::Cell;
-
-use crate::bmca::{
-    BestForeignSnapshot, ClockDS, GrandMasterTrackingBmca, ParentTrackingBmca, Priority1,
-    Priority2, StateDecisionEvent, StateDecisionEventTrigger,
-};
-use crate::clock::{
-    Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved,
-    SynchronizableClock, TimeScale,
-};
-use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
-use crate::port::{
-    PhysicalPort, PortIdentity, PortNumber, SendError, SendResult, Timeout, TimerHost,
-};
-use crate::result::Result;
-use crate::time::{LogInterval, TimeStamp};
-use crate::timestamping::TxTimestamping;
-use crate::wire::{MessageHeader, UnvalidatedMessage};
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-use crate::time::Duration;
-
 use crate::bmca::{
-    BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, LocalGrandMasterCandidate,
+    BestMasterClockAlgorithm, GrandMasterTrackingBmca, LocalGrandMasterCandidate,
+    ParentTrackingBmca, StateDecisionEvent, StateDecisionEventTrigger,
 };
-use crate::port::{ParentPortIdentity, Port};
+use crate::clock::{
+    Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, SynchronizableClock, TimeScale,
+};
+use crate::dataset::{ClockDS, Priority1, Priority2, StepsRemoved};
+use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
+use crate::foreign::{BestForeignRecord, BestForeignSnapshot, ForeignClockRecords};
+use crate::message::{EventMessage, GeneralMessage, SystemMessage};
+use crate::port::{
+    ParentPortIdentity, PhysicalPort, Port, PortIdentity, PortNumber, SendError, SendResult,
+    Timeout, TimerHost,
+};
 use crate::portstate::PortState;
 use crate::profile::PortProfile;
+use crate::result::Result;
+use crate::time::{Duration, LogInterval, TimeStamp};
+use crate::timestamping::TxTimestamping;
+use crate::wire::{MessageHeader, UnvalidatedMessage};
 
 /// Common `ClockDS` fixtures used in unit tests.
 ///

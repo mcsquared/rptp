@@ -12,12 +12,12 @@
 //! timers.
 
 use crate::bmca::{
-    BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, GrandMasterTrackingBmca,
-    ListeningBmca, ParentTrackingBmca, PassiveBmca, QualificationTimeoutPolicy,
-    StateDecisionEventTrigger,
+    BestMasterClockAlgorithm, GrandMasterTrackingBmca, ListeningBmca, ParentTrackingBmca,
+    PassiveBmca, QualificationTimeoutPolicy, StateDecisionEventTrigger,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::faulty::FaultyPort;
+use crate::foreign::{BestForeignRecord, ForeignClockRecords};
 use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
 use crate::master::{AnnounceCycle, MasterPort, SyncCycle};

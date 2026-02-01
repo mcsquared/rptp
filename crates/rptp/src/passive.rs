@@ -23,9 +23,8 @@
 //! Announce reception is the only message-processing responsibility of this state; event message
 //! processing (Sync/DelayReq/…) is handled in other states.
 
-use crate::bmca::{
-    BestForeignSnapshot, Bmca, BmcaMasterDecision, ForeignClockRecords, PassiveBmca,
-};
+use crate::bmca::{Bmca, BmcaMasterDecision, PassiveBmca};
+use crate::foreign::{BestForeignSnapshot, ForeignClockRecords};
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity};
@@ -149,11 +148,10 @@ impl<'a, P: Port, S: ForeignClockRecords> PassivePort<'a, P, S> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{
-        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
-        ForeignClockRecord, PassiveBmca, StateDecisionEventTrigger,
-    };
+    use crate::bmca::{BestMasterClockAlgorithm, PassiveBmca, StateDecisionEventTrigger};
     use crate::clock::{LocalClock, TimeScale};
+    use crate::dataset::ClockDS;
+    use crate::foreign::{BestForeignRecord, BestForeignSnapshot, ForeignClockRecord};
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::SystemMessage;

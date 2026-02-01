@@ -21,8 +21,8 @@
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
-use crate::bmca::{BestForeignSnapshot, ForeignClockRecords};
 use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
+use crate::foreign::{BestForeignSnapshot, ForeignClockRecords};
 use crate::log::{PortEvent, PortLog};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
 use crate::portstate::{PortState, StateDecision};

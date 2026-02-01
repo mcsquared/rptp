@@ -5,8 +5,8 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
 use rptp::{
-    bmca::{ClockDS, Priority1, Priority2},
     clock::{Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
+    dataset::{ClockDS, Priority1, Priority2, StepsRemoved},
     log::NOOP_CLOCK_METRICS,
     port::{DomainNumber, SingleDomainPortMap},
     servo::{Servo, SteppingServo},
@@ -28,7 +28,7 @@ async fn main() -> std::io::Result<()> {
         Priority1::new(250),
         Priority2::new(255),
         ClockQuality::new(ClockClass::Default, ClockAccuracy::Within10ms, 0xFFFF),
-        rptp::clock::StepsRemoved::new(0),
+        StepsRemoved::new(0),
     );
 
     let event_socket = Rc::new(MulticastSocket::event().await?);

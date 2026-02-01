@@ -27,10 +27,8 @@ use std::rc::Rc;
 use tokio::sync::mpsc;
 
 use rptp::{
-    bmca::{ClockDS, Priority1, Priority2},
-    clock::{
-        ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, TimeScale,
-    },
+    clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
+    dataset::{ClockDS, Priority1, Priority2, StepsRemoved},
     log::NOOP_CLOCK_METRICS,
     port::{DomainNumber, SingleDomainPortMap},
     servo::{Servo, SteppingServo},

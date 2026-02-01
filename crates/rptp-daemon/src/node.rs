@@ -386,11 +386,11 @@ mod tests {
     use tokio::time;
 
     use rptp::{
-        bmca::{ClockDS, Priority1, Priority2},
         clock::{
-            ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
+            ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock,
             SynchronizableClock, TimeScale,
         },
+        dataset::{ClockDS, Priority1, Priority2, StepsRemoved},
         infra::infra_support::ForeignClockRecordsVec,
         log::NOOP_CLOCK_METRICS,
         message::{EventMessage, GeneralMessage},

@@ -1,14 +1,22 @@
-//! Best Master Clock Algorithm (BMCA) and related data sets.
+//! Best Master Clock Algorithm (BMCA) and roles.
 //!
-//! This module implements the parts of the IEEE 1588-2019 Precision Time Protocol (PTP) best-master
-//! selection story that `rptp` currently needs:
+//! This module implements the *algorithm* and *roles* of the IEEE 1588-2019 best-master selection
+//! story: comparing local and foreign candidates, producing high-level decisions, and gating
+//! decision emission while tracking an already-selected parent or grandmaster.
 //!
-//! - Tracking and qualifying foreign master candidates learned from Announce messages
-//! - Comparing local and foreign clock data sets (`ClockDS`) and producing high-level decisions
-//! - Gating decision emission while tracking an already-selected parent/grandmaster
+//! - **Algorithm** – [`BestMasterClockAlgorithm`] implements the core BMCA comparison and decision
+//!   logic (IEEE 1588-2019 §9.3.3, Fig. 33). It consumes a local candidate ([`LocalGrandMasterCandidate`])
+//!   and best-foreign snapshots ([`BestForeignSnapshot`]) and produces a [`BmcaDecision`] (Master /
+//!   Slave / Passive).
+//! - **Roles** – [`ListeningBmca`], [`GrandMasterTrackingBmca`], [`ParentTrackingBmca`],
+//!   [`PassiveBmca`] wrap the core algorithm to gate when decisions are emitted (e.g. only when
+//!   a qualified foreign exists, or when the tracked grandmaster/parent changes).
+//! - **State decision events** – [`StateDecisionEvent`] and [`StateDecisionEventTrigger`] allow
+//!   the clock to coordinate BMCA evaluation across ports (e.g. when `e_rbest` changes).
 //!
-//! The implementation is deliberately domain-oriented: the output of the algorithm is expressed as
-//! a small set of domain decisions (`BmcaDecision`) that the port state machine can apply.
+//! Clock dataset types and BMCA comparison tuple wire format live in [`crate::dataset`]. Foreign
+//! master tracking, qualification, and storage ([`ForeignClockRecords`], [`BestForeignSnapshot`],
+//! etc.) live in [`crate::foreign`].
 //!
 //! ## Current limitations
 //!
@@ -17,14 +25,42 @@
 //! - Some topology-only comparisons are currently simplified; TODOs in this module mark those
 //!   places explicitly.
 
-use core::cell::Cell;
-use core::ops::Range;
-
-use crate::clock::{ClockIdentity, ClockQuality, StepsRemoved, TimeScale};
+use crate::clock::{ClockIdentity, TimeScale};
+use crate::dataset::{ClockDS, StepsRemoved};
+use crate::foreign::{BestForeignRecord, BestForeignSnapshot, ForeignClockRecords};
 use crate::message::{AnnounceMessage, SequenceId};
 use crate::port::{ParentPortIdentity, Port, PortIdentity, PortNumber};
 use crate::portstate::{PortState, StateDecision};
 use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
+
+/// Best Master Clock Algorithm interface.
+///
+/// The BMCA is driven by Announce reception: each received Announce contributes a new observation
+/// about a foreign clock candidate. Implementations keep local state (e.g. qualification windows)
+/// and can emit a high-level decision once enough information is available.
+pub(crate) trait Bmca {
+    /// Consider a new Announce-derived snapshot for a foreign clock candidate.
+    ///
+    /// `log_announce_interval` should be the interval announced by the sender, and is used for
+    /// qualification and staleness decisions.
+    ///
+    /// Implementations should check for changes in the best foreign dataset and trigger state
+    /// decision events when changes occur.
+    fn consider(
+        &mut self,
+        source_port_identity: PortIdentity,
+        foreign_clock_ds: ClockDS,
+        log_announce_interval: LogInterval,
+        now: Instant,
+    );
+
+    /// Return the latest BMCA decision, if one should be acted upon.
+    ///
+    /// Returning `None` means "no new decision": either not enough information is available yet
+    /// (e.g. no qualified foreign candidates), or the decision would be identical to the currently
+    /// tracked parent/grandmaster.
+    fn decision(&self, e_best: &BestForeignSnapshot) -> Option<BmcaDecision>;
+}
 
 /// Trait for triggering state decision events in clocks.
 ///
@@ -38,6 +74,143 @@ pub trait StateDecisionEvent {
     /// 2. Get the updated `e_best = foreign_candidates.best()`
     /// 3. Call `port.state_decision_event(e_best)` to trigger BMCA evaluation
     fn trigger(&self, port_number: PortNumber, e_rbest: BestForeignSnapshot);
+}
+
+/// High‑level BMCA outcome for a given port.
+///
+/// This is the “so what?” result that the port state machine can act upon, matching the state
+/// transition annotations in IEEE 1588-2019 §9.2.5; Fig. 30 & 31.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BmcaDecision {
+    /// The port should act as a master. (BMC_MASTER as to IEEE 1588-2019)
+    Master(BmcaMasterDecision),
+    /// The port should act as a slave, following the given parent. (BMC_SLAVE as to IEEE 1588-2019)
+    Slave(ParentPortIdentity),
+    /// The port should be passive. (BMC_PASSIVE as to IEEE 1588-2019)
+    Passive,
+}
+
+impl BmcaDecision {
+    pub(crate) fn to_state_decision(self) -> Option<StateDecision> {
+        match self {
+            BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
+            BmcaDecision::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
+            BmcaDecision::Passive => Some(StateDecision::RecommendedPassive),
+        }
+    }
+}
+
+/// Best Master Clock Algorithm implementation.
+///
+/// Implements the core best master clock decision algorithm as per IEEE 1588-2019 §9.3.3, Fig. 33,
+/// excluding the first listening-mode diamond, which is extracted into `ListeningBmca`, to keep the
+/// core logic clean and simple.
+///
+/// Each BMCA instance is identified by the port number it serves, to allow multi-port scenarios.
+/// Clock-level shared storage surfaces for local and foreign candidates are injected via trait
+/// objects which represent the cross-port shared state (`D_0` and `E_best` in spec).
+///
+/// ## Known limitations:
+///  - M3 topology-only comparison is not yet implemented; see TODO in
+///    `e_best_better_by_topology_than_e_rbest`.
+pub(crate) struct BestMasterClockAlgorithm<'a> {
+    local_candidate: &'a dyn LocalGrandMasterCandidate,
+    port_number: PortNumber,
+}
+
+impl<'a> BestMasterClockAlgorithm<'a> {
+    /// Create a new BMCA evaluator for `port_number`.
+    ///
+    /// `local_candidate` supplies the local data set snapshot (`D_0`).
+    /// `foreign_candidates` aggregates best foreign snapshots across ports. (`E_best`)
+    pub fn new(
+        local_candidate: &'a dyn LocalGrandMasterCandidate,
+        port_number: PortNumber,
+    ) -> Self {
+        Self {
+            local_candidate,
+            port_number,
+        }
+    }
+
+    /// Access the currently known grandmaster via the given closure.
+    pub(crate) fn using_grandmaster<R>(&self, f: impl FnOnce(GrandMaster<'_>) -> R) -> R {
+        // TODO: once multi-port is supported, this should return the grandmaster, whether local or
+        // foreign. With only single port support atm, it's always local d_0.
+        let d_0 = self.local_candidate.snapshot();
+        f(GrandMaster::new(&d_0))
+    }
+
+    /// Evaluate the BMCA decision for the current inputs.
+    ///
+    /// The argument `e_rbest` is the best qualified foreign candidate observed on the current
+    /// port (if any).
+    pub(crate) fn decision(
+        &self,
+        e_best: &BestForeignSnapshot,
+        e_rbest: &BestForeignSnapshot,
+    ) -> BmcaDecision {
+        let d_0 = self.local_candidate.snapshot();
+        if d_0.is_authoritative() {
+            Self::d0_better_or_better_by_topology_than_e_rbest(&d_0, e_rbest)
+        } else {
+            self.d0_better_or_better_by_topology_than_e_best(&d_0, e_best, e_rbest)
+        }
+    }
+
+    fn d0_better_or_better_by_topology_than_e_rbest(
+        d_0: &ClockDS,
+        e_rbest: &BestForeignSnapshot,
+    ) -> BmcaDecision {
+        if d_0.better_than_foreign(e_rbest) {
+            BmcaDecision::Master(BmcaMasterDecision::new(
+                BmcaMasterDecisionPoint::M1,
+                StepsRemoved::new(0), // IEEE 1588-2019 §3.9.5; Tbl. 30 (stepsRemoved=0 when acting as GM)
+                *d_0.identity(),
+            ))
+        } else {
+            BmcaDecision::Passive // Passive decision point P1
+        }
+    }
+
+    fn d0_better_or_better_by_topology_than_e_best(
+        &self,
+        d_0: &ClockDS,
+        e_best: &BestForeignSnapshot,
+        e_rbest: &BestForeignSnapshot,
+    ) -> BmcaDecision {
+        if d_0.better_than_foreign(e_best) {
+            BmcaDecision::Master(BmcaMasterDecision::new(
+                BmcaMasterDecisionPoint::M2,
+                StepsRemoved::new(0), // IEEE 1588-2019 §3.9.5; Tbl. 30 (stepsRemoved=0 when acting as master)
+                *d_0.identity(),
+            ))
+        } else if let Some(parent) = e_best.parent_if_received_on_port(self.port_number) {
+            BmcaDecision::Slave(parent) // Slave decision point S1
+        } else {
+            // Only a qualified e_best can reach this point (IEEE 1588-2019 §9.3.3; Fig. 33).
+            debug_assert!(matches!(e_best, BestForeignSnapshot::Qualified { .. }));
+            Self::e_best_better_by_topology_than_e_rbest(e_best, e_rbest)
+        }
+    }
+
+    fn e_best_better_by_topology_than_e_rbest(
+        e_best: &BestForeignSnapshot,
+        e_rbest: &BestForeignSnapshot,
+    ) -> BmcaDecision {
+        // TODO: this comparison shall be topology-only, as the method name suggests.
+        // See IEEE 1588-2019 §9.3.3; Fig. 33, diamond for decision point P2 vs M3.
+        if e_best.better_than(e_rbest) {
+            BmcaDecision::Passive // Passive decision point P2
+        } else {
+            BmcaDecision::Master(BmcaMasterDecision::new(
+                BmcaMasterDecisionPoint::M3,
+                StepsRemoved::new(0), // TODO: use currently used steps removed field here
+                // unwrap is safe here, because only a qualified e_best can win against d_0, see above.
+                e_best.grandmaster_id().unwrap(),
+            ))
+        }
+    }
 }
 
 /// Encapsulates change detection and state decision event triggering.
@@ -102,94 +275,6 @@ impl<'a> StateDecisionEventTrigger<'a> {
             self.previous_best_foreign = current;
             self.state_decision_event
                 .trigger(self.received_on_port, current);
-        }
-    }
-}
-
-/// Incremental Best Master Clock Algorithm interface.
-///
-/// The BMCA is driven by Announce reception: each received Announce contributes a new observation
-/// about a foreign clock candidate. Implementations keep local state (e.g. qualification windows)
-/// and can emit a high-level decision once enough information is available.
-pub(crate) trait Bmca {
-    /// Consider a new Announce-derived snapshot for a foreign clock candidate.
-    ///
-    /// `log_announce_interval` should be the interval announced by the sender, and is used for
-    /// qualification and staleness decisions.
-    ///
-    /// Implementations should check for changes in the best foreign dataset and trigger state
-    /// decision events when changes occur.
-    fn consider(
-        &mut self,
-        source_port_identity: PortIdentity,
-        foreign_clock_ds: ClockDS,
-        log_announce_interval: LogInterval,
-        now: Instant,
-    );
-
-    /// Return the latest BMCA decision, if one should be acted upon.
-    ///
-    /// Returning `None` means "no new decision": either not enough information is available yet
-    /// (e.g. no qualified foreign candidates), or the decision would be identical to the currently
-    /// tracked parent/grandmaster.
-    fn decision(&self, e_best: &BestForeignSnapshot) -> Option<BmcaDecision>;
-}
-
-/// Storage surface for foreign clock records.
-///
-/// The BMCA needs to retain foreign clock candidates, update them on subsequent Announce messages,
-/// qualify them, and efficiently retrieve the best qualified candidate.
-///
-/// This is a trait to keep the core portable across `std` and `no_std` environments, and to allow
-/// different storage strategies (heap, heapless, fixed arrays, etc.).
-pub trait ForeignClockRecords {
-    /// Remember (insert or update) a record.
-    fn remember(&mut self, record: ForeignClockRecord);
-    /// Return the best *qualified* record, if any.
-    fn best_qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>>;
-    /// Prune stale records and return `true` if any were removed.
-    fn prune_stale(&mut self, now: Instant) -> bool;
-}
-
-pub struct BestForeignRecord<S: ForeignClockRecords> {
-    received_on_port: PortNumber,
-    foreign_clock_records: S,
-}
-
-impl<S: ForeignClockRecords> BestForeignRecord<S> {
-    /// Create a new best foreign record collection.
-    ///
-    /// `received_on_port` identifies the port this record collection is associated with.
-    /// It is used when creating snapshots to identify which port received the foreign clock data.
-    pub fn new(received_on_port: PortNumber, foreign_clock_records: S) -> Self {
-        Self {
-            received_on_port,
-            foreign_clock_records,
-        }
-    }
-
-    /// Consider a new foreign clock record observation.
-    pub(crate) fn consider(
-        &mut self,
-        source_port_identity: PortIdentity,
-        foreign_clock_ds: ClockDS,
-        log_announce_interval: LogInterval,
-        now: Instant,
-    ) {
-        self.foreign_clock_records.prune_stale(now);
-        self.foreign_clock_records.remember(ForeignClockRecord::new(
-            source_port_identity,
-            foreign_clock_ds,
-            log_announce_interval,
-            now,
-        ));
-    }
-
-    /// Return the best qualified foreign dataset snapshot observed so far.
-    pub(crate) fn snapshot(&self) -> BestForeignSnapshot {
-        match self.foreign_clock_records.best_qualified() {
-            Some(qualified) => qualified.snapshot(self.received_on_port),
-            None => BestForeignSnapshot::Empty,
         }
     }
 }
@@ -670,102 +755,6 @@ impl<'a, S: ForeignClockRecords> Bmca for PassiveBmca<'a, S> {
     }
 }
 
-/// Snapshot of best foreign datasets.
-///
-/// Represents `E_best` and `E_rbest` in the IEEE 1588-2019 §9.3.
-/// Used for storage, passing between components, and as input to BMCA decision logic.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BestForeignSnapshot {
-    /// A qualified foreign candidate and the identity of the port that announced it.
-    Qualified {
-        ds: ClockDS,
-        source_port_identity: PortIdentity,
-        received_on_port: PortNumber,
-    },
-    /// No qualified foreign candidate is currently known. The empty dataset in spec language.
-    Empty,
-}
-
-impl BestForeignSnapshot {
-    /// Return the grandmaster identity of this dataset, if non-empty.
-    pub(crate) fn grandmaster_id(&self) -> Option<ClockIdentity> {
-        match self {
-            BestForeignSnapshot::Qualified { ds, .. } => Some(*ds.identity()),
-            BestForeignSnapshot::Empty => None,
-        }
-    }
-
-    /// Return `true` if `self` is better than `other` according to BMCA dataset comparison.
-    pub(crate) fn better_than(&self, other: &BestForeignSnapshot) -> bool {
-        match (self, other) {
-            (
-                BestForeignSnapshot::Qualified { ds: ds1, .. },
-                BestForeignSnapshot::Qualified { ds: ds2, .. },
-            ) => ds1.better_than(ds2),
-            (BestForeignSnapshot::Qualified { .. }, BestForeignSnapshot::Empty) => true,
-            (BestForeignSnapshot::Empty, BestForeignSnapshot::Qualified { .. }) => false,
-            (BestForeignSnapshot::Empty, BestForeignSnapshot::Empty) => false,
-        }
-    }
-
-    /// Return the parent port identity if this dataset was received on the given port.
-    pub(crate) fn parent_if_received_on_port(
-        &self,
-        port: PortNumber,
-    ) -> Option<ParentPortIdentity> {
-        match self {
-            BestForeignSnapshot::Qualified {
-                source_port_identity,
-                received_on_port,
-                ..
-            } => {
-                (*received_on_port == port).then(|| ParentPortIdentity::new(*source_port_identity))
-            }
-            BestForeignSnapshot::Empty => None,
-        }
-    }
-}
-
-/// Foreign grandmaster candidates storage surface to present the cross-port shared best
-/// foreign dataset.
-///
-/// Infrastructure implementations own storage strategy, locking, etc.
-pub trait ForeignGrandMasterCandidates {
-    /// Remember or update what a port reports (qualified candidate or empty).
-    ///
-    /// `port` identifies which port is reporting. For `Empty` snapshots, this signals
-    /// that the port has no qualified candidates and allows the store to update its
-    /// per-port tracking accordingly.
-    fn remember(&self, port: PortNumber, snapshot: BestForeignSnapshot);
-
-    /// Return the best qualified foreign candidate across all ports.
-    fn best(&self) -> BestForeignSnapshot;
-}
-
-// Simple in-memory implementation of ForeignGrandMasterCandidates for single-port use cases.
-impl ForeignGrandMasterCandidates for Cell<BestForeignSnapshot> {
-    fn remember(&self, port: PortNumber, snapshot: BestForeignSnapshot) {
-        debug_assert!(
-            port == PortNumber::new(1),
-            "only single-port use cases supported"
-        );
-        debug_assert!(
-            match snapshot {
-                BestForeignSnapshot::Qualified {
-                    received_on_port, ..
-                } => received_on_port == PortNumber::new(1),
-                BestForeignSnapshot::Empty => true,
-            },
-            "only single-port use cases supported"
-        );
-        self.set(snapshot);
-    }
-
-    fn best(&self) -> BestForeignSnapshot {
-        self.get()
-    }
-}
-
 /// Local grandmaster dataset storage surface to present the local clock's data set shared
 /// across ports.
 ///
@@ -778,119 +767,6 @@ pub trait LocalGrandMasterCandidate {
 impl LocalGrandMasterCandidate for ClockDS {
     fn snapshot(&self) -> ClockDS {
         *self
-    }
-}
-
-/// Best Master Clock Algorithm (BMCA).
-///
-/// Implements the core best master clock decision algorithm as per IEEE 1588-2019 §9.3.3, Fig. 33,
-/// excluding the first listening-mode diamond, which is extracted into `ListeningBmca`, to keep the
-/// core logic clean and simple.
-///
-/// Each BMCA instance is identified by the port number it serves, to allow multi-port scenarios.
-/// Clock-level shared storage surfaces for local and foreign candidates are injected via trait
-/// objects which represent the cross-port shared state (`D_0` and `E_best` in spec).
-///
-/// ## Known limitations:
-///  - M3 topology-only comparison is not yet implemented; see TODO in
-///    `e_best_better_by_topology_than_e_rbest`.
-pub(crate) struct BestMasterClockAlgorithm<'a> {
-    local_candidate: &'a dyn LocalGrandMasterCandidate,
-    port_number: PortNumber,
-}
-
-impl<'a> BestMasterClockAlgorithm<'a> {
-    /// Create a new BMCA evaluator for `port_number`.
-    ///
-    /// `local_candidate` supplies the local data set snapshot (`D_0`).
-    /// `foreign_candidates` aggregates best foreign snapshots across ports. (`E_best`)
-    pub fn new(
-        local_candidate: &'a dyn LocalGrandMasterCandidate,
-        port_number: PortNumber,
-    ) -> Self {
-        Self {
-            local_candidate,
-            port_number,
-        }
-    }
-
-    /// Access the currently known grandmaster via the given closure.
-    pub(crate) fn using_grandmaster<R>(&self, f: impl FnOnce(GrandMaster<'_>) -> R) -> R {
-        // TODO: once multi-port is supported, this should return the grandmaster, whether local or
-        // foreign. With only single port support atm, it's always local d_0.
-        let d_0 = self.local_candidate.snapshot();
-        f(GrandMaster::new(&d_0))
-    }
-
-    /// Evaluate the BMCA decision for the current inputs.
-    ///
-    /// The argument `e_rbest` is the best qualified foreign candidate observed on the current
-    /// port (if any).
-    pub(crate) fn decision(
-        &self,
-        e_best: &BestForeignSnapshot,
-        e_rbest: &BestForeignSnapshot,
-    ) -> BmcaDecision {
-        let d_0 = self.local_candidate.snapshot();
-        if d_0.is_authoritative() {
-            Self::d0_better_or_better_by_topology_than_e_rbest(&d_0, e_rbest)
-        } else {
-            self.d0_better_or_better_by_topology_than_e_best(&d_0, e_best, e_rbest)
-        }
-    }
-
-    fn d0_better_or_better_by_topology_than_e_rbest(
-        d_0: &ClockDS,
-        e_rbest: &BestForeignSnapshot,
-    ) -> BmcaDecision {
-        if d_0.better_than_foreign(e_rbest) {
-            BmcaDecision::Master(BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M1,
-                StepsRemoved::new(0), // IEEE 1588-2019 §3.9.5; Tbl. 30 (stepsRemoved=0 when acting as GM)
-                *d_0.identity(),
-            ))
-        } else {
-            BmcaDecision::Passive // Passive decision point P1
-        }
-    }
-
-    fn d0_better_or_better_by_topology_than_e_best(
-        &self,
-        d_0: &ClockDS,
-        e_best: &BestForeignSnapshot,
-        e_rbest: &BestForeignSnapshot,
-    ) -> BmcaDecision {
-        if d_0.better_than_foreign(e_best) {
-            BmcaDecision::Master(BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M2,
-                StepsRemoved::new(0), // IEEE 1588-2019 §3.9.5; Tbl. 30 (stepsRemoved=0 when acting as master)
-                *d_0.identity(),
-            ))
-        } else if let Some(parent) = e_best.parent_if_received_on_port(self.port_number) {
-            BmcaDecision::Slave(parent) // Slave decision point S1
-        } else {
-            // Only a qualified e_best can reach this point (IEEE 1588-2019 §9.3.3; Fig. 33).
-            debug_assert!(matches!(e_best, BestForeignSnapshot::Qualified { .. }));
-            Self::e_best_better_by_topology_than_e_rbest(e_best, e_rbest)
-        }
-    }
-
-    fn e_best_better_by_topology_than_e_rbest(
-        e_best: &BestForeignSnapshot,
-        e_rbest: &BestForeignSnapshot,
-    ) -> BmcaDecision {
-        // TODO: this comparison shall be topology-only, as the method name suggests.
-        // See IEEE 1588-2019 §9.3.3; Fig. 33, diamond for decision point P2 vs M3.
-        if e_best.better_than(e_rbest) {
-            BmcaDecision::Passive // Passive decision point P2
-        } else {
-            BmcaDecision::Master(BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M3,
-                StepsRemoved::new(0), // TODO: use currently used steps removed field here
-                // unwrap is safe here, because only a qualified e_best can win against d_0, see above.
-                e_best.grandmaster_id().unwrap(),
-            ))
-        }
     }
 }
 
@@ -926,30 +802,6 @@ pub enum BmcaMasterDecisionPoint {
     M1,
     M2,
     M3,
-}
-
-/// High‑level BMCA outcome for a given port.
-///
-/// This is the “so what?” result that the port state machine can act upon, matching the state
-/// transition annotations in IEEE 1588-2019 §9.2.5; Fig. 30 & 31.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BmcaDecision {
-    /// The port should act as a master. (BMC_MASTER as to IEEE 1588-2019)
-    Master(BmcaMasterDecision),
-    /// The port should act as a slave, following the given parent. (BMC_SLAVE as to IEEE 1588-2019)
-    Slave(ParentPortIdentity),
-    /// The port should be passive. (BMC_PASSIVE as to IEEE 1588-2019)
-    Passive,
-}
-
-impl BmcaDecision {
-    pub(crate) fn to_state_decision(self) -> Option<StateDecision> {
-        match self {
-            BmcaDecision::Master(decision) => Some(StateDecision::RecommendedMaster(decision)),
-            BmcaDecision::Slave(parent) => Some(StateDecision::RecommendedSlave(parent)),
-            BmcaDecision::Passive => Some(StateDecision::RecommendedPassive),
-        }
-    }
 }
 
 /// BMCA decision for entering a master/pre‑master state.
@@ -1033,437 +885,13 @@ impl QualificationTimeoutPolicy {
     }
 }
 
-/// A single foreign clock record tracked by BestForeignRecord and stored in
-/// `ForeignClockRecords`. It represents a foreign master clock candidate discovered via
-/// Announce messages along with its source port identity and qualification state.
-///
-/// A record becomes *qualified* once enough Announce messages have been received within the
-/// `ForeignMasterTimeWindow`. Until qualified, the record is retained but not considered for
-/// `best_qualified` selection.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ForeignClockRecord {
-    source_port_identity: PortIdentity,
-    foreign_clock_ds: ClockDS,
-    qualification: SlidingWindowQualification,
-}
-
-impl ForeignClockRecord {
-    pub(crate) fn new(
-        source_port_identity: PortIdentity,
-        foreign_clock_ds: ClockDS,
-        log_announce_interval: LogInterval,
-        now: Instant,
-    ) -> Self {
-        let window = ForeignMasterTimeWindow::new(log_announce_interval).duration();
-
-        Self {
-            source_port_identity,
-            foreign_clock_ds,
-            qualification: SlidingWindowQualification::new_unqualified(now, window),
-        }
-    }
-
-    /// Create a record for a new foreign clock that is already qualified. This is mainly
-    /// useful for tests, where we want to set up qualified foreign clock records directly.
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn new_qualified(
-        source_port_identity: PortIdentity,
-        foreign_clock_ds: ClockDS,
-        log_announce_interval: LogInterval,
-        now: Instant,
-    ) -> Self {
-        let window = ForeignMasterTimeWindow::new(log_announce_interval).duration();
-
-        Self {
-            source_port_identity,
-            foreign_clock_ds,
-            qualification: SlidingWindowQualification {
-                last: now,
-                prev: Some(now),
-                window,
-            },
-        }
-    }
-
-    /// Return `true` if this record originates from `source_port_identity`.
-    pub(crate) fn same_source_as(&self, source_port_identity: &PortIdentity) -> bool {
-        self.source_port_identity == *source_port_identity
-    }
-
-    /// Return `true` if this record is better than `other` purely based on the data sets,
-    /// ignoring qualification status.
-    pub(crate) fn better_by_dataset_than(&self, other: &ForeignClockRecord) -> bool {
-        self.foreign_clock_ds.better_than(&other.foreign_clock_ds)
-    }
-
-    /// Update this record from a newly observed record of the same source.
-    ///
-    /// This potentially:
-    /// - advances the qualification window,
-    /// - changes qualification status, and/or
-    /// - updates the underlying data set.
-    pub(crate) fn update_from(&mut self, record: &ForeignClockRecord) -> ForeignClockStatus {
-        debug_assert!(self.source_port_identity == record.source_port_identity);
-
-        let was_qualified = self.qualification.is_qualified();
-        self.qualification
-            .qualify(record.qualification.last, record.qualification.window);
-        let is_qualified = self.qualification.is_qualified();
-
-        let data_set_changed = self.foreign_clock_ds != record.foreign_clock_ds;
-        if data_set_changed {
-            self.foreign_clock_ds = record.foreign_clock_ds;
-        }
-
-        if was_qualified != is_qualified || (is_qualified && data_set_changed) {
-            ForeignClockStatus::Updated
-        } else {
-            ForeignClockStatus::Unchanged
-        }
-    }
-
-    /// Return a qualified foreign clock record if this record has become qualified.
-    pub(crate) fn qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>> {
-        if self.qualification.is_qualified() {
-            Some(QualifiedForeignClockRecord::new(
-                &self.foreign_clock_ds,
-                &self.source_port_identity,
-            ))
-        } else {
-            None
-        }
-    }
-
-    /// Return the source port identity that originated this record.
-    pub(crate) fn source_port_identity(&self) -> &PortIdentity {
-        &self.source_port_identity
-    }
-
-    /// Return `true` if this record is stale at the given time.
-    pub(crate) fn is_stale(&self, now: Instant) -> bool {
-        self.qualification.is_stale(now)
-    }
-}
-
-/// A qualified foreign clock record, guaranteed to have a valid dataset.
-#[derive(Debug, PartialEq, Eq)]
-pub struct QualifiedForeignClockRecord<'a> {
-    dataset: &'a ClockDS,
-    source_port_identity: &'a PortIdentity,
-}
-
-impl<'a> QualifiedForeignClockRecord<'a> {
-    pub(crate) fn new(dataset: &'a ClockDS, source_port_identity: &'a PortIdentity) -> Self {
-        Self {
-            dataset,
-            source_port_identity,
-        }
-    }
-
-    pub(crate) fn snapshot(&self, port_number: PortNumber) -> BestForeignSnapshot {
-        BestForeignSnapshot::Qualified {
-            ds: *self.dataset,
-            source_port_identity: *self.source_port_identity,
-            received_on_port: port_number,
-        }
-    }
-}
-
-impl Ord for ForeignClockRecord {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        use core::cmp::Ordering::*;
-
-        let ord = match (
-            self.qualification.is_qualified(),
-            other.qualification.is_qualified(),
-        ) {
-            (true, true) => {
-                if self.foreign_clock_ds.better_than(&other.foreign_clock_ds) {
-                    Less
-                } else if other.foreign_clock_ds.better_than(&self.foreign_clock_ds) {
-                    Greater
-                } else {
-                    Equal
-                }
-            }
-            (true, false) => Less,
-            (false, true) => Greater,
-            (false, false) => Equal,
-        };
-
-        if ord == Equal {
-            self.source_port_identity.cmp(&other.source_port_identity)
-        } else {
-            ord
-        }
-    }
-}
-
-impl PartialOrd for ForeignClockRecord {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-/// Result of considering a foreign clock record.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ForeignClockStatus {
-    /// The record remained unqualified or unchanged.
-    Unchanged,
-    /// The record became newly qualified or its data set changed.
-    Updated,
-}
-
-/// The `ForeignMasterTimeWindow` derived from a port's announce interval.
-///
-/// The window defines how tightly spaced Announce messages must be to qualify a foreign record and
-/// how long a record can remain silent before being considered stale.
-///
-/// See IEEE 1588-2019 §9.3.2.4.5
-struct ForeignMasterTimeWindow {
-    log_announce_interval: LogInterval,
-}
-
-impl ForeignMasterTimeWindow {
-    fn new(log_announce_interval: LogInterval) -> Self {
-        Self {
-            log_announce_interval,
-        }
-    }
-
-    fn duration(&self) -> Duration {
-        self.log_announce_interval.duration().saturating_mul(4)
-    }
-}
-
-/// Sliding window qualification policy for foreign master records. Encodes the logic to only
-/// consider an observed foreign clock as qualified once enough Announce messages have been received
-/// within a given time window.
-///
-/// This is intentionally a small and self-contained state machine that can later be replaced by a
-/// different strategy (e.g. higher thresholds) without rippling into the rest of the module.
-///
-/// Notes
-/// - Current behavior assumes a threshold of `2` Announce messages within the window. As defined in
-///   IEEE 1588-2019 §9.3.2.4.5 (FOREIGN_MASTER_THRESHOLD = 2).
-///
-/// See
-/// - IEEE 1588-2019 §9.3.2.4.5
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SlidingWindowQualification {
-    last: Instant,
-    prev: Option<Instant>,
-    window: Duration,
-}
-
-impl SlidingWindowQualification {
-    fn new_unqualified(first: Instant, window: Duration) -> Self {
-        Self {
-            last: first,
-            prev: None,
-            window,
-        }
-    }
-
-    /// Try to qualify this record based on a newly observed announce at `now`.
-    fn qualify(&mut self, now: Instant, window: Duration) {
-        self.prev = Some(self.last);
-        self.last = now;
-        self.window = window;
-    }
-
-    /// Return `true` if this record is currently qualified.
-    fn is_qualified(&self) -> bool {
-        let delta = match self.prev {
-            Some(prev) => self.last.checked_sub(prev),
-            None => None,
-        };
-
-        delta.is_some_and(|delta| delta <= self.window)
-    }
-
-    /// Return `true` if this record is stale at the given time.
-    fn is_stale(&self, now: Instant) -> bool {
-        let delta = now.checked_sub(self.last);
-        delta.is_none_or(|delta| delta > self.window)
-    }
-}
-
-/// Data set describing a grandmaster candidate.
-///
-/// This corresponds closely to the fields carried in Announce messages and
-/// used by the BMCA when comparing local and foreign clocks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ClockDS {
-    identity: ClockIdentity,
-    priority1: Priority1,
-    priority2: Priority2,
-    quality: ClockQuality,
-    steps_removed: StepsRemoved,
-}
-
-impl ClockDS {
-    const PRIORITY1_OFFSET: usize = 0;
-    const QUALITY_RANGE: Range<usize> = 1..5;
-    const PRIORITY2_OFFSET: usize = 5;
-    const IDENTITY_RANGE: Range<usize> = 6..14;
-    const STEPS_REMOVED_OFFSET: Range<usize> = 14..16;
-
-    pub fn new(
-        identity: ClockIdentity,
-        priority1: Priority1,
-        priority2: Priority2,
-        quality: ClockQuality,
-        steps_removed: StepsRemoved,
-    ) -> Self {
-        Self {
-            identity,
-            priority1,
-            priority2,
-            quality,
-            steps_removed,
-        }
-    }
-
-    /// Return the clock identity of this dataset.
-    pub fn identity(&self) -> &ClockIdentity {
-        &self.identity
-    }
-
-    /// Return `true` if this dataset represents an authoritative clock.
-    ///
-    /// A clock is authoritative when its clock class is 1 to 127 inclusive, as denoted in
-    /// the spec multiple times, but not named explicitly.
-    ///
-    /// See
-    /// - IEEE 1588-2019 §9.3.3; Fig. 33
-    pub(crate) fn is_authoritative(&self) -> bool {
-        self.quality.is_authoritative()
-    }
-
-    /// Parse a `ClockDS` from the binary representation used on the
-    /// wire (16‑byte BMCA comparison tuple).
-    pub(crate) fn from_wire(buf: &[u8; 16]) -> Self {
-        Self {
-            identity: ClockIdentity::new(&[
-                buf[Self::IDENTITY_RANGE.start],
-                buf[Self::IDENTITY_RANGE.start + 1],
-                buf[Self::IDENTITY_RANGE.start + 2],
-                buf[Self::IDENTITY_RANGE.start + 3],
-                buf[Self::IDENTITY_RANGE.start + 4],
-                buf[Self::IDENTITY_RANGE.start + 5],
-                buf[Self::IDENTITY_RANGE.start + 6],
-                buf[Self::IDENTITY_RANGE.start + 7],
-            ]),
-            priority1: Priority1::new(buf[ClockDS::PRIORITY1_OFFSET]),
-            priority2: Priority2::new(buf[ClockDS::PRIORITY2_OFFSET]),
-            quality: ClockQuality::from_wire(&[
-                buf[ClockDS::QUALITY_RANGE.start],
-                buf[ClockDS::QUALITY_RANGE.start + 1],
-                buf[ClockDS::QUALITY_RANGE.start + 2],
-                buf[ClockDS::QUALITY_RANGE.start + 3],
-            ]),
-            steps_removed: StepsRemoved::new(u16::from_be_bytes([
-                buf[ClockDS::STEPS_REMOVED_OFFSET.start],
-                buf[ClockDS::STEPS_REMOVED_OFFSET.start + 1],
-            ])),
-        }
-    }
-
-    /// Return `true` if this dataset is strictly better than `other`
-    /// according to BMCA ranking rules.
-    pub(crate) fn better_than(&self, other: &ClockDS) -> bool {
-        if self.identity == other.identity {
-            return self.steps_removed < other.steps_removed;
-        }
-
-        let a = (
-            &self.priority1,
-            &self.quality,
-            &self.priority2,
-            &self.identity,
-        );
-        let b = (
-            &other.priority1,
-            &other.quality,
-            &other.priority2,
-            &other.identity,
-        );
-
-        a < b
-    }
-
-    pub(crate) fn better_than_foreign(&self, other: &BestForeignSnapshot) -> bool {
-        match other {
-            BestForeignSnapshot::Qualified { ds, .. } => self.better_than(ds),
-            BestForeignSnapshot::Empty => true,
-        }
-    }
-
-    /// Serialize this data set into the 16‑byte BMCA comparison tuple
-    /// representation.
-    pub(crate) fn to_wire(self) -> [u8; 16] {
-        let mut bytes = [0u8; 16];
-        bytes[Self::PRIORITY1_OFFSET] = self.priority1.as_u8();
-        bytes[Self::QUALITY_RANGE].copy_from_slice(&self.quality.to_wire());
-        bytes[Self::PRIORITY2_OFFSET] = self.priority2.as_u8();
-        bytes[Self::IDENTITY_RANGE].copy_from_slice(self.identity.as_bytes());
-        bytes[Self::STEPS_REMOVED_OFFSET.start..Self::STEPS_REMOVED_OFFSET.end]
-            .copy_from_slice(&self.steps_removed.to_be_bytes());
-        bytes
-    }
-}
-
-/// `defaultDS.priority1` as defined in IEEE 1588-2019.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Priority1(u8);
-
-impl Priority1 {
-    /// Create a new `Priority1` from a raw `u8` value.
-    pub const fn new(value: u8) -> Self {
-        Self(value)
-    }
-
-    /// Return the underlying `u8` value.
-    pub(crate) fn as_u8(self) -> u8 {
-        self.0
-    }
-}
-
-impl From<u8> for Priority1 {
-    fn from(value: u8) -> Self {
-        Self::new(value)
-    }
-}
-
-/// `defaultDS.priority2` as defined in IEEE 1588-2019.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Priority2(u8);
-
-impl Priority2 {
-    /// Create a new `Priority2` from a raw `u8` value.
-    pub const fn new(value: u8) -> Self {
-        Self(value)
-    }
-
-    /// Return the underlying `u8` value.
-    pub(crate) fn as_u8(self) -> u8 {
-        self.0
-    }
-}
-
-impl From<u8> for Priority2 {
-    fn from(value: u8) -> Self {
-        Self::new(value)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use crate::clock::LocalClock;
+    use crate::dataset::Priority1;
+    use crate::foreign::{ForeignClockRecord, ForeignGrandMasterCandidates};
     use crate::infra::infra_support::{ForeignClockRecordsVec, MultiPortForeignCandidates};
     use crate::log::NOOP_CLOCK_METRICS;
     use crate::port::{PortIdentity, PortNumber};
@@ -1741,10 +1169,6 @@ mod tests {
         let other_port = PortNumber::new(2);
 
         let default_ds = TestClockDS::default_low_grade_slave_only().dataset();
-        debug_assert!(
-            !default_ds.is_authoritative(),
-            "test expects non-authoritative local clock behavior"
-        );
 
         // Seed Ebest on another local receive port. It must remain best after Erbest is remembered.
         let better = TestClockDS::default_high_grade().with_priority1(Priority1::new(1));
@@ -1776,275 +1200,6 @@ mod tests {
     }
 
     #[test]
-    fn sliding_window_qualification_requires_two_fast_announces() {
-        let t0 = Instant::from_secs(0);
-        let high = TestClockDS::default_high_grade();
-        let foreign_high = high.dataset();
-        let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
-        let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
-
-        // First Announce: record is created, still unqualified.
-        assert!(record.qualified().is_none());
-
-        // Second Announce within the window makes it qualified.
-        let new_record = ForeignClockRecord::new(
-            port_id,
-            foreign_high,
-            LogInterval::new(0),
-            Instant::from_secs(1),
-        );
-        record.update_from(&new_record);
-        assert!(record.qualified().is_some());
-    }
-
-    #[test]
-    fn sliding_window_qualification_drops_on_slow_announces() {
-        let t0 = Instant::from_secs(0);
-        let high = TestClockDS::default_high_grade();
-        let foreign_high = high.dataset();
-        let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
-        let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
-
-        // A second fast announce to qualify.
-        let new_record = ForeignClockRecord::new(
-            port_id,
-            foreign_high,
-            LogInterval::new(0),
-            Instant::from_secs(1),
-        );
-        record.update_from(&new_record);
-        assert!(record.qualified().is_some());
-
-        // After a long gap, a single announce is not enough to stay qualified.
-        let updated_record = ForeignClockRecord::new(
-            port_id,
-            foreign_high,
-            LogInterval::new(0),
-            Instant::from_secs(10),
-        );
-        record.update_from(&updated_record);
-        assert!(record.qualified().is_none());
-    }
-
-    #[test]
-    fn sliding_window_never_qualifies_with_one_annonce_per_window() {
-        let t0 = Instant::from_secs(0);
-        let high = TestClockDS::default_high_grade();
-        let foreign_high = high.dataset();
-        let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
-        let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
-
-        // Announce just slower than foreignMasterTimeWindow; density never reaches 2
-        // within any sliding window.
-        let updated_record = ForeignClockRecord::new(
-            port_id,
-            foreign_high,
-            LogInterval::new(0),
-            Instant::from_secs(5),
-        );
-        record.update_from(&updated_record);
-        assert!(record.qualified().is_none());
-
-        let updated_record = ForeignClockRecord::new(
-            port_id,
-            foreign_high,
-            LogInterval::new(0),
-            Instant::from_secs(10),
-        );
-        record.update_from(&updated_record);
-        assert!(record.qualified().is_none());
-
-        let updated_record = ForeignClockRecord::new(
-            port_id,
-            foreign_high,
-            LogInterval::new(0),
-            Instant::from_secs(15),
-        );
-        record.update_from(&updated_record);
-        assert!(record.qualified().is_none());
-    }
-
-    #[test]
-    fn qualified_dataset_change_reports_updated() {
-        let t0 = Instant::from_secs(0);
-        let high = TestClockDS::default_high_grade();
-        let foreign_high = high.dataset();
-        let foreign_low = TestClockDS::default_low_grade_slave_only().dataset();
-        let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
-        let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
-
-        // First fast Announce qualifies the record (two samples: t0 and t1).
-        let new_record = ForeignClockRecord::new(
-            port_id,
-            foreign_high,
-            LogInterval::new(0),
-            Instant::from_secs(1),
-        );
-        record.update_from(&new_record);
-        assert!(record.qualified().is_some());
-
-        // Change dataset while still qualified.
-        let updated_record = ForeignClockRecord::new(
-            port_id,
-            foreign_low,
-            LogInterval::new(0),
-            Instant::from_secs(2),
-        );
-        let status = record.update_from(&updated_record);
-        assert_eq!(status, ForeignClockStatus::Updated);
-        assert_eq!(
-            record.qualified().map(|q| q.snapshot(PortNumber::new(1))),
-            Some(BestForeignSnapshot::Qualified {
-                ds: foreign_low,
-                source_port_identity: port_id,
-                received_on_port: PortNumber::new(1),
-            })
-        );
-    }
-
-    #[test]
-    fn unqualified_dataset_change_does_not_report_updated() {
-        let t0 = Instant::from_secs(0);
-        let high = TestClockDS::default_high_grade();
-        let foreign_high = high.dataset();
-        let foreign_low = TestClockDS::default_low_grade_slave_only().dataset();
-        let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
-        let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
-
-        // First slow Announce: still unqualified (spacing >= window).
-        let updated_record = ForeignClockRecord::new(
-            port_id,
-            foreign_high,
-            LogInterval::new(0),
-            Instant::from_secs(10),
-        );
-        let _ = record.update_from(&updated_record);
-        assert!(record.qualified().is_none());
-
-        // Second slow Announce with changed dataset: still unqualified and should report Unchanged.
-        let updated_record = ForeignClockRecord::new(
-            port_id,
-            foreign_low,
-            LogInterval::new(0),
-            Instant::from_secs(20),
-        );
-        let status = record.update_from(&updated_record);
-        assert_eq!(status, ForeignClockStatus::Unchanged);
-        assert!(record.qualified().is_none());
-    }
-
-    #[test]
-    fn sliding_window_edge_drops_qualification_but_not_stale() {
-        let t0 = Instant::from_secs(0);
-        let high = TestClockDS::default_high_grade();
-        let foreign_high = high.dataset();
-        let port_id = PortIdentity::new(high.clock_identity(), PortNumber::new(1));
-        let mut record = ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), t0);
-
-        // Qualify with a fast Announce.
-        let new_record = ForeignClockRecord::new(
-            port_id,
-            foreign_high,
-            LogInterval::new(0),
-            Instant::from_secs(1),
-        );
-        record.update_from(&new_record);
-        assert!(record.qualified().is_some());
-
-        // Next Announce spaced just beyond the window drops qualification
-        // but the record is not stale yet.
-        let now = Instant::from_nanos(5_000_000_001);
-        let updated_record =
-            ForeignClockRecord::new(port_id, foreign_high, LogInterval::new(0), now);
-        let _ = record.update_from(&updated_record);
-        assert!(record.qualified().is_none());
-        assert!(!record.is_stale(now));
-    }
-
-    #[test]
-    fn test_foreign_clock_ordering() {
-        let high = TestClockDS::default_high_grade().dataset();
-        let mid = TestClockDS::default_mid_grade().dataset();
-        let low = TestClockDS::default_low_grade_slave_only().dataset();
-
-        assert!(high.better_than(&mid));
-        assert!(!mid.better_than(&high));
-
-        assert!(high.better_than(&low));
-        assert!(!low.better_than(&high));
-
-        assert!(mid.better_than(&low));
-        assert!(!low.better_than(&mid));
-    }
-
-    #[test]
-    fn test_foreign_clock_equality() {
-        let c1 = TestClockDS::default_high_grade().dataset();
-        let c2 = TestClockDS::default_high_grade().dataset();
-
-        assert!(!c1.better_than(&c2));
-        assert!(!c2.better_than(&c1));
-        assert_eq!(c1, c2);
-    }
-
-    #[test]
-    fn foreign_clock_ds_compares_priority1_before_quality() {
-        let a = TestClockDS::default_high_grade()
-            .with_priority1(Priority1::new(10))
-            .dataset();
-        let b = TestClockDS::atomic_grandmaster()
-            .with_priority1(Priority1::new(20))
-            .dataset();
-
-        // Atomic grandmaster looses againt default high grade because of lower priority1.
-        assert!(a.better_than(&b));
-        assert!(!b.better_than(&a));
-    }
-
-    #[test]
-    fn foreign_clock_ds_compares_priority2_after_quality() {
-        let a = TestClockDS::default_high_grade()
-            .with_clock_identity(ClockIdentity::new(&[0x00; 8]))
-            .with_priority2(Priority2::new(10))
-            .dataset();
-        let b = TestClockDS::default_high_grade()
-            .with_clock_identity(ClockIdentity::new(&[0x01; 8]))
-            .with_priority2(Priority2::new(20))
-            .dataset();
-
-        // Same p1 and quality; lower p2 wins.
-        assert!(a.better_than(&b));
-        assert!(!b.better_than(&a));
-    }
-
-    #[test]
-    fn foreign_clock_ds_tiebreaks_on_identity_last() {
-        let a = TestClockDS::default_high_grade()
-            .with_clock_identity(ClockIdentity::new(&[0x00; 8]))
-            .dataset();
-        let b = TestClockDS::default_high_grade()
-            .with_clock_identity(ClockIdentity::new(&[0x01; 8]))
-            .dataset();
-
-        // All fields equal except identity; lower identity better than higher.
-        assert!(a.better_than(&b));
-        assert!(!b.better_than(&a));
-    }
-
-    #[test]
-    fn foreign_clock_ds_prefers_lower_steps_removed_when_identity_equal() {
-        let a = TestClockDS::default_high_grade()
-            .with_steps_removed(StepsRemoved::new(1))
-            .dataset();
-        let b = TestClockDS::default_high_grade()
-            .with_steps_removed(StepsRemoved::new(3))
-            .dataset();
-
-        assert!(a.better_than(&b));
-        assert!(!b.better_than(&a));
-    }
-
-    #[test]
     fn listening_bmca_prunes_stale_foreign_clocks_on_next_announce_reception() {
         let high = TestClockDS::default_high_grade();
         let mid = TestClockDS::default_mid_grade();
@@ -2071,7 +1226,7 @@ mod tests {
                 Instant::from_secs(2),
             ),
         ];
-        let records = ForeignClockRecordsVec::from_records(&stale_records);
+        let mut records = ForeignClockRecordsVec::from_records(&stale_records);
 
         let gm_port_id = PortIdentity::new(gm.clock_identity(), PortNumber::new(1));
         let gm_foreign = gm.dataset();
@@ -2081,7 +1236,7 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
-            BestForeignRecord::new(PortNumber::new(1), records),
+            BestForeignRecord::new(PortNumber::new(1), &mut records),
             StateDecisionEventTrigger::new(
                 &state_decision_event,
                 BestForeignSnapshot::Empty,
@@ -2103,13 +1258,11 @@ mod tests {
         );
 
         assert_eq!(
-            bmca.best_foreign.foreign_clock_records.len(),
+            records.len(),
             1,
             "stale foreign clock records should have been pruned"
         );
-        let best = bmca
-            .best_foreign
-            .foreign_clock_records
+        let best = records
             .best_qualified()
             .expect("record should be qualified after two announces");
         assert_eq!(

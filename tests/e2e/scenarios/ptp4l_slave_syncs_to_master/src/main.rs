@@ -5,10 +5,8 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
 use rptp::{
-    bmca::{ClockDS, Priority1, Priority2},
-    clock::{
-        ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved, TimeScale,
-    },
+    clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
+    dataset::{ClockDS, Priority1, Priority2, StepsRemoved},
     log::NOOP_CLOCK_METRICS,
     port::{DomainNumber, SingleDomainPortMap},
     servo::{Servo, SteppingServo},
@@ -61,11 +59,7 @@ async fn main() -> std::io::Result<()> {
         .port(
             &physical_port,
             system_tx.clone(),
-            ClockTxTimestamping::new(
-                &virtual_clock,
-                system_tx.clone(),
-                domain_number,
-            ),
+            ClockTxTimestamping::new(&virtual_clock, system_tx.clone(), domain_number),
         )
         .expect("ordinary clock has one port");
     let portmap = SingleDomainPortMap::new(domain_number, port);

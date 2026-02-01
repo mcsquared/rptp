@@ -32,9 +32,9 @@
 //! - `heapless-storage` (default): enables heapless storage helpers for constrained targets.
 //! - `test-support`: enables extra test helpers (fake clocks/ports, etc.).
 
-pub mod bmca;
 pub mod clock;
-pub mod e2e;
+pub mod dataset;
+pub mod foreign;
 pub mod log;
 pub mod message;
 pub mod ordinary;
@@ -47,6 +47,8 @@ pub mod time;
 pub mod timestamping;
 pub mod wire;
 
+mod bmca;
+mod e2e;
 mod faulty;
 mod initializing;
 mod listening;

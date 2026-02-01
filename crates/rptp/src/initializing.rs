@@ -15,10 +15,8 @@
 //! decides when sockets/timers/clocks are ready, and the domain state machine decides what that
 //! means for behaviour.
 
-use crate::bmca::{
-    BestForeignRecord, BestMasterClockAlgorithm, ForeignClockRecords, ListeningBmca,
-    StateDecisionEventTrigger,
-};
+use crate::bmca::{BestMasterClockAlgorithm, ListeningBmca, StateDecisionEventTrigger};
+use crate::foreign::{BestForeignRecord, ForeignClockRecords};
 use crate::log::PortEvent;
 use crate::port::Port;
 use crate::portstate::PortState;

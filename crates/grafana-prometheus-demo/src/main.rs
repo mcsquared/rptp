@@ -3,9 +3,8 @@ mod node;
 
 use std::rc::Rc;
 
-use rptp::bmca::ClockDS;
-use rptp::bmca::{Priority1, Priority2};
-use rptp::clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved};
+use rptp::clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality};
+use rptp::dataset::{ClockDS, Priority1, Priority2, StepsRemoved};
 use rptp::port::DomainNumber;
 use rptp::profile::PortProfile;
 use rptp::servo::{Drift, ServoThreshold};

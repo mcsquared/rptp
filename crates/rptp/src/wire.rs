@@ -1,4 +1,4 @@
-use crate::bmca::ClockDS;
+use crate::dataset::ClockDS;
 use crate::message::SequenceId;
 use crate::port::DomainNumber;
 use crate::port::PortIdentity;
@@ -491,10 +491,8 @@ bitflags! {
 mod tests {
     use super::*;
 
-    use crate::bmca::{ClockDS, Priority1, Priority2};
-    use crate::clock::{
-        ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved, TimeScale,
-    };
+    use crate::clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, TimeScale};
+    use crate::dataset::{ClockDS, Priority1, Priority2, StepsRemoved};
     use crate::message::{
         AnnounceMessage, DelayRequestMessage, DelayResponseMessage, FollowUpMessage,
         TwoStepSyncMessage,

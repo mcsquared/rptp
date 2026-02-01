@@ -35,8 +35,9 @@
 
 use core::panic;
 
-use crate::bmca::{BmcaMasterDecision, ForeignClockRecords};
+use crate::bmca::BmcaMasterDecision;
 use crate::faulty::FaultyPort;
+use crate::foreign::ForeignClockRecords;
 use crate::initializing::InitializingPort;
 use crate::listening::ListeningPort;
 use crate::master::MasterPort;
@@ -352,12 +353,14 @@ mod tests {
     use super::*;
 
     use crate::bmca::{
-        BestForeignRecord, BestMasterClockAlgorithm, BmcaMasterDecision, BmcaMasterDecisionPoint,
-        ClockDS, GrandMasterTrackingBmca, ListeningBmca, ParentTrackingBmca, PassiveBmca,
+        BestMasterClockAlgorithm, BmcaMasterDecision, BmcaMasterDecisionPoint,
+        GrandMasterTrackingBmca, ListeningBmca, ParentTrackingBmca, PassiveBmca,
         QualificationTimeoutPolicy, StateDecisionEventTrigger,
     };
-    use crate::clock::{ClockIdentity, LocalClock, StepsRemoved};
+    use crate::clock::{ClockIdentity, LocalClock};
+    use crate::dataset::{ClockDS, StepsRemoved};
     use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
+    use crate::foreign::BestForeignRecord;
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, TimestampMessage, TwoStepSyncMessage};

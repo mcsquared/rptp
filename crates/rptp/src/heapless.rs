@@ -15,7 +15,7 @@
 
 use heapless::Vec;
 
-use crate::bmca::{
+use crate::foreign::{
     ForeignClockRecord, ForeignClockRecords, ForeignClockStatus, QualifiedForeignClockRecord,
 };
 

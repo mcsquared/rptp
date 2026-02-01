@@ -11,11 +11,11 @@ use cortex_m_semihosting::hprintln;
 use heapless::{Deque, Vec};
 use panic_halt as _;
 use rptp::{
-    bmca::{ClockDS, Priority1, Priority2},
     clock::{
-        Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
+        Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock,
         SynchronizableClock, TimeScale,
     },
+    dataset::{ClockDS, Priority1, Priority2, StepsRemoved},
     heapless::HeaplessForeignClockRecords,
     log::{NOOP_CLOCK_METRICS, PortEvent, PortLog},
     message::{EventMessage, MessageIngress, SystemMessage, TimestampMessage},

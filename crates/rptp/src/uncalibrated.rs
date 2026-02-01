@@ -19,10 +19,9 @@
 //! egress timestamp of that DelayReq is later reported back via `SystemMessage::Timestamp` and
 //! recorded using [`UncalibratedPort::process_delay_request`].
 
-use crate::bmca::{
-    BestForeignSnapshot, Bmca, BmcaMasterDecision, ForeignClockRecords, ParentTrackingBmca,
-};
+use crate::bmca::{Bmca, BmcaMasterDecision, ParentTrackingBmca};
 use crate::e2e::EndToEndDelayMechanism;
+use crate::foreign::{BestForeignSnapshot, ForeignClockRecords};
 use crate::log::PortEvent;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, DelayResponseMessage, EventMessage, FollowUpMessage,
@@ -307,12 +306,11 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
 mod tests {
     use super::*;
 
-    use crate::bmca::{
-        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
-        ForeignClockRecord, StateDecisionEventTrigger,
-    };
+    use crate::bmca::{BestMasterClockAlgorithm, StateDecisionEventTrigger};
     use crate::clock::{ClockIdentity, LocalClock, TimeScale};
+    use crate::dataset::ClockDS;
     use crate::e2e::DelayCycle;
+    use crate::foreign::{BestForeignRecord, BestForeignSnapshot, ForeignClockRecord};
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, DelayResponseMessage, SystemMessage};

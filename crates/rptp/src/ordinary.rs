@@ -12,11 +12,12 @@
 
 use core::cell::{Cell, RefCell};
 
-use crate::bmca::{
-    BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS, ForeignClockRecords,
-    ForeignGrandMasterCandidates, StateDecisionEvent, StateDecisionEventTrigger,
-};
+use crate::bmca::{BestMasterClockAlgorithm, StateDecisionEvent, StateDecisionEventTrigger};
 use crate::clock::{LocalClock, SynchronizableClock};
+use crate::dataset::ClockDS;
+use crate::foreign::{
+    BestForeignRecord, BestForeignSnapshot, ForeignClockRecords, ForeignGrandMasterCandidates,
+};
 use crate::log::PortLog;
 use crate::message::SystemMessage;
 use crate::port::{

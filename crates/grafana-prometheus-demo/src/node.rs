@@ -5,8 +5,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::metrics::offset_gauge;
-use rptp::bmca::ClockDS;
 use rptp::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
+use rptp::dataset::ClockDS;
 use rptp::log::ClockMetrics;
 use rptp::port::{DomainNumber, SingleDomainPortMap};
 use rptp::profile::PortProfile;

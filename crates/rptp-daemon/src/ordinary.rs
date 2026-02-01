@@ -12,8 +12,8 @@
 use tokio::sync::mpsc;
 
 use rptp::{
-    bmca::ClockDS,
     clock::{LocalClock, SynchronizableClock},
+    dataset::ClockDS,
     infra::infra_support::ForeignClockRecordsVec,
     message::SystemMessage,
     ordinary::OrdinaryClock,

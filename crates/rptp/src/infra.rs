@@ -22,11 +22,11 @@ pub mod infra_support {
     use std::collections::BTreeMap;
     use std::rc::Rc;
 
-    use crate::bmca::{
+    use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
+    use crate::foreign::{
         BestForeignSnapshot, ForeignClockRecord, ForeignClockRecords, ForeignClockStatus,
         ForeignGrandMasterCandidates, QualifiedForeignClockRecord,
     };
-    use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
     use crate::log::PortEvent;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
     use crate::port::{Port, PortNotification, PortNumber, SendResult, Timeout};
@@ -269,8 +269,8 @@ pub mod infra_support {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use crate::bmca::{BestForeignSnapshot, ForeignGrandMasterCandidates};
         use crate::clock::ClockIdentity;
+        use crate::foreign::{BestForeignSnapshot, ForeignGrandMasterCandidates};
         use crate::port::{PortIdentity, PortNumber};
         use crate::test_support::{FakeTimeout, TestClockDS};
         use crate::time::{Instant, LogInterval};

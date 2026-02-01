@@ -13,11 +13,9 @@
 //! Timing and sequencing for periodic traffic is encapsulated in [`AnnounceCycle`] and
 //! [`SyncCycle`]. Both schedule their next activation by restarting a `Timeout` handle.
 
-use crate::bmca::{
-    BestForeignSnapshot, Bmca, BmcaMasterDecision, ForeignClockRecords, GrandMaster,
-    GrandMasterTrackingBmca,
-};
+use crate::bmca::{Bmca, BmcaMasterDecision, GrandMaster, GrandMasterTrackingBmca};
 use crate::clock::{LocalClock, SynchronizableClock};
+use crate::foreign::{BestForeignSnapshot, ForeignClockRecords};
 use crate::log::PortEvent;
 use crate::message::{
     AnnounceMessage, DelayRequestMessage, EventMessage, GeneralMessage, SequenceId,
@@ -292,10 +290,11 @@ mod tests {
     use super::*;
 
     use crate::bmca::{
-        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
-        ForeignClockRecord, GrandMasterTrackingBmca, StateDecisionEventTrigger,
+        BestMasterClockAlgorithm, GrandMasterTrackingBmca, StateDecisionEventTrigger,
     };
     use crate::clock::{LocalClock, TimeScale};
+    use crate::dataset::ClockDS;
+    use crate::foreign::{BestForeignRecord, BestForeignSnapshot, ForeignClockRecord};
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{

@@ -25,8 +25,10 @@
 //! message types are reported as [`ProtocolError`].
 
 use crate::{
-    bmca::{BestForeignSnapshot, Bmca, ClockDS},
+    bmca::Bmca,
     clock::TimeScale,
+    dataset::ClockDS,
+    foreign::BestForeignSnapshot,
     port::{PortIdentity, PortMap},
     result::{ParseError, ProtocolError, Result},
     time::{Instant, LogMessageInterval, TimeInterval, TimeStamp},
@@ -690,8 +692,8 @@ mod tests {
 
     use crate::wire::UnvalidatedMessage;
 
-    use crate::bmca::{Priority1, Priority2};
-    use crate::clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, StepsRemoved};
+    use crate::clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality};
+    use crate::dataset::{Priority1, Priority2, StepsRemoved};
     use crate::port::{DomainNumber, PortIdentity, PortIngress, PortNumber};
     use crate::time::LogMessageInterval;
     use crate::wire::{PtpVersion, TransportSpecific};

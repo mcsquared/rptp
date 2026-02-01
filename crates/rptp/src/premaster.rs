@@ -11,9 +11,8 @@
 //! master is detected during that window, the port can still transition away (e.g. to
 //! `UNCALIBRATED`).
 
-use crate::bmca::{
-    BestForeignSnapshot, Bmca, BmcaMasterDecision, ForeignClockRecords, GrandMasterTrackingBmca,
-};
+use crate::bmca::{Bmca, BmcaMasterDecision, GrandMasterTrackingBmca};
+use crate::foreign::{BestForeignSnapshot, ForeignClockRecords};
 use crate::log::PortEvent;
 use crate::message::AnnounceMessage;
 use crate::port::{ParentPortIdentity, Port, PortIdentity};
@@ -143,10 +142,11 @@ mod tests {
     use super::*;
 
     use crate::bmca::{
-        BestForeignRecord, BestForeignSnapshot, BestMasterClockAlgorithm, ClockDS,
-        ForeignClockRecord, GrandMasterTrackingBmca, Priority1, StateDecisionEventTrigger,
+        BestMasterClockAlgorithm, GrandMasterTrackingBmca, StateDecisionEventTrigger,
     };
     use crate::clock::{ClockIdentity, LocalClock, TimeScale};
+    use crate::dataset::{ClockDS, Priority1};
+    use crate::foreign::{BestForeignRecord, BestForeignSnapshot, ForeignClockRecord};
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::SystemMessage;

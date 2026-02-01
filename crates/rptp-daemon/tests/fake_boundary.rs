@@ -23,11 +23,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rptp::{
-    bmca::{ClockDS, Priority1, Priority2},
-    clock::{
-        Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, StepsRemoved,
-        TimeScale,
-    },
+    clock::{Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
+    dataset::{ClockDS, Priority1, Priority2, StepsRemoved},
     infra::infra_support::ForeignClockRecordsVec,
     log::NOOP_CLOCK_METRICS,
     port::{DomainNumber, DomainPort, SingleDomainPortMap},
