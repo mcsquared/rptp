@@ -36,8 +36,8 @@ use crate::time::{Duration, Instant, LogInterval};
 pub trait ForeignClockRecords {
     /// Remember (insert or update) a record.
     fn remember(&mut self, record: ForeignClockRecord);
-    /// Return the best *qualified* record, if any.
-    fn best_qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>>;
+    /// Iterate over all stored records.
+    fn iter(&self) -> impl Iterator<Item = &ForeignClockRecord>;
     /// Prune stale records and return `true` if any were removed.
     fn prune_stale(&mut self, now: Instant) -> bool;
 }
@@ -176,10 +176,18 @@ impl<S: ForeignClockRecords> BestForeignRecord<S> {
 
     /// Return the best qualified foreign dataset snapshot observed so far.
     pub(crate) fn snapshot(&self) -> BestForeignSnapshot {
-        match self.foreign_clock_records.best_qualified() {
-            Some(qualified) => qualified.snapshot(self.received_on_port),
-            None => BestForeignSnapshot::Empty,
-        }
+        self.foreign_clock_records
+            .iter()
+            .filter_map(|record| record.qualified())
+            .reduce(|best, candidate| {
+                if candidate.is_better_by_dataset_than(&best) {
+                    candidate
+                } else {
+                    best
+                }
+            })
+            .map(|qualified| qualified.snapshot(self.received_on_port))
+            .unwrap_or(BestForeignSnapshot::Empty)
     }
 }
 
@@ -311,48 +319,20 @@ impl<'a> QualifiedForeignClockRecord<'a> {
         }
     }
 
+    /// Return `true` if this record is better than `other` by dataset comparison.
+    pub(crate) fn is_better_by_dataset_than(
+        &self,
+        other: &QualifiedForeignClockRecord<'_>,
+    ) -> bool {
+        self.dataset.better_than(other.dataset)
+    }
+
     pub(crate) fn snapshot(&self, port_number: PortNumber) -> BestForeignSnapshot {
         BestForeignSnapshot::Qualified {
             ds: *self.dataset,
             source_port_identity: *self.source_port_identity,
             received_on_port: port_number,
         }
-    }
-}
-
-impl Ord for ForeignClockRecord {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        use core::cmp::Ordering::*;
-
-        let ord = match (
-            self.qualification.is_qualified(),
-            other.qualification.is_qualified(),
-        ) {
-            (true, true) => {
-                if self.foreign_clock_ds.better_than(&other.foreign_clock_ds) {
-                    Less
-                } else if other.foreign_clock_ds.better_than(&self.foreign_clock_ds) {
-                    Greater
-                } else {
-                    Equal
-                }
-            }
-            (true, false) => Less,
-            (false, true) => Greater,
-            (false, false) => Equal,
-        };
-
-        if ord == Equal {
-            self.source_port_identity.cmp(&other.source_port_identity)
-        } else {
-            ord
-        }
-    }
-}
-
-impl PartialOrd for ForeignClockRecord {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
     }
 }
 

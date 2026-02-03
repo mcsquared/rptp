@@ -1323,17 +1323,16 @@ mod tests {
             1,
             "stale foreign clock records should have been pruned"
         );
-        let best = records
-            .best_qualified()
-            .expect("record should be qualified after two announces");
-        assert_eq!(
-            best.snapshot(PortNumber::new(1)),
-            BestForeignSnapshot::Qualified {
-                ds: gm_foreign,
-                source_port_identity: gm_port_id,
-                received_on_port: PortNumber::new(1),
-            }
+        // Verify the single remaining record is the newly qualified one.
+        let expected_record = ForeignClockRecord::new_qualified(
+            gm_port_id,
+            gm_foreign,
+            LogInterval::new(0),
+            Instant::from_secs(10),
         );
+        let remaining: Vec<_> = records.iter().collect();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0], &expected_record);
     }
 
     #[test]

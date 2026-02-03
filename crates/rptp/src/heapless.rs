@@ -15,9 +15,7 @@
 
 use heapless::Vec;
 
-use crate::foreign::{
-    ForeignClockRecord, ForeignClockRecords, ForeignClockStatus, QualifiedForeignClockRecord,
-};
+use crate::foreign::{ForeignClockRecord, ForeignClockRecords};
 
 /// Heapless implementation of [`ForeignClockRecords`] backed by a bounded
 /// `heapless::Vec`.
@@ -60,13 +58,10 @@ impl<const N: usize> HeaplessForeignClockRecords<N> {
     }
 
     /// Create a store from pre-seeded records (tests/support only).
-    ///
-    /// The resulting store is sorted according to the record ordering so that “best first” holds.
     #[cfg(any(test, feature = "test-support"))]
     #[allow(dead_code)]
     pub(crate) fn from_records(records: &[ForeignClockRecord]) -> Self {
-        let mut vec = Vec::from_slice(records).unwrap_or_default();
-        vec.sort_unstable();
+        let vec = Vec::from_slice(records).unwrap_or_default();
         Self {
             records: vec,
             removal_policy: RemovalPolicy,
@@ -90,32 +85,25 @@ impl<const N: usize> ForeignClockRecords for HeaplessForeignClockRecords<N> {
             .iter_mut()
             .find(|r| r.same_source_as(record.source_port_identity()))
         {
-            if let ForeignClockStatus::Updated = existing.update_from(&record) {
-                self.records.sort_unstable();
-            }
+            existing.update_from(&record);
             return;
         }
 
-        let record = match self.records.push(record) {
-            Ok(()) => {
-                self.records.sort_unstable();
-                return;
-            }
-            Err(record) => record,
-        };
+        if self.records.push(record).is_ok() {
+            return;
+        }
 
         // Capacity exceeded, determine if there is a record to remove by policy
         if let Some(index) = self.removal_policy.candidate_index(&self.records, &record) {
             self.records.remove(index);
             let result = self.records.push(record);
             assert!(result.is_ok());
-
-            self.records.sort_unstable();
         }
     }
 
-    fn best_qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>> {
-        self.records.first().and_then(|record| record.qualified())
+    /// Iterate over all stored records.
+    fn iter(&self) -> impl Iterator<Item = &ForeignClockRecord> {
+        self.records.iter()
     }
 
     fn prune_stale(&mut self, now: crate::time::Instant) -> bool {
@@ -129,28 +117,42 @@ impl<const N: usize> ForeignClockRecords for HeaplessForeignClockRecords<N> {
 // exceeded to make room for a new, possibly better record, even if unqualified.
 //
 // The current policy:
-// - ignores qualification (considers only dataset ranking),
-// - scans from worst → best, and
-// - replaces the worst record that the candidate beats.
+// - ignores qualification (considers only dataset ranking), and
+// - replaces the worst record that is worse than the candidate by dataset ranking.
 struct RemovalPolicy;
 
 impl RemovalPolicy {
     /// Return the index of a record to remove to make room for `candidate`.
     ///
-    /// The returned index points into `current` (which is assumed to be sorted best→worst).
-    /// The policy chooses the worst record that is still worse than `candidate` by dataset ranking.
+    /// The policy scans all records and chooses the worst one that is still worse
+    /// than `candidate` by dataset ranking. This ensures we always evict the
+    /// lowest-quality record to make room for a better candidate.
     fn candidate_index(
         &self,
         current: &[ForeignClockRecord],
         candidate: &ForeignClockRecord,
     ) -> Option<usize> {
-        current.iter().rev().enumerate().find_map(|(i, record)| {
+        let mut worst_index: Option<usize> = None;
+
+        for (i, record) in current.iter().enumerate() {
             if candidate.better_by_dataset_than(record) {
-                Some(current.len() - 1 - i)
-            } else {
-                None
+                match worst_index {
+                    None => worst_index = Some(i),
+                    Some(w) => {
+                        // If current record is worse than the previously found worst,
+                        // update the worst index.
+                        if record.better_by_dataset_than(&current[w]) {
+                            // current[w] is still the worst
+                        } else {
+                            // current record is worse or equal
+                            worst_index = Some(i);
+                        }
+                    }
+                }
             }
-        })
+        }
+
+        worst_index
     }
 }
 
@@ -170,7 +172,9 @@ mod tests {
     }
 
     #[test]
-    fn heapless_maintains_best_record_first() {
+    fn heapless_stores_and_iterates_records() {
+        let mut records = HeaplessForeignClockRecords::<4>::new();
+
         let high_clock = TestClockDS::default_high_grade().dataset();
         let mid_clock = TestClockDS::default_mid_grade().dataset();
         let low_clock = TestClockDS::default_low_grade_slave_only().dataset();
@@ -179,32 +183,48 @@ mod tests {
         let mid_port_id = new_port_identity(2);
         let low_port_id = new_port_identity(3);
 
-        let records = HeaplessForeignClockRecords::<4>::from_records(&[
-            ForeignClockRecord::new_qualified(
-                high_port_id,
-                high_clock,
-                LogInterval::new(0),
-                Instant::from_secs(0),
-            ),
-            ForeignClockRecord::new(
-                low_port_id,
-                low_clock,
-                LogInterval::new(0),
-                Instant::from_secs(0),
-            ),
-            ForeignClockRecord::new(
-                mid_port_id,
-                mid_clock,
-                LogInterval::new(0),
-                Instant::from_secs(0),
-            ),
-        ]);
+        records.remember(ForeignClockRecord::new(
+            high_port_id,
+            high_clock,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        ));
+        records.remember(ForeignClockRecord::new(
+            low_port_id,
+            low_clock,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        ));
+        records.remember(ForeignClockRecord::new(
+            mid_port_id,
+            mid_clock,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        ));
 
-        let best_clock = records.best_qualified();
-        assert_eq!(
-            best_clock,
-            Some(QualifiedForeignClockRecord::new(&high_clock, &high_port_id))
-        );
+        // All three records should be stored.
+        assert_eq!(records.records.len(), 3);
+
+        // Iteration should return all records with exact match.
+        let all_records: heapless::Vec<_, 4> = records.iter().collect();
+        assert!(all_records.contains(&&ForeignClockRecord::new(
+            high_port_id,
+            high_clock,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )));
+        assert!(all_records.contains(&&ForeignClockRecord::new(
+            low_port_id,
+            low_clock,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )));
+        assert!(all_records.contains(&&ForeignClockRecord::new(
+            mid_port_id,
+            mid_clock,
+            LogInterval::new(0),
+            Instant::from_secs(0),
+        )));
     }
 
     fn same_dataset(a: &ForeignClockRecord, b: &ForeignClockRecord) -> bool {

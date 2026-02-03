@@ -24,8 +24,7 @@ pub mod infra_support {
 
     use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
     use crate::foreign::{
-        BestForeignSnapshot, ForeignClockRecord, ForeignClockRecords, ForeignClockStatus,
-        ForeignGrandMasterCandidates, QualifiedForeignClockRecord,
+        BestForeignSnapshot, ForeignClockRecord, ForeignClockRecords, ForeignGrandMasterCandidates,
     };
     use crate::log::PortEvent;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
@@ -93,16 +92,11 @@ pub mod infra_support {
         }
 
         /// Create a store from pre-seeded records (tests/support only).
-        ///
-        /// The resulting store is sorted according to the record ordering so that “best first”
-        /// holds.
         #[cfg(any(test, feature = "test-support"))]
         pub fn from_records(records: &[ForeignClockRecord]) -> Self {
-            let mut vec = Self {
+            Self {
                 records: records.to_vec(),
-            };
-            vec.sort_records();
-            vec
+            }
         }
 
         #[cfg(test)]
@@ -115,32 +109,25 @@ pub mod infra_support {
         pub(crate) fn len(&self) -> usize {
             self.records.len()
         }
-
-        fn sort_records(&mut self) {
-            self.records.sort();
-        }
     }
 
     impl ForeignClockRecords for ForeignClockRecordsVec {
-        /// Remember (insert or update) a record and keep the internal list sorted.
+        /// Remember (insert or update) a record.
         fn remember(&mut self, record: ForeignClockRecord) {
             if let Some(existing) = self
                 .records
                 .iter_mut()
                 .find(|r| r.same_source_as(record.source_port_identity()))
             {
-                if let ForeignClockStatus::Updated = existing.update_from(&record) {
-                    self.sort_records();
-                }
+                existing.update_from(&record);
             } else {
                 self.records.push(record);
-                self.sort_records();
             }
         }
 
-        /// Return the best qualified record, if any.
-        fn best_qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>> {
-            self.records.first().and_then(|record| record.qualified())
+        /// Iterate over all stored records.
+        fn iter(&self) -> impl Iterator<Item = &ForeignClockRecord> {
+            self.records.iter()
         }
 
         /// Prune stale records and report whether any were removed.
@@ -157,8 +144,8 @@ pub mod infra_support {
             (*self).remember(record);
         }
 
-        fn best_qualified<'a>(&'a self) -> Option<QualifiedForeignClockRecord<'a>> {
-            (**self).best_qualified()
+        fn iter(&self) -> impl Iterator<Item = &ForeignClockRecord> {
+            (**self).iter()
         }
 
         fn prune_stale(&mut self, now: crate::time::Instant) -> bool {
@@ -276,7 +263,7 @@ pub mod infra_support {
         use crate::time::{Instant, LogInterval};
 
         #[test]
-        fn foreign_vec_maintains_best_record_first() {
+        fn foreign_vec_stores_and_iterates_records() {
             let mut records = ForeignClockRecordsVec::new();
 
             let high_clock = TestClockDS::default_high_grade().dataset();
@@ -315,31 +302,29 @@ pub mod infra_support {
                 Instant::from_secs(0),
             ));
 
-            // Qualify by remembering a second announce (threshold=2).
-            records.remember(ForeignClockRecord::new(
+            // All three records should be stored.
+            assert_eq!(records.len(), 3);
+
+            // Iteration should return all records with exact match.
+            let all_records: Vec<_> = records.iter().collect();
+            assert!(all_records.contains(&&ForeignClockRecord::new(
                 high_port_id,
                 high_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            ));
-            records.remember(ForeignClockRecord::new(
+            )));
+            assert!(all_records.contains(&&ForeignClockRecord::new(
                 low_port_id,
                 low_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            ));
-            records.remember(ForeignClockRecord::new(
+            )));
+            assert!(all_records.contains(&&ForeignClockRecord::new(
                 mid_port_id,
                 mid_clock,
                 LogInterval::new(0),
                 Instant::from_secs(0),
-            ));
-
-            let best_clock = records.best_qualified();
-            assert_eq!(
-                best_clock,
-                Some(QualifiedForeignClockRecord::new(&high_clock, &high_port_id))
-            );
+            )));
         }
 
         #[test]
