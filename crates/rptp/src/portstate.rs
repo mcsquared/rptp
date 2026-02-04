@@ -365,7 +365,8 @@ mod tests {
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
     use crate::message::{DelayRequestMessage, TimestampMessage, TwoStepSyncMessage};
     use crate::port::{
-        AnnounceReceiptTimeout, DomainNumber, DomainPort, ParentPortIdentity, PortNumber,
+        AnnounceReceiptTimeout, DomainNumber, DomainPort, ParentPortIdentity, PortIdentity,
+        PortNumber,
     };
     use crate::profile::PortProfile;
     use crate::servo::{Servo, SteppingServo};
@@ -419,7 +420,10 @@ mod tests {
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
             let port_number = PortNumber::new(1);
-            let best_foreign = BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+            let best_foreign = BestForeignRecord::new(
+                PortIdentity::fake_on_port(port_number),
+                ForeignClockRecordsVec::new(),
+            );
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
@@ -437,7 +441,10 @@ mod tests {
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
             let port_number = PortNumber::new(1);
-            let best_foreign = BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+            let best_foreign = BestForeignRecord::new(
+                PortIdentity::fake_on_port(port_number),
+                ForeignClockRecordsVec::new(),
+            );
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
@@ -455,7 +462,10 @@ mod tests {
 
         fn slave_port(&self) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
             let port_number = PortNumber::new(1);
-            let best_foreign = BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+            let best_foreign = BestForeignRecord::new(
+                PortIdentity::fake_on_port(port_number),
+                ForeignClockRecordsVec::new(),
+            );
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
@@ -482,7 +492,10 @@ mod tests {
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
             let port_number = PortNumber::new(1);
             let grandmaster_id = *self.local_clock.identity();
-            let best_foreign = BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+            let best_foreign = BestForeignRecord::new(
+                PortIdentity::fake_on_port(port_number),
+                ForeignClockRecordsVec::new(),
+            );
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
@@ -504,7 +517,10 @@ mod tests {
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
             let port_number = PortNumber::new(1);
             let grandmaster_id = *self.local_clock.identity();
-            let best_foreign = BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+            let best_foreign = BestForeignRecord::new(
+                PortIdentity::fake_on_port(port_number),
+                ForeignClockRecordsVec::new(),
+            );
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
@@ -526,7 +542,10 @@ mod tests {
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
             let port_number = PortNumber::new(1);
-            let best_foreign = BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+            let best_foreign = BestForeignRecord::new(
+                PortIdentity::fake_on_port(port_number),
+                ForeignClockRecordsVec::new(),
+            );
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
@@ -548,8 +567,10 @@ mod tests {
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
             {
                 let port_number = PortNumber::new(1);
-                let best_foreign =
-                    BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+                let best_foreign = BestForeignRecord::new(
+                    PortIdentity::fake_on_port(port_number),
+                    ForeignClockRecordsVec::new(),
+                );
                 let state_decision_trigger = StateDecisionEventTrigger::new(
                     &self.state_decision_event,
                     best_foreign.snapshot(),
@@ -568,7 +589,10 @@ mod tests {
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
             let port_number = PortNumber::new(1);
-            let best_foreign = BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+            let best_foreign = BestForeignRecord::new(
+                PortIdentity::fake_on_port(port_number),
+                ForeignClockRecordsVec::new(),
+            );
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
@@ -1006,8 +1030,10 @@ mod tests {
             ),
             {
                 let port_number = PortNumber::new(1);
-                let best_foreign =
-                    BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+                let best_foreign = BestForeignRecord::new(
+                    PortIdentity::fake_on_port(port_number),
+                    ForeignClockRecordsVec::new(),
+                );
                 let state_decision_trigger = StateDecisionEventTrigger::new(
                     &state_decision_event,
                     best_foreign.snapshot(),
@@ -1049,8 +1075,10 @@ mod tests {
             ),
             {
                 let port_number = PortNumber::new(1);
-                let best_foreign =
-                    BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+                let best_foreign = BestForeignRecord::new(
+                    PortIdentity::fake_on_port(port_number),
+                    ForeignClockRecordsVec::new(),
+                );
                 let state_decision_trigger = StateDecisionEventTrigger::new(
                     &state_decision_event,
                     best_foreign.snapshot(),
@@ -1096,8 +1124,10 @@ mod tests {
             ),
             {
                 let port_number = PortNumber::new(1);
-                let best_foreign =
-                    BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+                let best_foreign = BestForeignRecord::new(
+                    PortIdentity::fake_on_port(port_number),
+                    ForeignClockRecordsVec::new(),
+                );
                 let state_decision_trigger = StateDecisionEventTrigger::new(
                     &state_decision_event,
                     best_foreign.snapshot(),
@@ -1143,8 +1173,10 @@ mod tests {
             ),
             {
                 let port_number = PortNumber::new(1);
-                let best_foreign =
-                    BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+                let best_foreign = BestForeignRecord::new(
+                    PortIdentity::fake_on_port(port_number),
+                    ForeignClockRecordsVec::new(),
+                );
                 let state_decision_trigger = StateDecisionEventTrigger::new(
                     &state_decision_event,
                     best_foreign.snapshot(),
@@ -1184,8 +1216,10 @@ mod tests {
         );
 
         let state_decision_event = FakeStateDecisionEvent::new();
-        let best_foreign =
-            BestForeignRecord::new(PortNumber::new(1), ForeignClockRecordsVec::new());
+        let best_foreign = BestForeignRecord::new(
+            PortIdentity::fake_on_port(PortNumber::new(1)),
+            ForeignClockRecordsVec::new(),
+        );
         let state_decision_trigger = StateDecisionEventTrigger::new(
             &state_decision_event,
             best_foreign.snapshot(),

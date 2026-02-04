@@ -370,8 +370,10 @@ mod tests {
             let default_profile = PortProfile::default();
 
             // Initialize initial state from the provided records
-            let best_foreign_record =
-                BestForeignRecord::new(port_number, ForeignClockRecordsVec::from_records(records));
+            let best_foreign_record = BestForeignRecord::new(
+                PortIdentity::fake_on_port(port_number),
+                ForeignClockRecordsVec::from_records(records),
+            );
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign_record.snapshot(),
@@ -562,7 +564,7 @@ mod tests {
             BestForeignSnapshot::Qualified {
                 ds: foreign_clock_ds,
                 source_port_identity: foreign_port,
-                received_on_port: PortNumber::new(1),
+                receiver: PortIdentity::fake(),
             }
         );
     }
@@ -665,7 +667,7 @@ mod tests {
             BestForeignSnapshot::Qualified {
                 ds: improved_foreign,
                 source_port_identity: parent_port,
-                received_on_port: PortNumber::new(1),
+                receiver: PortIdentity::fake(),
             }
         );
     }

@@ -21,8 +21,8 @@ use rptp::{
     message::{EventMessage, MessageIngress, SystemMessage, TimestampMessage},
     ordinary::OrdinaryClock,
     port::{
-        DomainNumber, PhysicalPort, PortIdentity, PortMap, SendResult, SingleDomainPortMap,
-        Timeout, TimerHost,
+        DomainNumber, PhysicalPort, PortIdentity, PortMap, PortNumber, SendResult,
+        SingleDomainPortMap, Timeout, TimerHost,
     },
     result::Error as RptpError,
     servo::{Servo, SteppingServo},
@@ -175,8 +175,7 @@ impl SemiHostingTime {
         let total_nanos = clock_ticks.saturating_mul(1_000_000_000i64) / tickfreq;
         let extra_secs = total_nanos.div_euclid(1_000_000_000);
         let nanos = total_nanos.rem_euclid(1_000_000_000) as u32;
-        // PTP uses the TAI time scale; add the current TAI-UTC offset so the grandmaster
-        // epoch aligns with ptp4l expectations.
+        // PTP uses the TAI time scale; add the current TAI-UTC offset
         let secs = (secs + extra_secs + Self::TAI_OFFSET_SECONDS as i64) as u64;
 
         Some(TimeStamp::new(secs, nanos))
@@ -527,13 +526,14 @@ fn main() -> ! {
     let physical_port = DemoPhysicalPort {
         inner: network.physical_port(),
     };
+    let receiver = PortIdentity::new(*default_ds.identity(), PortNumber::new(1));
     let port = ordinary_clock
         .port(
             &physical_port,
             DemoTimerHost::new(&instant_clock),
             DemoTimestamping::new(&demo_clock),
             DemoPortLog,
-            HeaplessForeignClockRecords::<4>::new(),
+            HeaplessForeignClockRecords::<4>::new(receiver),
         )
         .expect("ordinary clock has one port");
     let mut port_map = SingleDomainPortMap::new(domain_number, port);

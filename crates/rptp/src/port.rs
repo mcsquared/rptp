@@ -252,6 +252,15 @@ impl PortIdentity {
         }
     }
 
+    /// Return the port number component of this port identity.
+    pub fn port_number(&self) -> PortNumber {
+        self.port_number
+    }
+
+    pub(crate) fn compare_by_port_number(&self, other: &PortIdentity) -> core::cmp::Ordering {
+        self.port_number.cmp(&other.port_number)
+    }
+
     pub(crate) fn from_wire(buf: &[u8; 10]) -> Self {
         Self {
             clock_identity: ClockIdentity::new(&[

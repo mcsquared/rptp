@@ -90,7 +90,7 @@ mod tests {
     use crate::clock::LocalClock;
     use crate::infra::infra_support::ForeignClockRecordsVec;
     use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
-    use crate::port::{DomainNumber, DomainPort, PortNumber};
+    use crate::port::{DomainNumber, DomainPort, PortIdentity, PortNumber};
     use crate::portstate::PortState;
     use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{
@@ -108,7 +108,10 @@ mod tests {
         let physical_port = FakePort::new();
         let state_decision_event = FakeStateDecisionEvent::new();
         let port_number = PortNumber::new(1);
-        let best_foreign = BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+        let best_foreign = BestForeignRecord::new(
+            PortIdentity::fake_on_port(port_number),
+            ForeignClockRecordsVec::new(),
+        );
         let state_decision_trigger = StateDecisionEventTrigger::new(
             &state_decision_event,
             best_foreign.snapshot(),

@@ -22,7 +22,7 @@
 use core::cell::Cell;
 
 use crate::clock::ClockIdentity;
-use crate::dataset::ClockDS;
+use crate::dataset::{ClockDS, TopologyDS};
 use crate::port::{ParentPortIdentity, PortIdentity, PortNumber};
 use crate::time::{Duration, Instant, LogInterval};
 
@@ -67,9 +67,9 @@ impl ForeignGrandMasterCandidates for Cell<BestForeignSnapshot> {
         );
         debug_assert!(
             match snapshot {
-                BestForeignSnapshot::Qualified {
-                    received_on_port, ..
-                } => received_on_port == PortNumber::new(1),
+                BestForeignSnapshot::Qualified { receiver, .. } => {
+                    receiver.port_number() == PortNumber::new(1)
+                }
                 BestForeignSnapshot::Empty => true,
             },
             "only single-port use cases supported"
@@ -92,31 +92,82 @@ pub enum BestForeignSnapshot {
     Qualified {
         ds: ClockDS,
         source_port_identity: PortIdentity,
-        received_on_port: PortNumber,
+        receiver: PortIdentity,
     },
     /// No qualified foreign candidate is currently known. The empty dataset in spec language.
     Empty,
 }
 
 impl BestForeignSnapshot {
-    /// Return the grandmaster identity of this dataset, if non-empty.
-    pub(crate) fn grandmaster_id(&self) -> Option<ClockIdentity> {
-        match self {
-            BestForeignSnapshot::Qualified { ds, .. } => Some(*ds.identity()),
-            BestForeignSnapshot::Empty => None,
-        }
-    }
-
-    /// Return `true` if `self` is better than `other` according to BMCA dataset comparison.
-    pub(crate) fn better_than(&self, other: &BestForeignSnapshot) -> bool {
+    /// Return `true` if `self` is better than `other` with full topology context.
+    ///
+    /// This uses topology-aware comparison including tie-breaks. Error conditions
+    /// (Error1, Error2) are treated as "not better" and return `false`.
+    #[allow(dead_code)]
+    pub(crate) fn is_better_or_better_by_topology(&self, other: &BestForeignSnapshot) -> bool {
         match (self, other) {
             (
-                BestForeignSnapshot::Qualified { ds: ds1, .. },
-                BestForeignSnapshot::Qualified { ds: ds2, .. },
-            ) => ds1.better_than(ds2),
+                BestForeignSnapshot::Qualified {
+                    ds: ds1,
+                    source_port_identity: sender1,
+                    receiver: receiver1,
+                },
+                BestForeignSnapshot::Qualified {
+                    ds: ds2,
+                    source_port_identity: sender2,
+                    receiver: receiver2,
+                },
+            ) => TopologyDS::foreign(ds1, sender1, receiver1)
+                .is_better_or_better_by_topology(TopologyDS::foreign(ds2, sender2, receiver2)),
             (BestForeignSnapshot::Qualified { .. }, BestForeignSnapshot::Empty) => true,
             (BestForeignSnapshot::Empty, BestForeignSnapshot::Qualified { .. }) => false,
             (BestForeignSnapshot::Empty, BestForeignSnapshot::Empty) => false,
+        }
+    }
+}
+
+/// A qualified foreign dataset snapshot, guaranteed to have a valid dataset. Provides a momentary
+/// view over a qualified foreign dataset along with its source and receiver port identities.
+pub(crate) struct QualifiedForeignSnapshot<'a> {
+    dataset: &'a ClockDS,
+    source_port_identity: &'a PortIdentity,
+    receiver: &'a PortIdentity,
+}
+
+impl<'a> QualifiedForeignSnapshot<'a> {
+    pub(crate) fn new(
+        dataset: &'a ClockDS,
+        source_port_identity: &'a PortIdentity,
+        receiver: &'a PortIdentity,
+    ) -> Self {
+        Self {
+            dataset,
+            source_port_identity,
+            receiver,
+        }
+    }
+
+    pub(crate) fn grandmaster_id(&self) -> ClockIdentity {
+        *self.dataset.identity()
+    }
+
+    /// Return `true` if `self` is better than `other` *only* due to topology.
+    ///
+    /// This returns `true` only when the datasets are equivalent by priority/quality/identity
+    /// and the topology comparison yields "better by topology". Used for the P2/M3 decision
+    /// point in BMCA (IEEE 1588-2019 §9.3.3; Fig. 33).
+    ///
+    /// Error conditions (Error1, Error2) are treated as "not better" and return `false`.
+    pub(crate) fn is_better_by_topology(&self, other: &BestForeignSnapshot) -> bool {
+        match other {
+            BestForeignSnapshot::Qualified {
+                ds: ds2,
+                source_port_identity: other_sender,
+                receiver: other_receiver,
+            } => TopologyDS::foreign(self.dataset, self.source_port_identity, self.receiver)
+                .is_better_by_topology(TopologyDS::foreign(ds2, other_sender, other_receiver)),
+            // Topology-only comparison doesn't apply when one side is empty
+            BestForeignSnapshot::Empty => false,
         }
     }
 
@@ -125,34 +176,26 @@ impl BestForeignSnapshot {
         &self,
         port: PortNumber,
     ) -> Option<ParentPortIdentity> {
-        match self {
-            BestForeignSnapshot::Qualified {
-                source_port_identity,
-                received_on_port,
-                ..
-            } => {
-                (*received_on_port == port).then(|| ParentPortIdentity::new(*source_port_identity))
-            }
-            BestForeignSnapshot::Empty => None,
-        }
+        (self.receiver.port_number() == port)
+            .then(|| ParentPortIdentity::new(*self.source_port_identity))
     }
 }
 
 /// Notion of the best foreign clock record determined over a collection of foreign clock records
 /// per port.
 pub struct BestForeignRecord<S: ForeignClockRecords> {
-    received_on_port: PortNumber,
+    receiver: PortIdentity,
     foreign_clock_records: S,
 }
 
 impl<S: ForeignClockRecords> BestForeignRecord<S> {
     /// Create a new best foreign record collection.
     ///
-    /// `received_on_port` identifies the port this record collection is associated with.
+    /// `receiver` identifies the port this record collection is associated with.
     /// It is used when creating snapshots to identify which port received the foreign clock data.
-    pub fn new(received_on_port: PortNumber, foreign_clock_records: S) -> Self {
+    pub fn new(receiver: PortIdentity, foreign_clock_records: S) -> Self {
         Self {
-            received_on_port,
+            receiver,
             foreign_clock_records,
         }
     }
@@ -180,13 +223,13 @@ impl<S: ForeignClockRecords> BestForeignRecord<S> {
             .iter()
             .filter_map(|record| record.qualified())
             .reduce(|best, candidate| {
-                if candidate.is_better_by_dataset_than(&best) {
+                if candidate.is_better_than(&best, &self.receiver) {
                     candidate
                 } else {
                     best
                 }
             })
-            .map(|qualified| qualified.snapshot(self.received_on_port))
+            .map(|qualified| qualified.snapshot(self.receiver))
             .unwrap_or(BestForeignSnapshot::Empty)
     }
 }
@@ -249,10 +292,21 @@ impl ForeignClockRecord {
         self.source_port_identity == *source_port_identity
     }
 
-    /// Return `true` if this record is better than `other` purely based on the data sets,
+    /// Return `true` if this record is better than `other` with topology awareness,
     /// ignoring qualification status.
-    pub(crate) fn better_by_dataset_than(&self, other: &ForeignClockRecord) -> bool {
-        self.foreign_clock_ds.better_than(&other.foreign_clock_ds)
+    ///
+    /// `receiver` is the port identity that received both records.
+    pub(crate) fn is_better_than(
+        &self,
+        other: &ForeignClockRecord,
+        receiver: &PortIdentity,
+    ) -> bool {
+        TopologyDS::foreign(&self.foreign_clock_ds, &self.source_port_identity, receiver)
+            .is_better_or_better_by_topology(TopologyDS::foreign(
+                &other.foreign_clock_ds,
+                &other.source_port_identity,
+                receiver,
+            ))
     }
 
     /// Update this record from a newly observed record of the same source.
@@ -319,19 +373,29 @@ impl<'a> QualifiedForeignClockRecord<'a> {
         }
     }
 
-    /// Return `true` if this record is better than `other` by dataset comparison.
-    pub(crate) fn is_better_by_dataset_than(
+    /// Compare this record against another with full topology context.
+    ///
+    /// Returns `true` if this record is better than `other` according to BMCA rules,
+    /// including topology tie-breaks. Error conditions (Error1, Error2) are treated
+    /// as "not better" and return `false`.
+    pub(crate) fn is_better_than(
         &self,
         other: &QualifiedForeignClockRecord<'_>,
+        receiver: &PortIdentity,
     ) -> bool {
-        self.dataset.better_than(other.dataset)
+        TopologyDS::foreign(self.dataset, self.source_port_identity, receiver)
+            .is_better_or_better_by_topology(TopologyDS::foreign(
+                other.dataset,
+                other.source_port_identity,
+                receiver,
+            ))
     }
 
-    pub(crate) fn snapshot(&self, port_number: PortNumber) -> BestForeignSnapshot {
+    pub(crate) fn snapshot(&self, receiver: PortIdentity) -> BestForeignSnapshot {
         BestForeignSnapshot::Qualified {
             ds: *self.dataset,
             source_port_identity: *self.source_port_identity,
-            received_on_port: port_number,
+            receiver,
         }
     }
 }
@@ -424,7 +488,27 @@ impl SlidingWindowQualification {
 mod tests {
     use super::*;
 
+    use crate::dataset::Priority1;
+    use crate::dataset::StepsRemoved;
     use crate::test_support::TestClockDS;
+
+    fn pid(clock_id: u8, port: u16) -> PortIdentity {
+        PortIdentity::new(
+            ClockIdentity::new(&[clock_id, 0, 0, 0, 0, 0, 0, 0]),
+            PortNumber::new(port),
+        )
+    }
+
+    fn qualified(snapshot: &BestForeignSnapshot) -> QualifiedForeignSnapshot<'_> {
+        match snapshot {
+            BestForeignSnapshot::Qualified {
+                ds,
+                source_port_identity,
+                receiver,
+            } => QualifiedForeignSnapshot::new(ds, source_port_identity, receiver),
+            BestForeignSnapshot::Empty => panic!("expected qualified snapshot"),
+        }
+    }
 
     #[test]
     fn qualified_dataset_change_reports_updated() {
@@ -454,12 +538,13 @@ mod tests {
         );
         let status = record.update_from(&updated_record);
         assert_eq!(status, ForeignClockStatus::Updated);
+        let receiver = PortIdentity::new(ClockIdentity::new(&[0; 8]), PortNumber::new(1));
         assert_eq!(
-            record.qualified().map(|q| q.snapshot(PortNumber::new(1))),
+            record.qualified().map(|q| q.snapshot(receiver)),
             Some(BestForeignSnapshot::Qualified {
                 ds: foreign_low,
                 source_port_identity: port_id,
-                received_on_port: PortNumber::new(1),
+                receiver,
             })
         );
     }
@@ -585,6 +670,116 @@ mod tests {
     }
 
     #[test]
+    fn best_foreign_snapshot_comparison_handles_empty_cases() {
+        let ds = TestClockDS::default_high_grade().dataset();
+        let snapshot = BestForeignSnapshot::Qualified {
+            ds,
+            source_port_identity: pid(1, 1),
+            receiver: PortIdentity::fake_on_port(PortNumber::new(1)),
+        };
+
+        assert!(snapshot.is_better_or_better_by_topology(&BestForeignSnapshot::Empty));
+        assert!(!BestForeignSnapshot::Empty.is_better_or_better_by_topology(&snapshot));
+        assert!(
+            !BestForeignSnapshot::Empty
+                .is_better_or_better_by_topology(&BestForeignSnapshot::Empty)
+        );
+
+        assert!(!qualified(&snapshot).is_better_by_topology(&BestForeignSnapshot::Empty));
+    }
+
+    #[test]
+    fn best_foreign_snapshot_is_better_by_topology_on_sender_order() {
+        let ds = TestClockDS::default_high_grade().dataset();
+        let better = BestForeignSnapshot::Qualified {
+            ds,
+            source_port_identity: pid(1, 1),
+            receiver: PortIdentity::fake_on_port(PortNumber::new(1)),
+        };
+        let worse = BestForeignSnapshot::Qualified {
+            ds,
+            source_port_identity: pid(2, 1),
+            receiver: PortIdentity::fake_on_port(PortNumber::new(1)),
+        };
+
+        assert!(qualified(&better).is_better_by_topology(&worse));
+        assert!(better.is_better_or_better_by_topology(&worse));
+        assert!(!qualified(&worse).is_better_by_topology(&better));
+        assert!(!worse.is_better_or_better_by_topology(&better));
+    }
+
+    #[test]
+    fn best_foreign_snapshot_topology_error1_is_not_better() {
+        let ds0 = TestClockDS::default_high_grade()
+            .with_steps_removed(StepsRemoved::new(0))
+            .dataset();
+        let ds1 = TestClockDS::default_high_grade()
+            .with_steps_removed(StepsRemoved::new(1))
+            .dataset();
+
+        let a = BestForeignSnapshot::Qualified {
+            ds: ds0,
+            source_port_identity: pid(9, 1),
+            receiver: PortIdentity::fake_on_port(PortNumber::new(1)),
+        };
+        // Trigger error-1 in the A<B branch: receiver_b == sender_b.
+        let b_sender = pid(7, 1);
+        let b = BestForeignSnapshot::Qualified {
+            ds: ds1,
+            source_port_identity: b_sender,
+            receiver: b_sender,
+        };
+
+        assert!(!a.is_better_or_better_by_topology(&b));
+        assert!(!qualified(&a).is_better_by_topology(&b));
+    }
+
+    #[test]
+    fn best_foreign_snapshot_topology_error2_is_not_better() {
+        let ds = TestClockDS::default_high_grade().dataset();
+        let sender = pid(1, 1);
+        let a = BestForeignSnapshot::Qualified {
+            ds,
+            source_port_identity: sender,
+            receiver: pid(9, 1),
+        };
+        // Trigger error-2: same sender and same receiver port number.
+        let b = BestForeignSnapshot::Qualified {
+            ds,
+            source_port_identity: sender,
+            receiver: pid(8, 1),
+        };
+
+        assert!(!a.is_better_or_better_by_topology(&b));
+        assert!(!qualified(&a).is_better_by_topology(&b));
+    }
+
+    #[test]
+    fn best_foreign_record_snapshot_prefers_better_by_topology() {
+        use crate::infra::infra_support::ForeignClockRecordsVec;
+
+        let now = Instant::from_secs(0);
+        let ds = TestClockDS::default_high_grade().dataset();
+        let receiver = PortIdentity::fake_on_port(PortNumber::new(1));
+
+        let worse = ForeignClockRecord::new_qualified(pid(2, 1), ds, LogInterval::new(0), now);
+        let better = ForeignClockRecord::new_qualified(pid(1, 1), ds, LogInterval::new(0), now);
+
+        let best = BestForeignRecord::new(
+            receiver,
+            ForeignClockRecordsVec::from_records(&[worse, better]),
+        );
+        assert_eq!(
+            best.snapshot(),
+            BestForeignSnapshot::Qualified {
+                ds,
+                source_port_identity: pid(1, 1),
+                receiver,
+            }
+        );
+    }
+
+    #[test]
     fn sliding_window_edge_drops_qualification_but_not_stale() {
         let t0 = Instant::from_secs(0);
         let high = TestClockDS::default_high_grade();
@@ -610,5 +805,57 @@ mod tests {
         let _ = record.update_from(&updated_record);
         assert!(record.qualified().is_none());
         assert!(!record.is_stale(now));
+    }
+
+    #[test]
+    fn best_foreign_snapshot_is_better_than_is_antisymmetric_for_strict_better() {
+        let receiver = PortIdentity::fake_on_port(PortNumber::new(1));
+
+        let low_id = ClockIdentity::new(&[0x00, 0, 0, 0, 0, 0, 0, 0]);
+        let high_id = ClockIdentity::new(&[0x01, 0, 0, 0, 0, 0, 0, 0]);
+
+        let a = BestForeignSnapshot::Qualified {
+            ds: TestClockDS::default_high_grade()
+                .with_clock_identity(low_id)
+                .with_priority1(Priority1::new(1))
+                .dataset(),
+            source_port_identity: pid(1, 1),
+            receiver,
+        };
+        let b = BestForeignSnapshot::Qualified {
+            ds: TestClockDS::default_high_grade()
+                .with_clock_identity(high_id)
+                .with_priority1(Priority1::new(2))
+                .dataset(),
+            source_port_identity: pid(2, 1),
+            receiver,
+        };
+
+        assert!(a.is_better_or_better_by_topology(&b));
+        assert!(!b.is_better_or_better_by_topology(&a));
+        assert!(!qualified(&a).is_better_by_topology(&b));
+        assert!(!qualified(&b).is_better_by_topology(&a));
+    }
+
+    #[test]
+    fn best_foreign_snapshot_is_better_by_topology_is_antisymmetric() {
+        let receiver = PortIdentity::fake_on_port(PortNumber::new(1));
+        let ds = TestClockDS::default_high_grade().dataset();
+
+        let a = BestForeignSnapshot::Qualified {
+            ds,
+            source_port_identity: pid(1, 1),
+            receiver,
+        };
+        let b = BestForeignSnapshot::Qualified {
+            ds,
+            source_port_identity: pid(2, 1),
+            receiver,
+        };
+
+        assert!(qualified(&a).is_better_by_topology(&b));
+        assert!(!qualified(&b).is_better_by_topology(&a));
+        assert!(a.is_better_or_better_by_topology(&b));
+        assert!(!b.is_better_or_better_by_topology(&a));
     }
 }

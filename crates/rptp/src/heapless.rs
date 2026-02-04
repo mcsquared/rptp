@@ -16,6 +16,7 @@
 use heapless::Vec;
 
 use crate::foreign::{ForeignClockRecord, ForeignClockRecords};
+use crate::port::PortIdentity;
 
 /// Heapless implementation of [`ForeignClockRecords`] backed by a bounded
 /// `heapless::Vec`.
@@ -46,32 +47,40 @@ use crate::foreign::{ForeignClockRecord, ForeignClockRecords};
 pub struct HeaplessForeignClockRecords<const N: usize> {
     records: Vec<ForeignClockRecord, N>,
     removal_policy: RemovalPolicy,
+    receiver: PortIdentity,
 }
 
 impl<const N: usize> HeaplessForeignClockRecords<N> {
     /// Create an empty store with capacity `N`.
-    pub fn new() -> Self {
+    ///
+    /// `receiver` identifies the port that will receive these foreign clock records.
+    pub fn new(receiver: PortIdentity) -> Self {
         Self {
             records: Vec::new(),
             removal_policy: RemovalPolicy,
+            receiver,
         }
     }
 
     /// Create a store from pre-seeded records (tests/support only).
     #[cfg(any(test, feature = "test-support"))]
     #[allow(dead_code)]
-    pub(crate) fn from_records(records: &[ForeignClockRecord]) -> Self {
+    pub(crate) fn from_records(receiver: PortIdentity, records: &[ForeignClockRecord]) -> Self {
         let vec = Vec::from_slice(records).unwrap_or_default();
         Self {
             records: vec,
             removal_policy: RemovalPolicy,
+            receiver,
         }
     }
 }
 
 impl Default for HeaplessForeignClockRecords<0> {
     fn default() -> Self {
-        Self::new()
+        Self::new(PortIdentity::new(
+            crate::clock::ClockIdentity::new(&[0; 8]),
+            crate::port::PortNumber::new(1),
+        ))
     }
 }
 
@@ -94,7 +103,10 @@ impl<const N: usize> ForeignClockRecords for HeaplessForeignClockRecords<N> {
         }
 
         // Capacity exceeded, determine if there is a record to remove by policy
-        if let Some(index) = self.removal_policy.candidate_index(&self.records, &record) {
+        if let Some(index) =
+            self.removal_policy
+                .candidate_index(&self.records, &record, &self.receiver)
+        {
             self.records.remove(index);
             let result = self.records.push(record);
             assert!(result.is_ok());
@@ -117,31 +129,32 @@ impl<const N: usize> ForeignClockRecords for HeaplessForeignClockRecords<N> {
 // exceeded to make room for a new, possibly better record, even if unqualified.
 //
 // The current policy:
-// - ignores qualification (considers only dataset ranking), and
-// - replaces the worst record that is worse than the candidate by dataset ranking.
+// - ignores qualification (considers only dataset ranking with topology), and
+// - replaces the worst record that is worse than the candidate by dataset + topology ranking.
 struct RemovalPolicy;
 
 impl RemovalPolicy {
     /// Return the index of a record to remove to make room for `candidate`.
     ///
     /// The policy scans all records and chooses the worst one that is still worse
-    /// than `candidate` by dataset ranking. This ensures we always evict the
+    /// than `candidate` by dataset ranking with topology. This ensures we always evict the
     /// lowest-quality record to make room for a better candidate.
     fn candidate_index(
         &self,
         current: &[ForeignClockRecord],
         candidate: &ForeignClockRecord,
+        receiver: &PortIdentity,
     ) -> Option<usize> {
         let mut worst_index: Option<usize> = None;
 
         for (i, record) in current.iter().enumerate() {
-            if candidate.better_by_dataset_than(record) {
+            if candidate.is_better_than(record, receiver) {
                 match worst_index {
                     None => worst_index = Some(i),
                     Some(w) => {
                         // If current record is worse than the previously found worst,
                         // update the worst index.
-                        if record.better_by_dataset_than(&current[w]) {
+                        if record.is_better_than(&current[w], receiver) {
                             // current[w] is still the worst
                         } else {
                             // current record is worse or equal
@@ -173,7 +186,8 @@ mod tests {
 
     #[test]
     fn heapless_stores_and_iterates_records() {
-        let mut records = HeaplessForeignClockRecords::<4>::new();
+        let receiver = new_port_identity(99);
+        let mut records = HeaplessForeignClockRecords::<4>::new(receiver);
 
         let high_clock = TestClockDS::default_high_grade().dataset();
         let mid_clock = TestClockDS::default_mid_grade().dataset();
@@ -227,12 +241,17 @@ mod tests {
         )));
     }
 
-    fn same_dataset(a: &ForeignClockRecord, b: &ForeignClockRecord) -> bool {
-        !a.better_by_dataset_than(b) && !b.better_by_dataset_than(a)
+    fn same_dataset(
+        a: &ForeignClockRecord,
+        b: &ForeignClockRecord,
+        receiver: &PortIdentity,
+    ) -> bool {
+        !a.is_better_than(b, receiver) && !b.is_better_than(a, receiver)
     }
 
     #[test]
     fn heapless_replacement_keeps_best_records_on_overflow() {
+        let receiver = new_port_identity(99);
         let high_clock = TestClockDS::default_high_grade().dataset();
         let mid_clock = TestClockDS::default_mid_grade().dataset();
         let low_clock = TestClockDS::default_low_grade_slave_only().dataset();
@@ -242,20 +261,23 @@ mod tests {
         let low_port_id = new_port_identity(3);
 
         // Start with mid and low, both qualified.
-        let mut records = HeaplessForeignClockRecords::<2>::from_records(&[
-            ForeignClockRecord::new_qualified(
-                mid_port_id,
-                mid_clock,
-                LogInterval::new(0),
-                Instant::from_secs(0),
-            ),
-            ForeignClockRecord::new_qualified(
-                low_port_id,
-                low_clock,
-                LogInterval::new(0),
-                Instant::from_secs(0),
-            ),
-        ]);
+        let mut records = HeaplessForeignClockRecords::<2>::from_records(
+            receiver,
+            &[
+                ForeignClockRecord::new_qualified(
+                    mid_port_id,
+                    mid_clock,
+                    LogInterval::new(0),
+                    Instant::from_secs(0),
+                ),
+                ForeignClockRecord::new_qualified(
+                    low_port_id,
+                    low_clock,
+                    LogInterval::new(0),
+                    Instant::from_secs(0),
+                ),
+            ],
+        );
 
         // Insert a better clock; capacity is exceeded, so low should be removed.
         records.remember(ForeignClockRecord::new(
@@ -289,15 +311,15 @@ mod tests {
         let has_high = records
             .records
             .iter()
-            .any(|r| same_dataset(r, &template_high));
+            .any(|r| same_dataset(r, &template_high, &receiver));
         let has_mid = records
             .records
             .iter()
-            .any(|r| same_dataset(r, &template_mid));
+            .any(|r| same_dataset(r, &template_mid, &receiver));
         let has_low = records
             .records
             .iter()
-            .any(|r| same_dataset(r, &template_low));
+            .any(|r| same_dataset(r, &template_low, &receiver));
 
         assert!(has_high);
         assert!(has_mid);
@@ -306,6 +328,7 @@ mod tests {
 
     #[test]
     fn heapless_replacement_does_not_replace_when_candidate_is_worse() {
+        let receiver = new_port_identity(99);
         let high_clock = TestClockDS::default_high_grade().dataset();
         let mid_clock = TestClockDS::default_mid_grade().dataset();
         let low_clock = TestClockDS::default_low_grade_slave_only().dataset();
@@ -315,20 +338,23 @@ mod tests {
         let low_port_id = new_port_identity(3);
 
         // Start with high and mid, both qualified.
-        let mut records = HeaplessForeignClockRecords::<2>::from_records(&[
-            ForeignClockRecord::new_qualified(
-                high_port_id,
-                high_clock,
-                LogInterval::new(0),
-                Instant::from_secs(0),
-            ),
-            ForeignClockRecord::new_qualified(
-                mid_port_id,
-                mid_clock,
-                LogInterval::new(0),
-                Instant::from_secs(0),
-            ),
-        ]);
+        let mut records = HeaplessForeignClockRecords::<2>::from_records(
+            receiver,
+            &[
+                ForeignClockRecord::new_qualified(
+                    high_port_id,
+                    high_clock,
+                    LogInterval::new(0),
+                    Instant::from_secs(0),
+                ),
+                ForeignClockRecord::new_qualified(
+                    mid_port_id,
+                    mid_clock,
+                    LogInterval::new(0),
+                    Instant::from_secs(0),
+                ),
+            ],
+        );
 
         // Insert a worse clock; capacity is exceeded, but no record should be replaced.
         records.remember(ForeignClockRecord::new(
@@ -362,15 +388,15 @@ mod tests {
         let has_high = records
             .records
             .iter()
-            .any(|r| same_dataset(r, &template_high));
+            .any(|r| same_dataset(r, &template_high, &receiver));
         let has_mid = records
             .records
             .iter()
-            .any(|r| same_dataset(r, &template_mid));
+            .any(|r| same_dataset(r, &template_mid, &receiver));
         let has_low = records
             .records
             .iter()
-            .any(|r| same_dataset(r, &template_low));
+            .any(|r| same_dataset(r, &template_low, &receiver));
 
         assert!(has_high);
         assert!(has_mid);
@@ -379,10 +405,11 @@ mod tests {
 
     #[test]
     fn heapless_prune_stale_returns_true_when_records_removed() {
+        let receiver = new_port_identity(99);
         let high_clock = TestClockDS::default_high_grade().dataset();
         let high_port_id = new_port_identity(1);
 
-        let mut records = HeaplessForeignClockRecords::<4>::new();
+        let mut records = HeaplessForeignClockRecords::<4>::new(receiver);
         records.remember(ForeignClockRecord::new(
             high_port_id,
             high_clock,
@@ -403,10 +430,11 @@ mod tests {
 
     #[test]
     fn heapless_prune_stale_returns_false_when_no_records_are_stale() {
+        let receiver = new_port_identity(99);
         let high_clock = TestClockDS::default_high_grade().dataset();
         let high_port_id = new_port_identity(1);
 
-        let mut records = HeaplessForeignClockRecords::<4>::new();
+        let mut records = HeaplessForeignClockRecords::<4>::new(receiver);
         records.remember(ForeignClockRecord::new(
             high_port_id,
             high_clock,

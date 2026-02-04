@@ -21,8 +21,8 @@ use crate::foreign::{
 use crate::log::PortLog;
 use crate::message::SystemMessage;
 use crate::port::{
-    DomainNumber, DomainPort, PhysicalPort, PortEnumeration, PortNotification, PortNumber, Timeout,
-    TimerHost,
+    DomainNumber, DomainPort, PhysicalPort, PortEnumeration, PortIdentity, PortNotification,
+    PortNumber, Timeout, TimerHost,
 };
 use crate::portstate::PortState;
 use crate::profile::PortProfile;
@@ -131,7 +131,8 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
 
         let default_ds = &self.default_ds;
         let bmca = BestMasterClockAlgorithm::new(default_ds, port_number);
-        let best_foreign = BestForeignRecord::new(port_number, foreign_clock_records);
+        let receiver = PortIdentity::new(*self.local_clock.identity(), port_number);
+        let best_foreign = BestForeignRecord::new(receiver, foreign_clock_records);
         let state_decision_trigger =
             StateDecisionEventTrigger::new(self, best_foreign.snapshot(), port_number);
 

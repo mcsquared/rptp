@@ -322,7 +322,8 @@ pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
     profile: PortProfile,
 ) -> PortState<'a, P, S> {
     let grandmaster_id = *port.local_clock().identity();
-    let best_foreign = BestForeignRecord::new(port_number, foreign_clock_records);
+    let receiver = PortIdentity::fake_on_port(port_number);
+    let best_foreign = BestForeignRecord::new(receiver, foreign_clock_records);
     let state_decision_trigger =
         StateDecisionEventTrigger::new(state_decision_event, best_foreign.snapshot(), port_number);
     let bmca = GrandMasterTrackingBmca::new(
@@ -347,7 +348,8 @@ pub fn slave_test_port<'a, P: Port, S: ForeignClockRecords>(
     parent_port_identity: ParentPortIdentity,
     profile: PortProfile,
 ) -> PortState<'a, P, S> {
-    let best_foreign = BestForeignRecord::new(port_number, foreign_clock_records);
+    let receiver = PortIdentity::fake_on_port(port_number);
+    let best_foreign = BestForeignRecord::new(receiver, foreign_clock_records);
     let state_decision_trigger =
         StateDecisionEventTrigger::new(state_decision_event, best_foreign.snapshot(), port_number);
     let bmca = ParentTrackingBmca::new(
@@ -532,6 +534,14 @@ impl PortIdentity {
         PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
             PortNumber::new(1),
+        )
+    }
+
+    /// Construct a deterministic fake port identity on a specific port for tests.
+    pub fn fake_on_port(port: PortNumber) -> Self {
+        PortIdentity::new(
+            ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+            port,
         )
     }
 }

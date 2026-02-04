@@ -197,17 +197,7 @@ pub mod infra_support {
             let mut best_snapshot = BestForeignSnapshot::Empty;
 
             for snapshot in by_port.values().copied() {
-                let better = match (snapshot, best_snapshot) {
-                    (
-                        BestForeignSnapshot::Qualified { ds: ds1, .. },
-                        BestForeignSnapshot::Qualified { ds: ds2, .. },
-                    ) => ds1.better_than(&ds2),
-                    (BestForeignSnapshot::Qualified { .. }, BestForeignSnapshot::Empty) => true,
-                    (BestForeignSnapshot::Empty, BestForeignSnapshot::Qualified { .. }) => false,
-                    (BestForeignSnapshot::Empty, BestForeignSnapshot::Empty) => false,
-                };
-
-                if better {
+                if snapshot.is_better_or_better_by_topology(&best_snapshot) {
                     best_snapshot = snapshot;
                 }
             }
@@ -395,7 +385,7 @@ pub mod infra_support {
                 BestForeignSnapshot::Qualified {
                     ds: high_ds,
                     source_port_identity: high_port_id,
-                    received_on_port: port1,
+                    receiver: PortIdentity::fake_on_port(port1),
                 },
             );
 
@@ -405,20 +395,16 @@ pub mod infra_support {
                 BestForeignSnapshot::Qualified {
                     ds: mid_ds,
                     source_port_identity: mid_port_id,
-                    received_on_port: port2,
+                    receiver: PortIdentity::fake_on_port(port2),
                 },
             );
 
             // Best should be the high-grade candidate from port 1
             let best = candidates.best();
             match best {
-                BestForeignSnapshot::Qualified {
-                    ds,
-                    received_on_port,
-                    ..
-                } => {
+                BestForeignSnapshot::Qualified { ds, receiver, .. } => {
                     assert_eq!(ds, high_ds);
-                    assert_eq!(received_on_port, port1);
+                    assert_eq!(receiver.port_number(), port1);
                 }
                 BestForeignSnapshot::Empty => panic!("expected qualified candidate"),
             }
@@ -444,7 +430,7 @@ pub mod infra_support {
                 BestForeignSnapshot::Qualified {
                     ds: high_ds,
                     source_port_identity: high_port_id,
-                    received_on_port: port1,
+                    receiver: PortIdentity::fake_on_port(port1),
                 },
             );
             candidates.remember(
@@ -452,7 +438,7 @@ pub mod infra_support {
                 BestForeignSnapshot::Qualified {
                     ds: mid_ds,
                     source_port_identity: mid_port_id,
-                    received_on_port: port2,
+                    receiver: PortIdentity::fake_on_port(port2),
                 },
             );
 
@@ -462,13 +448,9 @@ pub mod infra_support {
             // Best should now be the mid-grade candidate from port 2
             let best = candidates.best();
             match best {
-                BestForeignSnapshot::Qualified {
-                    ds,
-                    received_on_port,
-                    ..
-                } => {
+                BestForeignSnapshot::Qualified { ds, receiver, .. } => {
                     assert_eq!(ds, mid_ds);
-                    assert_eq!(received_on_port, port2);
+                    assert_eq!(receiver.port_number(), port2);
                 }
                 BestForeignSnapshot::Empty => panic!("expected qualified candidate from port 2"),
             }
@@ -502,7 +484,7 @@ pub mod infra_support {
                 BestForeignSnapshot::Qualified {
                     ds: high_ds,
                     source_port_identity: high_port_id,
-                    received_on_port: port1,
+                    receiver: PortIdentity::fake_on_port(port1),
                 },
             );
 
@@ -538,7 +520,7 @@ pub mod infra_support {
                 BestForeignSnapshot::Qualified {
                     ds: mid_ds,
                     source_port_identity: mid_port_id,
-                    received_on_port: port2,
+                    receiver: PortIdentity::fake_on_port(port2),
                 },
             );
             candidates.remember(
@@ -546,7 +528,7 @@ pub mod infra_support {
                 BestForeignSnapshot::Qualified {
                     ds: low_ds,
                     source_port_identity: low_port_id,
-                    received_on_port: port3,
+                    receiver: PortIdentity::fake_on_port(port3),
                 },
             );
             candidates.remember(
@@ -554,20 +536,16 @@ pub mod infra_support {
                 BestForeignSnapshot::Qualified {
                     ds: high_ds,
                     source_port_identity: high_port_id,
-                    received_on_port: port1,
+                    receiver: PortIdentity::fake_on_port(port1),
                 },
             );
 
             // Best should be the high-grade candidate from port 1
             let best = candidates.best();
             match best {
-                BestForeignSnapshot::Qualified {
-                    ds,
-                    received_on_port,
-                    ..
-                } => {
+                BestForeignSnapshot::Qualified { ds, receiver, .. } => {
                     assert_eq!(ds, high_ds);
-                    assert_eq!(received_on_port, port1);
+                    assert_eq!(receiver.port_number(), port1);
                 }
                 BestForeignSnapshot::Empty => panic!("expected qualified candidate"),
             }

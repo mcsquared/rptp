@@ -214,8 +214,10 @@ mod tests {
             );
 
             {
-                let best_foreign =
-                    BestForeignRecord::new(port_number, ForeignClockRecordsVec::new());
+                let best_foreign = BestForeignRecord::new(
+                    PortIdentity::fake_on_port(port_number),
+                    ForeignClockRecordsVec::new(),
+                );
                 let state_decision_trigger = StateDecisionEventTrigger::new(
                     &self.state_decision_event,
                     best_foreign.snapshot(),
@@ -353,7 +355,7 @@ mod tests {
             BestForeignSnapshot::Qualified {
                 ds: foreign_clock,
                 source_port_identity: foreign_port,
-                received_on_port: PortNumber::new(1),
+                receiver: PortIdentity::fake(),
             }
         );
     }

@@ -375,8 +375,10 @@ mod tests {
             let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
             // Initialize initial state from the provided records
-            let best_foreign_record =
-                BestForeignRecord::new(port_number, ForeignClockRecordsVec::from_records(records));
+            let best_foreign_record = BestForeignRecord::new(
+                PortIdentity::fake_on_port(port_number),
+                ForeignClockRecordsVec::from_records(records),
+            );
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign_record.snapshot(),
@@ -471,7 +473,7 @@ mod tests {
             BestForeignSnapshot::Qualified {
                 ds: TestClockDS::default_high_grade().dataset(),
                 source_port_identity: new_parent,
-                received_on_port: PortNumber::new(1),
+                receiver: PortIdentity::fake(),
             }
         );
     }
@@ -600,7 +602,7 @@ mod tests {
             BestForeignSnapshot::Qualified {
                 ds: foreign_clock,
                 source_port_identity: foreign_port,
-                received_on_port: PortNumber::new(1),
+                receiver: PortIdentity::fake(),
             }
         );
     }
@@ -657,7 +659,7 @@ mod tests {
             BestForeignSnapshot::Qualified {
                 ds: foreign_clock,
                 source_port_identity: foreign_port,
-                received_on_port: PortNumber::new(1),
+                receiver: PortIdentity::fake(),
             }
         );
     }
