@@ -47,12 +47,8 @@ async fn main() -> std::io::Result<()> {
     let profile = PortProfile::default().with_servo_config(ServoConfig::Stepping {
         metrics: &NOOP_CLOCK_METRICS,
     });
-    let mut ordinary_clock = OrdinaryTokioClock::new(
-        &virtual_clock,
-        default_ds,
-        DomainNumber::new(0),
-        profile,
-    );
+    let ordinary_clock =
+        OrdinaryTokioClock::new(&virtual_clock, default_ds, DomainNumber::new(0), profile);
 
     let domain_number = ordinary_clock.domain_number();
     let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());

@@ -65,7 +65,7 @@ impl<C: SynchronizableClock + Clone> OrdinaryTokioClock<C> {
     /// - schedules timeouts by sending `(DomainNumber, SystemMessage)` through `system_tx`, and
     /// - uses `timestamping` for egress timestamp feedback integration.
     pub fn port<'a, N, T>(
-        &'a mut self,
+        &'a self,
         physical_port: TokioPhysicalPort<N>,
         system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
         timestamping: T,

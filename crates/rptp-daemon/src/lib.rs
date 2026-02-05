@@ -10,6 +10,8 @@
 //! Most of the domain behaviour lives in the `rptp` crate; this crate focuses on wiring:
 //! networking, timestamp feedback, virtual clocks, and an `OrdinaryClock` node runtime.
 
+/// Daemon-side assembly of the `rptp` boundary clock.
+pub mod boundary;
 /// Logging/tracing integration and log sinks for daemon components.
 pub mod log;
 /// UDP/network helpers used by the daemon runtime.

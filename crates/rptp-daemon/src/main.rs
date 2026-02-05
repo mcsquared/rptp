@@ -71,7 +71,7 @@ async fn main() -> std::io::Result<()> {
         metrics: &NOOP_CLOCK_METRICS,
     });
 
-    let mut ordinary_clock =
+    let ordinary_clock =
         OrdinaryTokioClock::new(&virtual_clock, default_ds, DomainNumber::new(0), profile);
 
     let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());

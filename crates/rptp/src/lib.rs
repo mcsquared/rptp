@@ -14,6 +14,7 @@
 //! - Port state machine (IEEE 1588 state chart as objects): [`portstate::PortState`]
 //! - BMCA logic and foreign master tracking: [`bmca`]
 //! - Building an ordinary clock: [`ordinary::OrdinaryClock`]
+//! - Building a boundary clock: [`boundary::BoundaryClock`]
 //! - Time and intervals: [`time`]
 //!
 //! For an end-to-end reference wiring, see the `rptp-daemon` crate in this repository.
@@ -32,6 +33,7 @@
 //! - `heapless-storage` (default): enables heapless storage helpers for constrained targets.
 //! - `test-support`: enables extra test helpers (fake clocks/ports, etc.).
 
+pub mod boundary;
 pub mod clock;
 pub mod dataset;
 pub mod foreign;

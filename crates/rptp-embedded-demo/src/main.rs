@@ -506,8 +506,7 @@ fn main() -> ! {
     let profile = PortProfile::default().with_servo_config(ServoConfig::Stepping {
         metrics: &NOOP_CLOCK_METRICS,
     });
-    let mut ordinary_clock =
-        OrdinaryClock::new(&demo_clock, default_ds, DomainNumber::new(0), profile);
+    let ordinary_clock = OrdinaryClock::new(&demo_clock, default_ds, DomainNumber::new(0), profile);
 
     let domain_number = ordinary_clock.domain_number();
     let physical_port = DemoPhysicalPort {

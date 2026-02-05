@@ -235,8 +235,8 @@ pub mod infra_support {
     }
 
     impl<T: Timeout> PortNotification<T> for MultiPortNotification<T> {
-        fn add_port(&mut self, timeout: T) {
-            self.timeouts.get_mut().push(timeout);
+        fn add_port(&self, timeout: T) {
+            self.timeouts.borrow_mut().push(timeout);
         }
 
         fn notify_all(&self, snapshot: StateDecisionSnapshot) {
@@ -570,7 +570,7 @@ pub mod infra_support {
                 snapshot,
             )));
 
-            let mut notification = MultiPortNotification::new();
+            let notification = MultiPortNotification::new();
             notification.add_port(timeout1.clone());
             notification.add_port(timeout2.clone());
 

@@ -104,7 +104,7 @@ impl<C: SynchronizableClock + Clone, T: Timeout> OrdinaryClock<C, T> {
     /// is responsible for delivering `SystemMessage::Initialized` to start the state machine (see
     /// `PortState::dispatch_system`).
     pub fn port<'a, P, TH, TS, S, L>(
-        &'a mut self,
+        &'a self,
         physical_port: P,
         timer_host: TH,
         timestamping: TS,
@@ -178,7 +178,7 @@ impl<T: Timeout> SinglePortNotification<T> {
 }
 
 impl<T: Timeout> PortNotification<T> for SinglePortNotification<T> {
-    fn add_port(&mut self, timeout: T) {
+    fn add_port(&self, timeout: T) {
         *self.timeout.borrow_mut() = Some(timeout);
     }
 

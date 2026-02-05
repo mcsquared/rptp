@@ -18,6 +18,7 @@
 //! [`DomainPort`] is the bridge: it converts typed domain messages into wire buffers and delegates
 //! actual sending and timestamp feedback to infrastructure collaborators.
 
+use core::cell::Cell;
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
@@ -78,7 +79,10 @@ pub trait PhysicalPort {
 /// Generic over the `Timeout` type to avoid trait objects in the domain core.
 pub trait PortNotification<T: Timeout> {
     /// Register a port for state decision event delivery.
-    fn add_port(&mut self, timeout: T);
+    ///
+    /// Implementations use interior mutability (e.g. [`RefCell`](core::cell::RefCell)) so this
+    /// can be called with `&self`, enabling sequential port creation.
+    fn add_port(&self, timeout: T);
 
     /// Notify all registered ports of a state decision event.
     ///
@@ -168,7 +172,7 @@ pub struct PortEnumeration {
     /// Number of ports (1..=count).
     count: u16,
     /// Next port index to yield (1-based). When next > count, enumeration is exhausted.
-    next: u16,
+    next: Cell<u16>,
 }
 
 impl PortEnumeration {
@@ -178,31 +182,29 @@ impl PortEnumeration {
     /// Panics if `n` is zero (a clock must have at least one port).
     pub fn sequential(n: u16) -> Self {
         assert!(n >= 1, "PortEnumeration must have at least one port");
-        Self { count: n, next: 1 }
+        Self {
+            count: n,
+            next: Cell::new(1),
+        }
     }
 
     /// Create an enumeration of a single port (port number 1).
     pub fn single() -> Self {
         Self::sequential(1)
     }
-}
 
-impl Iterator for PortEnumeration {
-    type Item = PortNumber;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next <= self.count {
-            let n = self.next;
-            self.next += 1;
+    /// Yield the next port number, advancing the enumeration.
+    ///
+    /// Can be called with `&self` (interior mutability), enabling sequential port creation
+    /// when multiple ports share a reference to the same clock.
+    pub fn next(&self) -> Option<PortNumber> {
+        let n = self.next.get();
+        if n <= self.count {
+            self.next.set(n + 1);
             Some(PortNumber::new(n))
         } else {
             None
         }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = (self.count.saturating_sub(self.next - 1)) as usize;
-        (remaining, Some(remaining))
     }
 }
 
@@ -670,7 +672,7 @@ mod tests {
 
     #[test]
     fn port_enumeration_sequential_yields_1_to_n() {
-        let mut e = PortEnumeration::sequential(3);
+        let e = PortEnumeration::sequential(3);
         assert_eq!(e.next(), Some(PortNumber::new(1)));
         assert_eq!(e.next(), Some(PortNumber::new(2)));
         assert_eq!(e.next(), Some(PortNumber::new(3)));
@@ -680,7 +682,7 @@ mod tests {
 
     #[test]
     fn port_enumeration_single_yields_one_then_none() {
-        let mut e = PortEnumeration::single();
+        let e = PortEnumeration::single();
         assert_eq!(e.next(), Some(PortNumber::new(1)));
         assert_eq!(e.next(), None);
     }

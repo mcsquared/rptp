@@ -102,7 +102,7 @@ impl<N: NetworkSocket> PrometheusNode<N> {
         let timestamping = ClockTxTimestamping::new(&*virtual_clock, system_tx.clone(), domain);
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let mut ordinary = OrdinaryTokioClock::new(&*virtual_clock, default_ds, domain, profile);
+        let ordinary = OrdinaryTokioClock::new(&*virtual_clock, default_ds, domain, profile);
         let port_state = ordinary
             .port(physical_port, system_tx, &timestamping)
             .expect("ordinary clock has one port");
