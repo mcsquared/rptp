@@ -28,7 +28,7 @@ pub mod infra_support {
     };
     use crate::log::PortEvent;
     use crate::message::{EventMessage, GeneralMessage, SystemMessage};
-    use crate::port::{Port, PortNotification, PortNumber, SendResult, Timeout};
+    use crate::port::{Port, PortIdentity, PortNotification, PortNumber, SendResult, Timeout};
     use crate::time::{Duration, TimeStamp};
 
     impl Clock for Rc<dyn SynchronizableClock> {
@@ -44,6 +44,10 @@ pub mod infra_support {
     impl<P: Port> Port for Box<P> {
         type Clock = P::Clock;
         type Timeout = P::Timeout;
+
+        fn identity(&self) -> PortIdentity {
+            self.as_ref().identity()
+        }
 
         fn local_clock(&self) -> &LocalClock<Self::Clock> {
             self.as_ref().local_clock()

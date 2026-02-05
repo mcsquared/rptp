@@ -224,8 +224,8 @@ impl ClockDS {
     }
 
     /// Return the clock identity of this dataset.
-    pub fn identity(&self) -> &ClockIdentity {
-        &self.identity
+    pub fn identity(&self) -> ClockIdentity {
+        self.identity
     }
 
     /// Return `true` if this dataset represents an authoritative clock.

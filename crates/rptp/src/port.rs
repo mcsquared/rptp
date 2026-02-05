@@ -111,6 +111,8 @@ pub trait Port {
     type Clock: SynchronizableClock;
     type Timeout: Timeout;
 
+    /// Return this port's PTP identity (clock identity + port number).
+    fn identity(&self) -> PortIdentity;
     /// Access the local clock discipline boundary.
     fn local_clock(&self) -> &LocalClock<Self::Clock>;
     /// Send a typed event message.
@@ -334,12 +336,12 @@ impl Display for ParentPortIdentity {
 /// - logging to a [`PortLog`] implementation.
 pub struct DomainPort<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> {
     local_clock: &'a LocalClock<C>,
+    port_identity: PortIdentity,
     physical_port: &'a dyn PhysicalPort,
     timer_host: T,
     timestamping: TS,
     log: L,
     domain_number: DomainNumber,
-    port_number: PortNumber,
 }
 
 impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog>
@@ -348,21 +350,21 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog>
     /// Create a new `DomainPort` wired to the given infrastructure collaborators.
     pub fn new(
         local_clock: &'a LocalClock<C>,
+        port_identity: PortIdentity,
         physical_port: &'a dyn PhysicalPort,
         timer_host: T,
         timestamping: TS,
         log: L,
         domain_number: DomainNumber,
-        port_number: PortNumber,
     ) -> Self {
         Self {
             local_clock,
+            port_identity,
             physical_port,
             timer_host,
             timestamping,
             log,
             domain_number,
-            port_number,
         }
     }
 }
@@ -373,6 +375,10 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> P
     type Clock = C;
     type Timeout = T::Timeout;
 
+    fn identity(&self) -> PortIdentity {
+        self.port_identity
+    }
+
     fn local_clock(&self) -> &LocalClock<Self::Clock> {
         self.local_clock
     }
@@ -382,7 +388,7 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> P
             TransportSpecific,
             PtpVersion::V2,
             self.domain_number,
-            PortIdentity::new(*self.local_clock.identity(), self.port_number),
+            self.port_identity,
         );
         let finalized = msg.to_wire(&mut buf);
         let res = self.physical_port.send_event(finalized.as_ref());
@@ -397,7 +403,7 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> P
             TransportSpecific,
             PtpVersion::V2,
             self.domain_number,
-            PortIdentity::new(*self.local_clock.identity(), self.port_number),
+            self.port_identity,
         );
         let finalized = msg.to_wire(&mut buf);
         self.physical_port.send_general(finalized.as_ref())
@@ -408,8 +414,7 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> P
     }
 
     fn log(&self, event: PortEvent) {
-        let port_identity = PortIdentity::new(*self.local_clock.identity(), self.port_number);
-        self.log.port_event(port_identity, event);
+        self.log.port_event(self.port_identity, event);
     }
 }
 
@@ -602,22 +607,21 @@ mod tests {
         let identity = ClockIdentity::new(&[1, 2, 3, 4, 5, 6, 7, 8]);
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            identity,
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();
         let domain_number = DomainNumber::new(3);
-        let port_number = PortNumber::new(5);
+        let port_identity = PortIdentity::new(identity, PortNumber::new(5));
 
         let port = DomainPort::new(
             &local_clock,
+            port_identity,
             &cap_port,
             &timer_host,
             FakeTimestamping::new(),
             NoopPortLog,
             domain_number,
-            port_number,
         );
 
         assert!(
@@ -628,10 +632,7 @@ mod tests {
         assert!(!bufs.is_empty());
         let bytes = &bufs[0];
         assert_eq!(bytes[4], domain_number.as_u8());
-        assert_eq!(
-            &bytes[20..30],
-            &crate::port::PortIdentity::new(identity, port_number).to_wire()
-        );
+        assert_eq!(&bytes[20..30], &port.identity().to_wire());
     }
 
     #[test]
@@ -639,22 +640,21 @@ mod tests {
         let identity = ClockIdentity::new(&[8, 7, 6, 5, 4, 3, 2, 1]);
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            identity,
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();
         let domain_number = DomainNumber::new(9);
-        let port_number = PortNumber::new(2);
+        let port_identity = PortIdentity::new(identity, PortNumber::new(2));
 
         let port = DomainPort::new(
             &local_clock,
+            port_identity,
             &cap_port,
             &timer_host,
             FakeTimestamping::new(),
             NoopPortLog,
             domain_number,
-            port_number,
         );
 
         let follow =
@@ -664,10 +664,7 @@ mod tests {
         assert!(!bufs.is_empty());
         let bytes = &bufs[0];
         assert_eq!(bytes[4], domain_number.as_u8());
-        assert_eq!(
-            &bytes[20..30],
-            &crate::port::PortIdentity::new(identity, port_number).to_wire()
-        );
+        assert_eq!(&bytes[20..30], &port.identity().to_wire());
     }
 
     #[test]

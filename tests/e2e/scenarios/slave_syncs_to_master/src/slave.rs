@@ -38,7 +38,6 @@ async fn main() -> std::io::Result<()> {
     let mut ordinary_clock = OrdinaryTokioClock::new(
         LocalClock::new(
             &fake_clock,
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         ),
         default_ds,

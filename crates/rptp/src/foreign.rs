@@ -148,7 +148,7 @@ impl<'a> QualifiedForeignSnapshot<'a> {
     }
 
     pub(crate) fn grandmaster_id(&self) -> ClockIdentity {
-        *self.dataset.identity()
+        self.dataset.identity()
     }
 
     /// Return `true` if `self` is better than `other` *only* due to topology.

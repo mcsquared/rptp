@@ -72,7 +72,6 @@ impl Node {
         let shared_clock = SharedVirtualClock(clock);
         let local_clock = LocalClock::new(
             shared_clock.clone(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let ordinary = OrdinaryTokioClock::new(local_clock, default_ds, DOMAIN);

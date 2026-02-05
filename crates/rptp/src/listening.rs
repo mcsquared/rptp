@@ -187,7 +187,6 @@ mod tests {
             Self {
                 local_clock: LocalClock::new(
                     FakeClock::default(),
-                    *ds.identity(),
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
                 default_ds: ds,
@@ -198,14 +197,16 @@ mod tests {
         }
 
         fn port_under_test(&self, port_number: PortNumber) -> ListeningTestPort<'_> {
+            let port_identity = PortIdentity::fake_on_port(port_number);
+
             let domain_port = DomainPort::new(
                 &self.local_clock,
+                port_identity,
                 &self.physical_port,
                 &self.timer_host,
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                port_number,
             );
 
             let announce_receipt_timeout = AnnounceReceiptTimeout::new(
@@ -215,7 +216,7 @@ mod tests {
 
             {
                 let best_foreign = BestForeignRecord::new(
-                    PortIdentity::fake_on_port(port_number),
+                    port_identity,
                     ForeignClockRecordsVec::new(),
                 );
                 let state_decision_trigger = StateDecisionEventTrigger::new(

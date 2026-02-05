@@ -379,33 +379,23 @@ pub trait SynchronizableClock: Clock {
     fn adjust(&self, rate: f64);
 }
 
-/// The local clock in a PTP node: identity + backend + servo.
+/// The local clock in a PTP node: backend + servo.
 ///
 /// `LocalClock` composes:
 /// - a platform clock backend (`C: [`SynchronizableClock`]),
-/// - a stable [`ClockIdentity`], and
 /// - a [`Servo`] strategy that turns observed offset samples into clock actions.
 ///
 /// Port roles feed samples into the clock discipline boundary via `discipline()` and then use the
 /// returned [`ServoState`] in their state machine decisions.
 pub struct LocalClock<C: SynchronizableClock> {
     clock: C,
-    identity: ClockIdentity,
     servo: Servo,
 }
 
 impl<C: SynchronizableClock> LocalClock<C> {
     /// Create a new local clock wrapper around a backend clock and a servo strategy.
-    pub fn new(clock: C, identity: ClockIdentity, servo: Servo) -> Self {
-        Self {
-            clock,
-            identity,
-            servo,
-        }
-    }
-
-    pub fn identity(&self) -> &ClockIdentity {
-        &self.identity
+    pub fn new(clock: C, servo: Servo) -> Self {
+        Self { clock, servo }
     }
 
     /// Return the current time reported by the backend clock.

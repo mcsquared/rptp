@@ -112,6 +112,7 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
         L: PortLog,
     {
         let port_number = self.port_enumeration.next()?;
+        let port_identity = PortIdentity::new(self.default_ds.identity(), port_number);
 
         // Register port with notification before creating port state
         let state_decision_timeout = timer_host.timeout(SystemMessage::StateDecisionEvent(
@@ -121,18 +122,17 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
 
         let domain_port = DomainPort::new(
             &self.local_clock,
+            port_identity,
             physical_port,
             timer_host,
             timestamping,
             log,
             self.domain_number,
-            port_number,
         );
 
         let default_ds = &self.default_ds;
         let bmca = BestMasterClockAlgorithm::new(default_ds, port_number);
-        let receiver = PortIdentity::new(*self.local_clock.identity(), port_number);
-        let best_foreign = BestForeignRecord::new(receiver, foreign_clock_records);
+        let best_foreign = BestForeignRecord::new(port_identity, foreign_clock_records);
         let state_decision_trigger =
             StateDecisionEventTrigger::new(self, best_foreign.snapshot(), port_number);
 

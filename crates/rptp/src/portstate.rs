@@ -391,7 +391,6 @@ mod tests {
             Self {
                 local_clock: LocalClock::new(
                     FakeClock::default(),
-                    *ds.identity(),
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
                 default_ds: ds,
@@ -403,34 +402,33 @@ mod tests {
         fn domain_port<'a>(&'a self) -> PortStateTestDomainPort<'a> {
             DomainPort::new(
                 &self.local_clock,
+                PortIdentity::fake_on_port(PortNumber::new(1)),
                 &self.physical_port,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
             )
         }
 
-        fn local_clock_identity(&self) -> &ClockIdentity {
-            self.local_clock.identity()
+        fn local_clock_identity(&self) -> ClockIdentity {
+            self.default_ds.identity()
         }
 
         fn initializing_port(
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
-            let port_number = PortNumber::new(1);
-            let best_foreign = BestForeignRecord::new(
-                PortIdentity::fake_on_port(port_number),
-                ForeignClockRecordsVec::new(),
-            );
+            let domain_port = self.domain_port();
+            let port_identity = domain_port.identity();
+            let port_number = port_identity.port_number();
+            let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
                 port_number,
             );
             PortProfile::default().initializing(
-                self.domain_port(),
+                domain_port,
                 BestMasterClockAlgorithm::new(&self.default_ds, port_number),
                 best_foreign,
                 state_decision_trigger,
@@ -440,18 +438,17 @@ mod tests {
         fn listening_port(
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
-            let port_number = PortNumber::new(1);
-            let best_foreign = BestForeignRecord::new(
-                PortIdentity::fake_on_port(port_number),
-                ForeignClockRecordsVec::new(),
-            );
+            let domain_port = self.domain_port();
+            let port_identity = domain_port.identity();
+            let port_number = port_identity.port_number();
+            let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
                 port_number,
             );
             PortProfile::default().listening(
-                self.domain_port(),
+                domain_port,
                 ListeningBmca::new(
                     BestMasterClockAlgorithm::new(&self.default_ds, port_number),
                     best_foreign,
@@ -461,18 +458,17 @@ mod tests {
         }
 
         fn slave_port(&self) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
-            let port_number = PortNumber::new(1);
-            let best_foreign = BestForeignRecord::new(
-                PortIdentity::fake_on_port(port_number),
-                ForeignClockRecordsVec::new(),
-            );
+            let domain_port = self.domain_port();
+            let port_identity = domain_port.identity();
+            let port_number = port_identity.port_number();
+            let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
                 port_number,
             );
             PortProfile::default().slave(
-                self.domain_port(),
+                domain_port,
                 ParentTrackingBmca::new(
                     BestMasterClockAlgorithm::new(&self.default_ds, port_number),
                     best_foreign,
@@ -490,19 +486,18 @@ mod tests {
         fn master_port(
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
-            let port_number = PortNumber::new(1);
-            let grandmaster_id = *self.local_clock.identity();
-            let best_foreign = BestForeignRecord::new(
-                PortIdentity::fake_on_port(port_number),
-                ForeignClockRecordsVec::new(),
-            );
+            let domain_port = self.domain_port();
+            let port_identity = domain_port.identity();
+            let port_number = port_identity.port_number();
+            let grandmaster_id = self.default_ds.identity();
+            let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
                 port_number,
             );
             PortProfile::default().master(
-                self.domain_port(),
+                domain_port,
                 GrandMasterTrackingBmca::new(
                     BestMasterClockAlgorithm::new(&self.default_ds, port_number),
                     best_foreign,
@@ -515,19 +510,18 @@ mod tests {
         fn pre_master_port(
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
-            let port_number = PortNumber::new(1);
-            let grandmaster_id = *self.local_clock.identity();
-            let best_foreign = BestForeignRecord::new(
-                PortIdentity::fake_on_port(port_number),
-                ForeignClockRecordsVec::new(),
-            );
+            let domain_port = self.domain_port();
+            let port_identity = domain_port.identity();
+            let port_number = port_identity.port_number();
+            let grandmaster_id = self.default_ds.identity();
+            let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
                 port_number,
             );
             PortProfile::default().pre_master(
-                self.domain_port(),
+                domain_port,
                 GrandMasterTrackingBmca::new(
                     BestMasterClockAlgorithm::new(&self.default_ds, port_number),
                     best_foreign,
@@ -541,18 +535,17 @@ mod tests {
         fn uncalibrated_port(
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
-            let port_number = PortNumber::new(1);
-            let best_foreign = BestForeignRecord::new(
-                PortIdentity::fake_on_port(port_number),
-                ForeignClockRecordsVec::new(),
-            );
+            let domain_port = self.domain_port();
+            let port_identity = domain_port.identity();
+            let port_number = port_identity.port_number();
+            let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
                 port_number,
             );
             PortProfile::default().uncalibrated(
-                self.domain_port(),
+                domain_port,
                 ParentTrackingBmca::new(
                     BestMasterClockAlgorithm::new(&self.default_ds, port_number),
                     best_foreign,
@@ -565,41 +558,37 @@ mod tests {
         fn faulty_port(
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
-            {
-                let port_number = PortNumber::new(1);
-                let best_foreign = BestForeignRecord::new(
-                    PortIdentity::fake_on_port(port_number),
-                    ForeignClockRecordsVec::new(),
-                );
-                let state_decision_trigger = StateDecisionEventTrigger::new(
-                    &self.state_decision_event,
-                    best_foreign.snapshot(),
-                    port_number,
-                );
-                PortProfile::default().faulty(
-                    self.domain_port(),
-                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
-                    best_foreign,
-                    state_decision_trigger,
-                )
-            }
+            let domain_port = self.domain_port();
+            let port_identity = domain_port.identity();
+            let port_number = port_identity.port_number();
+            let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
+            let state_decision_trigger = StateDecisionEventTrigger::new(
+                &self.state_decision_event,
+                best_foreign.snapshot(),
+                port_number,
+            );
+            PortProfile::default().faulty(
+                domain_port,
+                BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                best_foreign,
+                state_decision_trigger,
+            )
         }
 
         fn passive_port(
             &self,
         ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
-            let port_number = PortNumber::new(1);
-            let best_foreign = BestForeignRecord::new(
-                PortIdentity::fake_on_port(port_number),
-                ForeignClockRecordsVec::new(),
-            );
+            let domain_port = self.domain_port();
+            let port_identity = domain_port.identity();
+            let port_number = port_identity.port_number();
+            let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
                 best_foreign.snapshot(),
                 port_number,
             );
             PortProfile::default().passive(
-                self.domain_port(),
+                domain_port,
                 PassiveBmca::new(
                     BestMasterClockAlgorithm::new(&self.default_ds, port_number),
                     best_foreign,
@@ -700,7 +689,7 @@ mod tests {
             listening.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M1,
                 StepsRemoved::new(0),
-                *setup.local_clock_identity(),
+                setup.local_clock_identity(),
             )));
 
         assert!(matches!(pre_master, PortState::PreMaster(_)));
@@ -857,7 +846,7 @@ mod tests {
         let result = initializing.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            *setup.local_clock_identity(),
+            setup.local_clock_identity(),
         )));
 
         assert!(matches!(result, PortState::Faulty(_)));
@@ -872,7 +861,7 @@ mod tests {
         let result = slave.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            *setup.local_clock_identity(),
+            setup.local_clock_identity(),
         )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
@@ -887,7 +876,7 @@ mod tests {
         let result = master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            *setup.local_clock_identity(),
+            setup.local_clock_identity(),
         )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
@@ -902,7 +891,7 @@ mod tests {
         let result = pre_master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            *setup.local_clock_identity(),
+            setup.local_clock_identity(),
         )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
@@ -917,7 +906,7 @@ mod tests {
         let result = uncalibrated.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            *setup.local_clock_identity(),
+            setup.local_clock_identity(),
         )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
@@ -1013,39 +1002,33 @@ mod tests {
         let default_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
+        let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
+        let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
         let state_decision_event = FakeStateDecisionEvent::new();
+        let state_decision_trigger = StateDecisionEventTrigger::new(
+            &state_decision_event,
+            best_foreign.snapshot(),
+            port_identity.port_number(),
+        );
         let mut master = PortProfile::default().master(
             DomainPort::new(
                 &local_clock,
+                port_identity,
                 &FailingPort, // <-- Failing port to simulate send failure <--
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
             ),
-            {
-                let port_number = PortNumber::new(1);
-                let best_foreign = BestForeignRecord::new(
-                    PortIdentity::fake_on_port(port_number),
-                    ForeignClockRecordsVec::new(),
-                );
-                let state_decision_trigger = StateDecisionEventTrigger::new(
-                    &state_decision_event,
-                    best_foreign.snapshot(),
-                    port_number,
-                );
-                GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(&default_ds, port_number),
-                    best_foreign,
-                    *local_clock.identity(),
-                    state_decision_trigger,
-                )
-            },
+            GrandMasterTrackingBmca::new(
+                BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
+                best_foreign,
+                default_ds.identity(),
+                state_decision_trigger,
+            ),
         );
 
         let transition = master.dispatch_system(SystemMessage::AnnounceSendTimeout);
@@ -1058,39 +1041,33 @@ mod tests {
         let default_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
+        let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
+        let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
         let state_decision_event = FakeStateDecisionEvent::new();
+        let state_decision_trigger = StateDecisionEventTrigger::new(
+            &state_decision_event,
+            best_foreign.snapshot(),
+            port_identity.port_number(),
+        );
         let mut master = PortProfile::default().master(
             DomainPort::new(
                 &local_clock,
+                port_identity,
                 &FailingPort,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
             ),
-            {
-                let port_number = PortNumber::new(1);
-                let best_foreign = BestForeignRecord::new(
-                    PortIdentity::fake_on_port(port_number),
-                    ForeignClockRecordsVec::new(),
-                );
-                let state_decision_trigger = StateDecisionEventTrigger::new(
-                    &state_decision_event,
-                    best_foreign.snapshot(),
-                    port_number,
-                );
-                GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(&default_ds, port_number),
-                    best_foreign,
-                    *local_clock.identity(),
-                    state_decision_trigger,
-                )
-            },
+            GrandMasterTrackingBmca::new(
+                BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
+                best_foreign,
+                default_ds.identity(),
+                state_decision_trigger,
+            ),
         );
 
         let transition = master.dispatch_event(
@@ -1107,39 +1084,33 @@ mod tests {
         let default_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
+        let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
+        let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
         let state_decision_event = FakeStateDecisionEvent::new();
+        let state_decision_trigger = StateDecisionEventTrigger::new(
+            &state_decision_event,
+            best_foreign.snapshot(),
+            port_identity.port_number(),
+        );
         let mut master = PortProfile::default().master(
             DomainPort::new(
                 &local_clock,
+                port_identity,
                 &FailingPort, // <-- failing port to simulate send failure <--
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
             ),
-            {
-                let port_number = PortNumber::new(1);
-                let best_foreign = BestForeignRecord::new(
-                    PortIdentity::fake_on_port(port_number),
-                    ForeignClockRecordsVec::new(),
-                );
-                let state_decision_trigger = StateDecisionEventTrigger::new(
-                    &state_decision_event,
-                    best_foreign.snapshot(),
-                    port_number,
-                );
-                GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(&default_ds, port_number),
-                    best_foreign,
-                    *local_clock.identity(),
-                    state_decision_trigger,
-                )
-            },
+            GrandMasterTrackingBmca::new(
+                BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
+                best_foreign,
+                default_ds.identity(),
+                state_decision_trigger,
+            ),
         );
 
         let sync_msg = TwoStepSyncMessage::new(0.into(), LogMessageInterval::new(0));
@@ -1156,39 +1127,33 @@ mod tests {
         let default_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
+        let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
+        let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
         let state_decision_event = FakeStateDecisionEvent::new();
+        let state_decision_trigger = StateDecisionEventTrigger::new(
+            &state_decision_event,
+            best_foreign.snapshot(),
+            port_identity.port_number(),
+        );
         let mut master = PortProfile::default().master(
             DomainPort::new(
                 &local_clock,
+                port_identity,
                 &FailingPort,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                PortNumber::new(1),
             ),
-            {
-                let port_number = PortNumber::new(1);
-                let best_foreign = BestForeignRecord::new(
-                    PortIdentity::fake_on_port(port_number),
-                    ForeignClockRecordsVec::new(),
-                );
-                let state_decision_trigger = StateDecisionEventTrigger::new(
-                    &state_decision_event,
-                    best_foreign.snapshot(),
-                    port_number,
-                );
-                GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(&default_ds, port_number),
-                    best_foreign,
-                    *local_clock.identity(),
-                    state_decision_trigger,
-                )
-            },
+            GrandMasterTrackingBmca::new(
+                BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
+                best_foreign,
+                default_ds.identity(),
+                state_decision_trigger,
+            ),
         );
 
         let transition = master.dispatch_system(SystemMessage::SyncTimeout);
@@ -1201,33 +1166,30 @@ mod tests {
         let default_ds = TestClockDS::default_mid_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
+        let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
         let domain_port = DomainPort::new(
             &local_clock,
+            port_identity,
             &FailingPort,
             FakeTimerHost::new(),
             FakeTimestamping::new(),
             NoopPortLog,
             DomainNumber::new(0),
-            PortNumber::new(1),
         );
 
         let state_decision_event = FakeStateDecisionEvent::new();
-        let best_foreign = BestForeignRecord::new(
-            PortIdentity::fake_on_port(PortNumber::new(1)),
-            ForeignClockRecordsVec::new(),
-        );
+        let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
         let state_decision_trigger = StateDecisionEventTrigger::new(
             &state_decision_event,
             best_foreign.snapshot(),
-            PortNumber::new(1),
+            port_identity.port_number(),
         );
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         let bmca = ParentTrackingBmca::new(
-            BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
+            BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
             best_foreign,
             parent_port_identity,
             state_decision_trigger,
@@ -1372,7 +1334,7 @@ mod tests {
         let pre_master = passive.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            *setup.local_clock_identity(),
+            setup.local_clock_identity(),
         )));
 
         assert!(matches!(pre_master, PortState::PreMaster(_)));

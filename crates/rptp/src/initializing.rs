@@ -102,32 +102,28 @@ mod tests {
         let default_ds = TestClockDS::default_mid_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let physical_port = FakePort::new();
         let state_decision_event = FakeStateDecisionEvent::new();
-        let port_number = PortNumber::new(1);
-        let best_foreign = BestForeignRecord::new(
-            PortIdentity::fake_on_port(port_number),
-            ForeignClockRecordsVec::new(),
-        );
+        let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
+        let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
         let state_decision_trigger = StateDecisionEventTrigger::new(
             &state_decision_event,
             best_foreign.snapshot(),
-            port_number,
+            port_identity.port_number(),
         );
         let initializing = InitializingPort::new(
             DomainPort::new(
                 &local_clock,
+                port_identity,
                 &physical_port,
                 FakeTimerHost::new(),
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                port_number,
             ),
-            BestMasterClockAlgorithm::new(&default_ds, port_number),
+            BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
             best_foreign,
             state_decision_trigger,
             PortProfile::default(),

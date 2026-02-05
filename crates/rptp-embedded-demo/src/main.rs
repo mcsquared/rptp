@@ -515,7 +515,6 @@ fn main() -> ! {
     let mut ordinary_clock = OrdinaryClock::new(
         LocalClock::new(
             &demo_clock,
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         ),
         default_ds,
@@ -526,14 +525,14 @@ fn main() -> ! {
     let physical_port = DemoPhysicalPort {
         inner: network.physical_port(),
     };
-    let receiver = PortIdentity::new(*default_ds.identity(), PortNumber::new(1));
+    let port_identity = PortIdentity::new(default_ds.identity(), PortNumber::new(1));
     let port = ordinary_clock
         .port(
             &physical_port,
             DemoTimerHost::new(&instant_clock),
             DemoTimestamping::new(&demo_clock),
             DemoPortLog,
-            HeaplessForeignClockRecords::<4>::new(receiver),
+            HeaplessForeignClockRecords::<4>::new(port_identity),
         )
         .expect("ordinary clock has one port");
     let mut port_map = SingleDomainPortMap::new(domain_number, port);

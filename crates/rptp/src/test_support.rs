@@ -315,21 +315,20 @@ impl SynchronizableClock for FakeClock {
 /// [`PortState::Master`] built via the provided [`PortProfile`].
 pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
     port: P,
-    port_number: PortNumber,
     local_candidate: &'a dyn LocalGrandMasterCandidate,
     foreign_clock_records: S,
     state_decision_event: &'a dyn StateDecisionEvent,
     profile: PortProfile,
 ) -> PortState<'a, P, S> {
-    let grandmaster_id = *port.local_clock().identity();
-    let receiver = PortIdentity::fake_on_port(port_number);
-    let best_foreign = BestForeignRecord::new(receiver, foreign_clock_records);
+    let port_identity = port.identity();
+    let port_number = port_identity.port_number();
+    let best_foreign = BestForeignRecord::new(port_identity, foreign_clock_records);
     let state_decision_trigger =
         StateDecisionEventTrigger::new(state_decision_event, best_foreign.snapshot(), port_number);
     let bmca = GrandMasterTrackingBmca::new(
         BestMasterClockAlgorithm::new(local_candidate, port_number),
         best_foreign,
-        grandmaster_id,
+        local_candidate.snapshot().identity(),
         state_decision_trigger,
     );
     profile.master(port, bmca)
@@ -341,15 +340,15 @@ pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
 /// timeout is started immediately so tests can drive `DelayRequestTimeout` behaviour.
 pub fn slave_test_port<'a, P: Port, S: ForeignClockRecords>(
     port: P,
-    port_number: PortNumber,
     local_candidate: &'a dyn LocalGrandMasterCandidate,
     foreign_clock_records: S,
     state_decision_event: &'a dyn StateDecisionEvent,
     parent_port_identity: ParentPortIdentity,
     profile: PortProfile,
 ) -> PortState<'a, P, S> {
-    let receiver = PortIdentity::fake_on_port(port_number);
-    let best_foreign = BestForeignRecord::new(receiver, foreign_clock_records);
+    let port_identity = port.identity();
+    let port_number = port_identity.port_number();
+    let best_foreign = BestForeignRecord::new(port_identity, foreign_clock_records);
     let state_decision_trigger =
         StateDecisionEventTrigger::new(state_decision_event, best_foreign.snapshot(), port_number);
     let bmca = ParentTrackingBmca::new(

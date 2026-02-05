@@ -467,19 +467,18 @@ mod tests {
 
             let (system_tx, system_rx) = mpsc::unbounded_channel();
             let tx_timestamping = FakeTimestamping::new();
-            let port_number = PortNumber::new(1);
+            let port_identity = PortIdentity::new(default_ds.identity(), PortNumber::new(1));
             let domain_port = Box::new(DomainPort::new(
                 local_clock,
+                port_identity,
                 physical_port,
                 TokioTimerHost::new(domain_number, system_tx.clone()),
                 tx_timestamping,
                 TracingPortLog::new(),
                 domain_number,
-                port_number,
             ));
             let port_state = master_test_port(
                 domain_port,
-                PortNumber::new(1),
                 default_ds,
                 ForeignClockRecordsVec::new(),
                 state_decision_event,
@@ -596,7 +595,6 @@ mod tests {
         );
         let local_clock = LocalClock::new(
             &virtual_clock,
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -604,20 +602,19 @@ mod tests {
         let timestamping =
             ClockTxTimestamping::new(&virtual_clock, system_tx.clone(), domain_number);
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let port_number = PortNumber::new(1);
+        let port_identity = PortIdentity::new(default_ds.identity(), PortNumber::new(1));
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
+            port_identity,
             &physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             &timestamping,
             TracingPortLog::new(),
             domain_number,
-            port_number,
         ));
         let state_decision_event = FakeStateDecisionEvent::new();
         let port_state = master_test_port(
             domain_port,
-            PortNumber::new(1),
             &default_ds,
             ForeignClockRecordsVec::new(),
             &state_decision_event,
@@ -692,22 +689,21 @@ mod tests {
         );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let port_number = PortNumber::new(1);
+        let port_identity = PortIdentity::new(default_ds.identity(), PortNumber::new(1));
         let timer_host = TokioTimerHost::new(domain_number, system_tx.clone());
         let domain_port = Box::new(DomainPort::new(
             &local_clock,
+            port_identity,
             &physical_port,
             timer_host,
             FakeTimestamping::new(),
             TracingPortLog::new(),
             domain_number,
-            port_number,
         ));
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::new(
             ClockIdentity::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
@@ -716,7 +712,6 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let port_state = slave_test_port(
             domain_port,
-            PortNumber::new(1),
             &default_ds,
             ForeignClockRecordsVec::new(),
             &state_decision_event,
@@ -779,7 +774,6 @@ mod tests {
         );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -824,7 +818,6 @@ mod tests {
         );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -866,7 +859,6 @@ mod tests {
         );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -909,7 +901,6 @@ mod tests {
         );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 
@@ -954,7 +945,6 @@ mod tests {
         );
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *default_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
 

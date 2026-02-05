@@ -117,11 +117,7 @@ impl<N: NetworkSocket> PrometheusNode<N> {
             });
         }
 
-        let local_clock = LocalClock::new(
-            &*virtual_clock,
-            *default_ds.identity(),
-            Servo::PI(servo.build()),
-        );
+        let local_clock = LocalClock::new(&*virtual_clock, Servo::PI(servo.build()));
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let timestamping = ClockTxTimestamping::new(&*virtual_clock, system_tx.clone(), domain);

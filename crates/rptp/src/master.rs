@@ -331,7 +331,6 @@ mod tests {
             Self {
                 local_clock: LocalClock::new(
                     FakeClock::new(now, TimeScale::Ptp),
-                    *ds.identity(),
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
                 default_ds: ds,
@@ -346,14 +345,16 @@ mod tests {
             port_number: PortNumber,
             records: &[ForeignClockRecord],
         ) -> MasterTestPort<'_> {
+            let port_identity = PortIdentity::fake_on_port(port_number);
+
             let domain_port = DomainPort::new(
                 &self.local_clock,
+                port_identity,
                 &self.physical_port,
                 &self.timer_host,
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                port_number,
             );
             let announce_cycle = AnnounceCycle::new(
                 0.into(),
@@ -365,13 +366,13 @@ mod tests {
                 domain_port.timeout(SystemMessage::SyncTimeout),
                 LogInterval::new(0),
             );
-            let grandmaster_id = *self.local_clock.identity();
+            let grandmaster_id = self.default_ds.identity();
 
             let default_profile = PortProfile::default();
 
             // Initialize initial state from the provided records
             let best_foreign_record = BestForeignRecord::new(
-                PortIdentity::fake_on_port(port_number),
+                port_identity,
                 ForeignClockRecordsVec::from_records(records),
             );
             let state_decision_trigger = StateDecisionEventTrigger::new(
@@ -677,7 +678,6 @@ mod tests {
         let clock_ds = TestClockDS::default_high_grade().dataset();
         let local_clock = LocalClock::new(
             FakeClock::default(),
-            *clock_ds.identity(),
             Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
         );
         let bmca = BestMasterClockAlgorithm::new(&clock_ds, PortNumber::new(1));

@@ -188,7 +188,7 @@ impl LocalDS {
     fn new(ds: ClockDS) -> Self {
         // IEEE 1588-2019 §9.3.4, Tbl. 29: the “self” topology for the local dataset D_0 uses
         // PortIdentity(local_clock_identity, 0) for both sender and receiver.
-        let local_topo_id = PortIdentity::new(*ds.identity(), PortNumber::new(0));
+        let local_topo_id = PortIdentity::new(ds.identity(), PortNumber::new(0));
 
         Self { ds, local_topo_id }
     }
@@ -213,7 +213,7 @@ impl LocalDS {
         &self,
         other: &'b BestForeignSnapshot,
     ) -> Result<ClockIdentity, QualifiedForeignSnapshot<'b>> {
-        let local_clock_id = *self.ds.identity();
+        let local_clock_id = self.ds.identity();
 
         match other {
             BestForeignSnapshot::Qualified {
@@ -467,7 +467,7 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
     pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<'a, S> {
         let current = self.best_foreign.snapshot();
         self.state_decision_trigger.trigger(current);
-        let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
+        let current_grandmaster_id = self.bmca.using_grandmaster(|gm| gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 
@@ -531,7 +531,7 @@ impl<'a> GrandMaster<'a> {
         Self { ds }
     }
 
-    pub fn identity(&self) -> &ClockIdentity {
+    pub fn identity(&self) -> ClockIdentity {
         self.ds.identity()
     }
 
@@ -717,7 +717,7 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
     pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<'a, S> {
         let current = self.best_foreign.snapshot();
         self.state_decision_trigger.trigger(current);
-        let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
+        let current_grandmaster_id = self.bmca.using_grandmaster(|gm| gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 
@@ -835,7 +835,7 @@ impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
     pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<'a, S> {
         let current = self.best_foreign.snapshot();
         self.state_decision_trigger.trigger(current);
-        let current_grandmaster_id = self.bmca.using_grandmaster(|gm| *gm.identity());
+        let current_grandmaster_id = self.bmca.using_grandmaster(|gm| gm.identity());
         self.into_grandmaster_tracking(current_grandmaster_id)
     }
 
@@ -1019,14 +1019,11 @@ impl QualificationTimeoutPolicy {
 mod tests {
     use super::*;
 
-    use crate::clock::LocalClock;
     use crate::dataset::Priority1;
     use crate::foreign::{ForeignClockRecord, ForeignGrandMasterCandidates};
     use crate::infra::infra_support::{ForeignClockRecordsVec, MultiPortForeignCandidates};
-    use crate::log::NOOP_CLOCK_METRICS;
     use crate::port::{PortIdentity, PortNumber};
-    use crate::servo::{Servo, SteppingServo};
-    use crate::test_support::{FakeClock, FakeStateDecisionEvent, TestClockDS};
+    use crate::test_support::{FakeStateDecisionEvent, TestClockDS};
     use crate::time::{Duration, Instant};
 
     #[test]
@@ -1152,12 +1149,8 @@ mod tests {
 
     #[test]
     fn grandmaster_tracking_bmca_gates_when_grandmaster_id_matches() {
-        let default_ds = TestClockDS::default_high_grade().dataset();
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            *default_ds.identity(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let test_clock = TestClockDS::default_high_grade();
+        let default_ds = test_clock.dataset();
 
         let state_decision_event = FakeStateDecisionEvent::new();
         let bmca = GrandMasterTrackingBmca::new(
@@ -1166,7 +1159,7 @@ mod tests {
                 PortIdentity::fake_on_port(PortNumber::new(1)),
                 ForeignClockRecordsVec::new(),
             ),
-            *local_clock.identity(),
+            test_clock.clock_identity(),
             StateDecisionEventTrigger::new(
                 &state_decision_event,
                 BestForeignSnapshot::Empty,
@@ -1207,12 +1200,8 @@ mod tests {
     fn grandmaster_tracking_bmca_does_not_gate_passive_decisions() {
         let now = Instant::from_secs(0);
 
-        let default_ds = TestClockDS::gps_grandmaster().dataset();
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            *default_ds.identity(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let gps_clock = TestClockDS::gps_grandmaster();
+        let gps_ds = gps_clock.dataset();
 
         let better = TestClockDS::atomic_grandmaster();
         let better_port_id = PortIdentity::new(better.clock_identity(), PortNumber::new(1));
@@ -1226,12 +1215,12 @@ mod tests {
 
         let state_decision_event = FakeStateDecisionEvent::new();
         let bmca = GrandMasterTrackingBmca::new(
-            BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
+            BestMasterClockAlgorithm::new(&gps_ds, PortNumber::new(1)),
             BestForeignRecord::new(
                 PortIdentity::fake_on_port(PortNumber::new(1)),
                 ForeignClockRecordsVec::from_records(&records),
             ),
-            *local_clock.identity(),
+            gps_clock.clock_identity(),
             StateDecisionEventTrigger::new(
                 &state_decision_event,
                 BestForeignSnapshot::Empty,
@@ -1249,12 +1238,8 @@ mod tests {
     fn grandmaster_tracking_bmca_does_not_gate_slave_decisions() {
         let now = Instant::from_secs(0);
 
-        let default_ds = TestClockDS::default_low_grade_slave_only().dataset();
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            *default_ds.identity(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let test_clock = TestClockDS::default_low_grade_slave_only();
+        let slave_only_ds = test_clock.dataset();
 
         let better = TestClockDS::default_high_grade();
         let better_port_id = PortIdentity::new(better.clock_identity(), PortNumber::new(1));
@@ -1269,9 +1254,9 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let receiver = PortIdentity::fake_on_port(PortNumber::new(1));
         let bmca = GrandMasterTrackingBmca::new(
-            BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
+            BestMasterClockAlgorithm::new(&slave_only_ds, PortNumber::new(1)),
             BestForeignRecord::new(receiver, ForeignClockRecordsVec::from_records(&records)),
-            *local_clock.identity(),
+            test_clock.clock_identity(),
             StateDecisionEventTrigger::new(
                 &state_decision_event,
                 BestForeignSnapshot::Empty,
@@ -1527,7 +1512,7 @@ mod tests {
     fn listening_bmca_gm_capable_local_better_than_foreign_returns_master_m1() {
         let default_ds = TestClockDS::gps_grandmaster().dataset();
         let state_decision_event = FakeStateDecisionEvent::new();
-        let local_identity = *default_ds.identity();
+        let local_identity = default_ds.identity();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),
             BestForeignRecord::new(PortIdentity::fake(), ForeignClockRecordsVec::new()),
@@ -1561,7 +1546,7 @@ mod tests {
     #[test]
     fn listening_bmca_non_gm_local_better_than_foreign_returns_master_m2() {
         let default_ds = TestClockDS::default_mid_grade().dataset();
-        let local_identity = *default_ds.identity();
+        let local_identity = default_ds.identity();
         let state_decision_event = FakeStateDecisionEvent::new();
         let mut bmca = ListeningBmca::new(
             BestMasterClockAlgorithm::new(&default_ds, PortNumber::new(1)),

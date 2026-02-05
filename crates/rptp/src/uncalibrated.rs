@@ -340,7 +340,6 @@ mod tests {
             Self {
                 local_clock: LocalClock::new(
                     FakeClock::default(),
-                    *ds.identity(),
                     Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
                 ),
                 default_ds: ds,
@@ -356,14 +355,15 @@ mod tests {
             parent_port: PortIdentity,
             records: &[ForeignClockRecord],
         ) -> UncalibratedTestPort<'_> {
+            let port_identity = PortIdentity::new(self.default_ds.identity(), port_number);
             let domain_port = DomainPort::new(
                 &self.local_clock,
+                port_identity,
                 &self.physical_port,
                 &self.timer_host,
                 FakeTimestamping::new(),
                 NoopPortLog,
                 DomainNumber::new(0),
-                port_number,
             );
 
             let announce_receipt_timeout = AnnounceReceiptTimeout::new(
@@ -376,7 +376,7 @@ mod tests {
 
             // Initialize initial state from the provided records
             let best_foreign_record = BestForeignRecord::new(
-                PortIdentity::fake_on_port(port_number),
+                port_identity,
                 ForeignClockRecordsVec::from_records(records),
             );
             let state_decision_trigger = StateDecisionEventTrigger::new(
@@ -466,6 +466,7 @@ mod tests {
 
         // State decision event should be triggered (new parent is now best and qualified)
         let events = setup.state_decision_event.take_events();
+        let receiver = PortIdentity::new(setup.default_ds.identity(), PortNumber::new(1));
         assert_eq!(events.len(), 1,);
         assert_eq!(events[0].0, PortNumber::new(1));
         assert_eq!(
@@ -473,7 +474,7 @@ mod tests {
             BestForeignSnapshot::Qualified {
                 ds: TestClockDS::default_high_grade().dataset(),
                 source_port_identity: new_parent,
-                receiver: PortIdentity::fake(),
+                receiver,
             }
         );
     }
@@ -595,6 +596,7 @@ mod tests {
 
         // State decision event should be triggered (Empty → Qualified)
         let events = setup.state_decision_event.take_events();
+        let receiver = PortIdentity::new(setup.default_ds.identity(), PortNumber::new(1));
         assert_eq!(events.len(), 1,);
         assert_eq!(events[0].0, PortNumber::new(1));
         assert_eq!(
@@ -602,7 +604,7 @@ mod tests {
             BestForeignSnapshot::Qualified {
                 ds: foreign_clock,
                 source_port_identity: foreign_port,
-                receiver: PortIdentity::fake(),
+                receiver,
             }
         );
     }
@@ -652,6 +654,7 @@ mod tests {
 
         // State decision event should be triggered (Empty → Qualified)
         let events = setup.state_decision_event.take_events();
+        let receiver = PortIdentity::new(setup.default_ds.identity(), PortNumber::new(1));
         assert_eq!(events.len(), 1,);
         assert_eq!(events[0].0, PortNumber::new(1));
         assert_eq!(
@@ -659,7 +662,7 @@ mod tests {
             BestForeignSnapshot::Qualified {
                 ds: foreign_clock,
                 source_port_identity: foreign_port,
-                receiver: PortIdentity::fake(),
+                receiver,
             }
         );
     }
