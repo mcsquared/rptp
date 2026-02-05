@@ -368,7 +368,7 @@ impl From<u8> for Priority2 {
 ///
 /// This counts the number of communication paths between the local clock and the grandmaster. It
 /// participates in BMCA comparisons and is carried in Announce messages.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StepsRemoved(u16);
 
 impl StepsRemoved {
