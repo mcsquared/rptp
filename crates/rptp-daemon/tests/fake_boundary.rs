@@ -23,12 +23,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rptp::{
-    clock::{Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
+    clock::{Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, TimeScale},
     dataset::{ClockDS, Priority1, Priority2, StepsRemoved},
     infra::infra_support::ForeignClockRecordsVec,
     log::NOOP_CLOCK_METRICS,
     port::{DomainNumber, DomainPort, SingleDomainPortMap},
-    servo::{Servo, SteppingServo},
+    profile::PortProfile,
+    servo::ServoConfig,
     time::TimeStamp,
 };
 use rptp_daemon::log::TracingPortLog;
@@ -70,11 +71,10 @@ impl Node {
     ) -> Self {
         const DOMAIN: DomainNumber = DomainNumber::new(0); // test assumes domain 0 only
         let shared_clock = SharedVirtualClock(clock);
-        let local_clock = LocalClock::new(
-            shared_clock.clone(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
-        let ordinary = OrdinaryTokioClock::new(local_clock, default_ds, DOMAIN);
+        let profile = PortProfile::default().with_servo_config(ServoConfig::Stepping {
+            metrics: &NOOP_CLOCK_METRICS,
+        });
+        let ordinary = OrdinaryTokioClock::new(shared_clock.clone(), default_ds, DOMAIN, profile);
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         Self {
             shared_clock,

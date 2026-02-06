@@ -387,17 +387,15 @@ mod tests {
 
     use rptp::{
         clock::{
-            ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock,
-            SynchronizableClock, TimeScale,
+            ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, SynchronizableClock, TimeScale,
         },
         dataset::{ClockDS, Priority1, Priority2, StepsRemoved},
         infra::infra_support::ForeignClockRecordsVec,
-        log::NOOP_CLOCK_METRICS,
         message::{EventMessage, GeneralMessage},
         port::{DomainPort, ParentPortIdentity, PortIdentity, PortNumber, SingleDomainPortMap},
         portstate::PortState,
         profile::PortProfile,
-        servo::{Servo, SteppingServo},
+        servo::ServoConfig,
         test_support::{
             FakeClock, FakeStateDecisionEvent, FakeTimestamping, TestMessage, master_test_port,
             slave_test_port,
@@ -456,7 +454,7 @@ mod tests {
 
     impl<'a, C: SynchronizableClock, N: NetworkSocket> MasterTestNode<'a, C, N> {
         async fn new(
-            local_clock: &'a LocalClock<C>,
+            clock: C,
             default_ds: &'a ClockDS,
             event_socket: Rc<N>,
             general_socket: Rc<N>,
@@ -469,7 +467,7 @@ mod tests {
             let tx_timestamping = FakeTimestamping::new();
             let port_identity = PortIdentity::new(default_ds.identity(), PortNumber::new(1));
             let domain_port = Box::new(DomainPort::new(
-                local_clock,
+                clock,
                 port_identity,
                 physical_port,
                 TokioTimerHost::new(domain_number, system_tx.clone()),
@@ -526,7 +524,8 @@ mod tests {
             >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);
-        assert!(s <= 512);
+        // Guardrail only: refactors (e.g. moving servo ownership into port states) affect this.
+        assert!(s <= 768);
     }
 
     impl RxTimestamping for FakeTimestamping {
@@ -593,10 +592,6 @@ mod tests {
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             StepsRemoved::new(0),
         );
-        let local_clock = LocalClock::new(
-            &virtual_clock,
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let timestamping =
@@ -604,7 +599,7 @@ mod tests {
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         let port_identity = PortIdentity::new(default_ds.identity(), PortNumber::new(1));
         let domain_port = Box::new(DomainPort::new(
-            &local_clock,
+            &virtual_clock,
             port_identity,
             &physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
@@ -687,17 +682,14 @@ mod tests {
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             StepsRemoved::new(0),
         );
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
         let port_identity = PortIdentity::new(default_ds.identity(), PortNumber::new(1));
         let timer_host = TokioTimerHost::new(domain_number, system_tx.clone());
         let domain_port = Box::new(DomainPort::new(
-            &local_clock,
+            &clock,
             port_identity,
             &physical_port,
             timer_host,
@@ -721,6 +713,9 @@ mod tests {
                 LogInterval::new(0),
                 LogInterval::new(0),
                 LogInterval::new(0),
+                ServoConfig::Stepping {
+                    metrics: &rptp::log::NOOP_CLOCK_METRICS,
+                },
             ),
         );
         let portmap = SingleDomainPortMap::new(domain_number, port_state);
@@ -772,10 +767,7 @@ mod tests {
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             StepsRemoved::new(0),
         );
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let (event_socket, event_queue) = InjectingNetworkSocket::new();
         let (general_socket, _) = InjectingNetworkSocket::new();
@@ -787,7 +779,7 @@ mod tests {
 
         let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
-            &local_clock,
+            &clock,
             &default_ds,
             event_socket,
             general_socket,
@@ -816,10 +808,7 @@ mod tests {
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             StepsRemoved::new(0),
         );
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let (event_socket, event_queue) = InjectingNetworkSocket::new();
         let (general_socket, _) = InjectingNetworkSocket::new();
@@ -831,7 +820,7 @@ mod tests {
 
         let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
-            &local_clock,
+            &clock,
             &default_ds,
             event_socket,
             general_socket,
@@ -857,10 +846,7 @@ mod tests {
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             StepsRemoved::new(0),
         );
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let (event_socket, event_queue) = InjectingNetworkSocket::new();
         let (general_socket, _) = InjectingNetworkSocket::new();
@@ -872,7 +858,7 @@ mod tests {
 
         let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
-            &local_clock,
+            &clock,
             &default_ds,
             event_socket,
             general_socket,
@@ -899,10 +885,7 @@ mod tests {
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             StepsRemoved::new(0),
         );
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let (event_socket, event_queue) = InjectingNetworkSocket::new();
         let (general_socket, _) = InjectingNetworkSocket::new();
@@ -914,7 +897,7 @@ mod tests {
 
         let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
-            &local_clock,
+            &clock,
             &default_ds,
             event_socket,
             general_socket,
@@ -943,10 +926,7 @@ mod tests {
             ClockQuality::new(ClockClass::Default, ClockAccuracy::Within1ms, 0xFFFF),
             StepsRemoved::new(0),
         );
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let (event_socket, event_queue) = InjectingNetworkSocket::new();
         let (general_socket, _) = InjectingNetworkSocket::new();
@@ -958,7 +938,7 @@ mod tests {
 
         let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
-            &local_clock,
+            &clock,
             &default_ds,
             event_socket,
             general_socket,

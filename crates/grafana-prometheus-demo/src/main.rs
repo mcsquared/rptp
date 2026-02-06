@@ -7,12 +7,12 @@ use rptp::clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality};
 use rptp::dataset::{ClockDS, Priority1, Priority2, StepsRemoved};
 use rptp::port::DomainNumber;
 use rptp::profile::PortProfile;
-use rptp::servo::{Drift, ServoThreshold};
+use rptp::servo::{Drift, PiServoConfig, ServoThreshold};
 use rptp::time::{TimeInterval, TimeStamp};
 use rptp_daemon::net::LoopbackSocket;
 
 use crate::metrics::run_metrics_server;
-use crate::node::{PiServoConfig, PrometheusNode, PrometheusNodeConfig};
+use crate::node::{PrometheusNode, PrometheusNodeConfig};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> std::io::Result<()> {

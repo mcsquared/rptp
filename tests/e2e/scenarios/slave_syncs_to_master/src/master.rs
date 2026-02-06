@@ -5,11 +5,12 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
 use rptp::{
-    clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock, TimeScale},
+    clock::{ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, TimeScale},
     dataset::{ClockDS, Priority1, Priority2, StepsRemoved},
     log::NOOP_CLOCK_METRICS,
     port::{DomainNumber, SingleDomainPortMap},
-    servo::{Servo, SteppingServo},
+    profile::PortProfile,
+    servo::ServoConfig,
     test_support::FakeClock,
     time::TimeStamp,
 };
@@ -35,13 +36,14 @@ async fn main() -> std::io::Result<()> {
     let general_socket = Rc::new(MulticastSocket::general().await?);
 
     let (system_tx, system_rx) = mpsc::unbounded_channel();
+    let profile = PortProfile::default().with_servo_config(ServoConfig::Stepping {
+        metrics: &NOOP_CLOCK_METRICS,
+    });
     let mut ordinary_clock = OrdinaryTokioClock::new(
-        LocalClock::new(
-            &fake_clock,
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        ),
+        &fake_clock,
         default_ds,
         DomainNumber::new(0),
+        profile,
     );
 
     let domain_number = ordinary_clock.domain_number();

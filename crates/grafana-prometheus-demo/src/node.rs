@@ -5,14 +5,12 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::metrics::offset_gauge;
-use rptp::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
+use rptp::clock::{Clock, SynchronizableClock, TimeScale};
 use rptp::dataset::ClockDS;
 use rptp::log::ClockMetrics;
 use rptp::port::{DomainNumber, SingleDomainPortMap};
 use rptp::profile::PortProfile;
-use rptp::servo::{
-    Drift, PiLoop, PiServo, Servo, ServoDriftEstimate, ServoState, ServoThreshold, StepPolicy,
-};
+use rptp::servo::{PiServoConfig, ServoConfig};
 use rptp::time::{TimeInterval, TimeStamp};
 use rptp_daemon::net::NetworkSocket;
 use rptp_daemon::node::{TokioPhysicalPort, TokioPortsLoop};
@@ -32,28 +30,6 @@ impl ClockMetrics for TracingClockMetrics {
 }
 
 pub static TRACING_CLOCK_METRICS: TracingClockMetrics = TracingClockMetrics;
-
-pub struct PiServoConfig {
-    pub first_step_threshold: ServoThreshold,
-    pub step_threshold: ServoThreshold,
-    pub drift_min: Drift,
-    pub drift_max: Drift,
-    pub drift_update_interval: TimeInterval,
-    pub kp: f64,
-    pub ki: f64,
-}
-
-impl PiServoConfig {
-    fn build(self) -> PiServo {
-        PiServo::new(
-            StepPolicy::new(self.first_step_threshold, self.step_threshold),
-            ServoDriftEstimate::new(self.drift_min, self.drift_max, self.drift_update_interval),
-            PiLoop::new(self.kp, self.ki),
-            ServoState::Unlocked,
-            &TRACING_CLOCK_METRICS,
-        )
-    }
-}
 
 pub struct PrometheusNodeConfig {
     pub clock_start: TimeStamp,
@@ -97,7 +73,7 @@ impl<N: NetworkSocket> PrometheusNode<N> {
                     clock_start,
                     clock_rate,
                     default_ds,
-                    profile: _profile,
+                    profile,
                     servo,
                     clock_steps,
                 },
@@ -117,13 +93,16 @@ impl<N: NetworkSocket> PrometheusNode<N> {
             });
         }
 
-        let local_clock = LocalClock::new(&*virtual_clock, Servo::PI(servo.build()));
+        let profile = profile.with_servo_config(ServoConfig::Pi {
+            config: servo,
+            metrics: &TRACING_CLOCK_METRICS,
+        });
 
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let timestamping = ClockTxTimestamping::new(&*virtual_clock, system_tx.clone(), domain);
 
         let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
-        let mut ordinary = OrdinaryTokioClock::new(local_clock, default_ds, domain);
+        let mut ordinary = OrdinaryTokioClock::new(&*virtual_clock, default_ds, domain, profile);
         let port_state = ordinary
             .port(&physical_port, system_tx, &timestamping)
             .expect("ordinary clock has one port");

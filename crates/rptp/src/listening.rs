@@ -155,27 +155,26 @@ mod tests {
     use super::*;
 
     use crate::bmca::{BestMasterClockAlgorithm, ListeningBmca, StateDecisionEventTrigger};
-    use crate::clock::{LocalClock, TimeScale};
+    use crate::clock::TimeScale;
     use crate::dataset::ClockDS;
     use crate::foreign::{BestForeignRecord, BestForeignSnapshot};
     use crate::infra::infra_support::ForeignClockRecordsVec;
-    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
+    use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, PortNumber};
-    use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{
         FakeClock, FakePort, FakeStateDecisionEvent, FakeTimerHost, FakeTimestamping, TestClockDS,
     };
     use crate::time::{Duration, Instant, LogMessageInterval};
 
     type ListeningTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
+        DomainPort<'a, &'a FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type ListeningTestPort<'a> =
         ListeningPort<'a, ListeningTestDomainPort<'a>, ForeignClockRecordsVec>;
 
     struct ListeningPortTestSetup {
-        local_clock: LocalClock<FakeClock>,
+        clock: FakeClock,
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
@@ -185,10 +184,7 @@ mod tests {
     impl ListeningPortTestSetup {
         fn new(ds: ClockDS) -> Self {
             Self {
-                local_clock: LocalClock::new(
-                    FakeClock::default(),
-                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-                ),
+                clock: FakeClock::default(),
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
@@ -200,7 +196,7 @@ mod tests {
             let port_identity = PortIdentity::fake_on_port(port_number);
 
             let domain_port = DomainPort::new(
-                &self.local_clock,
+                &self.clock,
                 port_identity,
                 &self.physical_port,
                 &self.timer_host,
@@ -215,10 +211,8 @@ mod tests {
             );
 
             {
-                let best_foreign = BestForeignRecord::new(
-                    port_identity,
-                    ForeignClockRecordsVec::new(),
-                );
+                let best_foreign =
+                    BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
                 let state_decision_trigger = StateDecisionEventTrigger::new(
                     &self.state_decision_event,
                     best_foreign.snapshot(),

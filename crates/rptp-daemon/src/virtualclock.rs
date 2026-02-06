@@ -78,16 +78,6 @@ impl Clock for VirtualClock {
     }
 }
 
-impl Clock for &VirtualClock {
-    fn now(&self) -> TimeStamp {
-        (*self).now()
-    }
-
-    fn time_scale(&self) -> TimeScale {
-        (*self).time_scale()
-    }
-}
-
 impl SynchronizableClock for VirtualClock {
     /// Discontinuously set the clock to `to`.
     ///
@@ -109,18 +99,8 @@ impl SynchronizableClock for VirtualClock {
     }
 }
 
-impl SynchronizableClock for &VirtualClock {
-    fn step(&self, to: TimeStamp) {
-        (*self).step(to)
-    }
-
-    fn adjust(&self, rate: f64) {
-        (*self).adjust(rate)
-    }
-}
-
 /// Shared ownership of a [`VirtualClock`] for use where [`SynchronizableClock`] is needed with
-/// owned types (e.g. [`LocalClock`], [`OrdinaryTokioClock`]).
+/// owned types (e.g. [`OrdinaryTokioClock`]).
 #[derive(Clone)]
 pub struct SharedVirtualClock(pub Arc<VirtualClock>);
 

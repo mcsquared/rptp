@@ -37,8 +37,8 @@ pub enum ServoState {
 
 /// Servo strategy selection.
 ///
-/// This is stored inside [`crate::clock::LocalClock`] and called by port roles to discipline the
-/// local clock.
+/// Port roles store a servo instance while in synchronization-capable states (e.g.
+/// `UNCALIBRATED` / `SLAVE`) and call it to discipline the local clock backend.
 pub enum Servo {
     /// A servo that always steps to the estimated master time.
     Stepping(SteppingServo),
@@ -59,6 +59,53 @@ impl Servo {
         match self {
             Servo::Stepping(servo) => servo.feed(clock, sample),
             Servo::PI(servo) => servo.feed(clock, sample),
+        }
+    }
+}
+
+/// Configuration for building a fresh PI servo instance.
+///
+/// This is a value-only representation (no interior mutability) so it can be stored in config
+/// objects such as [`crate::profile::PortProfile`]. Each call to [`ServoConfig::build`] produces a
+/// new servo with fresh internal state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PiServoConfig {
+    pub first_step_threshold: ServoThreshold,
+    pub step_threshold: ServoThreshold,
+    pub drift_min: Drift,
+    pub drift_max: Drift,
+    pub drift_update_interval: TimeInterval,
+    pub kp: f64,
+    pub ki: f64,
+}
+
+/// Servo strategy configuration used by port profiles.
+#[derive(Clone, Copy)]
+pub enum ServoConfig {
+    /// Always-step servo (useful for tests and bring-up).
+    Stepping { metrics: &'static dyn ClockMetrics },
+    /// PI servo configuration.
+    Pi {
+        config: PiServoConfig,
+        metrics: &'static dyn ClockMetrics,
+    },
+}
+
+impl ServoConfig {
+    /// Build a fresh [`Servo`] instance with reset internal state.
+    pub fn servo(self) -> Servo {
+        match self {
+            ServoConfig::Stepping { metrics } => Servo::Stepping(SteppingServo::new(metrics)),
+            ServoConfig::Pi { config, metrics } => Servo::PI(PiServo::new(
+                StepPolicy::new(config.first_step_threshold, config.step_threshold),
+                ServoDriftEstimate::new(
+                    config.drift_min,
+                    config.drift_max,
+                    config.drift_update_interval,
+                ),
+                PiLoop::new(config.kp, config.ki),
+                metrics,
+            )),
         }
     }
 }
@@ -107,8 +154,8 @@ impl SteppingServo {
 ///    - while [`ServoState::Locked`], feed the offset error into the [`PiLoop`] and continuously
 ///      adjust the clock rate.
 ///
-/// The internal state uses `Cell` so the servo can be shared by reference (`&self`) through
-/// [`crate::clock::LocalClock`].
+/// The internal state uses `Cell` so the servo can be shared by reference (`&self`) while still
+/// keeping the surrounding domain objects mostly immutable.
 pub struct PiServo {
     step_policy: StepPolicy,
     drift_estimate: ServoDriftEstimate,
@@ -123,20 +170,18 @@ impl PiServo {
     /// - `step_policy` controls when the servo performs discontinuous steps.
     /// - `drift_estimate` defines how drift is estimated during calibration and how it is clamped.
     /// - `pi_loop` contains the PI gains used once locked.
-    /// - `initial_state` sets the starting [`ServoState`] (typically `Unlocked`).
     /// - `metrics` receives offset measurements as samples are processed.
     pub fn new(
         step_policy: StepPolicy,
         drift_estimate: ServoDriftEstimate,
         pi_loop: PiLoop,
-        initial_state: ServoState,
         metrics: &'static dyn ClockMetrics,
     ) -> Self {
         Self {
             step_policy,
             drift_estimate,
             pi_loop,
-            state: Cell::new(initial_state),
+            state: Cell::new(ServoState::Unlocked),
             metrics,
         }
     }
@@ -319,6 +364,7 @@ pub(crate) enum ServoStepDecision {
 /// Optional threshold used by [`StepPolicy`] to decide whether to step the clock.
 ///
 /// When enabled, the threshold compares the absolute offset magnitude against a [`TimeInterval`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServoThreshold {
     /// Threshold comparison is disabled.
     Disabled,
@@ -555,7 +601,6 @@ mod tests {
                 TimeInterval::new(4, 0),
             ),
             PiLoop::new(0.0, 0.0),
-            ServoState::Unlocked,
             &NOOP_CLOCK_METRICS,
         );
 
@@ -586,7 +631,6 @@ mod tests {
                 TimeInterval::new(1, 0),
             ),
             PiLoop::new(0.0, 0.0),
-            ServoState::Unlocked,
             &NOOP_CLOCK_METRICS,
         );
 
@@ -615,7 +659,6 @@ mod tests {
                 TimeInterval::new(2, 0),
             ),
             PiLoop::new(0.5, 0.5),
-            ServoState::Unlocked,
             &NOOP_CLOCK_METRICS,
         );
 
@@ -650,7 +693,6 @@ mod tests {
                 TimeInterval::new(4, 0),
             ),
             PiLoop::new(0.0, 0.0),
-            ServoState::Unlocked,
             &NOOP_CLOCK_METRICS,
         );
 
@@ -680,7 +722,6 @@ mod tests {
                 TimeInterval::new(1, 0),
             ),
             PiLoop::new(0.0, 0.0),
-            ServoState::Unlocked,
             &NOOP_CLOCK_METRICS,
         );
 
@@ -709,7 +750,6 @@ mod tests {
                 TimeInterval::new(2, 0),
             ),
             PiLoop::new(0.0, 1.0),
-            ServoState::Unlocked,
             &NOOP_CLOCK_METRICS,
         );
 
@@ -776,7 +816,6 @@ mod tests {
                 TimeInterval::new(1, 0),
             ),
             PiLoop::new(0.0, 0.0),
-            ServoState::Unlocked,
             &NOOP_CLOCK_METRICS,
         );
 
@@ -804,7 +843,6 @@ mod tests {
                 TimeInterval::new(1, 0),
             ),
             PiLoop::new(0.2, 0.3),
-            ServoState::Unlocked,
             &NOOP_CLOCK_METRICS,
         );
 
@@ -853,7 +891,6 @@ mod tests {
                 TimeInterval::new(2, 0),
             ),
             PiLoop::new(0.0, 0.0),
-            ServoState::Unlocked,
             &NOOP_CLOCK_METRICS,
         );
 

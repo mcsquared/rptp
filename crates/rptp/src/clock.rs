@@ -5,9 +5,6 @@
 //! - **Identity**: [`ClockIdentity`] is the 8-byte identity used in PTP datasets and port identities.
 //! - **Quality**: [`ClockClass`], [`ClockAccuracy`], and [`ClockQuality`] represent the fields used
 //!   by BMCA comparisons.
-//! - **Discipline boundary**: [`LocalClock`] composes a platform clock backend ([`SynchronizableClock`])
-//!   with a [`Servo`] strategy. Port roles feed samples into that boundary and observe the resulting
-//!   [`ServoState`] (locked/calibrating/unlocked).
 //!
 //! The traits in this module are intentionally small adapter surfaces: infrastructure can implement
 //! them for system clocks, virtual clocks used in tests, or embedded clock backends.
@@ -15,10 +12,7 @@
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
-use crate::{
-    servo::{Servo, ServoSample, ServoState},
-    time::TimeStamp,
-};
+use crate::time::TimeStamp;
 
 /// A PTP clock identity (IEEE 1588-2019 `clockIdentity`).
 ///
@@ -364,6 +358,16 @@ pub trait Clock {
     fn time_scale(&self) -> TimeScale;
 }
 
+impl<T: Clock + ?Sized> Clock for &T {
+    fn now(&self) -> TimeStamp {
+        (*self).now()
+    }
+
+    fn time_scale(&self) -> TimeScale {
+        (*self).time_scale()
+    }
+}
+
 /// A clock that can be disciplined (stepped or rate-adjusted).
 ///
 /// This is the infrastructure boundary that servos operate against. A servo may:
@@ -379,38 +383,13 @@ pub trait SynchronizableClock: Clock {
     fn adjust(&self, rate: f64);
 }
 
-/// The local clock in a PTP node: backend + servo.
-///
-/// `LocalClock` composes:
-/// - a platform clock backend (`C: [`SynchronizableClock`]),
-/// - a [`Servo`] strategy that turns observed offset samples into clock actions.
-///
-/// Port roles feed samples into the clock discipline boundary via `discipline()` and then use the
-/// returned [`ServoState`] in their state machine decisions.
-pub struct LocalClock<C: SynchronizableClock> {
-    clock: C,
-    servo: Servo,
-}
-
-impl<C: SynchronizableClock> LocalClock<C> {
-    /// Create a new local clock wrapper around a backend clock and a servo strategy.
-    pub fn new(clock: C, servo: Servo) -> Self {
-        Self { clock, servo }
+impl<T: SynchronizableClock + ?Sized> SynchronizableClock for &T {
+    fn step(&self, to: TimeStamp) {
+        (*self).step(to)
     }
 
-    /// Return the current time reported by the backend clock.
-    pub fn now(&self) -> TimeStamp {
-        self.clock.now()
-    }
-
-    /// Return the time scale used by the backend clock.
-    pub fn time_scale(&self) -> TimeScale {
-        self.clock.time_scale()
-    }
-
-    /// Feed a new servo sample into the discipline pipeline.
-    pub(crate) fn discipline(&self, sample: ServoSample) -> ServoState {
-        self.servo.feed(&self.clock, sample)
+    fn adjust(&self, rate: f64) {
+        (*self).adjust(rate)
     }
 }
 

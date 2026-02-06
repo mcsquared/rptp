@@ -13,7 +13,7 @@
 use core::cell::{Cell, RefCell};
 
 use crate::bmca::{BestMasterClockAlgorithm, StateDecisionEvent, StateDecisionEventTrigger};
-use crate::clock::{LocalClock, SynchronizableClock};
+use crate::clock::SynchronizableClock;
 use crate::dataset::ClockDS;
 use crate::foreign::{
     BestForeignRecord, BestForeignSnapshot, ForeignClockRecords, ForeignGrandMasterCandidates,
@@ -33,7 +33,7 @@ use crate::timestamping::TxTimestamping;
 ///
 /// This type owns the immutable configuration and shared collaborators that are reused when
 /// constructing the port state machine:
-/// - the local clock discipline boundary ([`LocalClock`]),
+/// - the local clock backend (`C: [`SynchronizableClock`]),
 /// - the local default dataset used for BMCA comparisons ([`ClockDS`]),
 /// - the domain and port numbers, and
 /// - a shared store for best-foreign snapshots (`E_best` in BMCA terms).
@@ -41,41 +41,44 @@ use crate::timestamping::TxTimestamping;
 /// The returned port state machine is constructed by [`OrdinaryClock::port`].
 /// Port creation is exhaustive: [`port`](Self::port) returns `None` once the clock's single port
 /// has been handed out.
-pub struct OrdinaryClock<C: SynchronizableClock, T: Timeout> {
-    local_clock: LocalClock<C>,
+pub struct OrdinaryClock<C: SynchronizableClock + Clone, T: Timeout> {
+    clock: C,
     default_ds: ClockDS,
     domain_number: DomainNumber,
     port_enumeration: PortEnumeration,
     foreign_candidates: Cell<BestForeignSnapshot>,
     port_notification: SinglePortNotification<T>,
+    profile: PortProfile,
 }
 
-impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
+impl<C: SynchronizableClock + Clone, T: Timeout> OrdinaryClock<C, T> {
     /// Create a new ordinary clock configuration.
     ///
     /// `default_ds` is the local clock dataset used by BMCA as the local candidate (`D_0`).
     /// An ordinary clock has exactly one port (port number 1); the enumeration is fixed to
     /// [`PortEnumeration::single`] internally.
     pub fn new(
-        local_clock: LocalClock<C>,
+        clock: C,
         default_ds: ClockDS,
         domain_number: DomainNumber,
+        profile: PortProfile,
     ) -> Self {
         let foreign_candidates = Cell::new(BestForeignSnapshot::Empty);
 
         OrdinaryClock {
-            local_clock,
+            clock,
             default_ds,
             domain_number,
             port_enumeration: PortEnumeration::single(),
             foreign_candidates,
             port_notification: SinglePortNotification::new(),
+            profile,
         }
     }
 
-    /// Return the local clock discipline boundary.
-    pub fn local_clock(&self) -> &LocalClock<C> {
-        &self.local_clock
+    /// Return the local clock backend handle.
+    pub fn clock(&self) -> &C {
+        &self.clock
     }
 
     /// Return the configured PTP domain number.
@@ -121,7 +124,7 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
         self.port_notification.add_port(state_decision_timeout);
 
         let domain_port = DomainPort::new(
-            &self.local_clock,
+            self.clock.clone(),
             port_identity,
             physical_port,
             timer_host,
@@ -136,16 +139,14 @@ impl<C: SynchronizableClock, T: Timeout> OrdinaryClock<C, T> {
         let state_decision_trigger =
             StateDecisionEventTrigger::new(self, best_foreign.snapshot(), port_number);
 
-        Some(PortProfile::default().initializing(
-            domain_port,
-            bmca,
-            best_foreign,
-            state_decision_trigger,
-        ))
+        Some(
+            self.profile
+                .initializing(domain_port, bmca, best_foreign, state_decision_trigger),
+        )
     }
 }
 
-impl<C: SynchronizableClock, T: Timeout> StateDecisionEvent for OrdinaryClock<C, T> {
+impl<C: SynchronizableClock + Clone, T: Timeout> StateDecisionEvent for OrdinaryClock<C, T> {
     fn trigger(&self, port_number: PortNumber, e_rbest: BestForeignSnapshot) {
         // Update shared state
         self.foreign_candidates.remember(port_number, e_rbest);

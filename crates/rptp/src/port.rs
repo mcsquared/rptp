@@ -21,7 +21,7 @@
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
-use crate::clock::{ClockIdentity, LocalClock, SynchronizableClock};
+use crate::clock::{ClockIdentity, SynchronizableClock};
 use crate::foreign::{BestForeignSnapshot, ForeignClockRecords};
 use crate::log::{PortEvent, PortLog};
 use crate::message::{EventMessage, GeneralMessage, SystemMessage};
@@ -105,7 +105,7 @@ pub trait TimerHost {
 /// Port state objects use this interface to:
 /// - send domain messages,
 /// - create timeouts,
-/// - access the local clock discipline boundary, and
+/// - access the local clock backend, and
 /// - emit logging events.
 pub trait Port {
     type Clock: SynchronizableClock;
@@ -113,8 +113,8 @@ pub trait Port {
 
     /// Return this port's PTP identity (clock identity + port number).
     fn identity(&self) -> PortIdentity;
-    /// Access the local clock discipline boundary.
-    fn local_clock(&self) -> &LocalClock<Self::Clock>;
+    /// Access the local clock backend.
+    fn clock(&self) -> &Self::Clock;
     /// Send a typed event message.
     fn send_event(&self, msg: EventMessage) -> SendResult;
     /// Send a typed general message.
@@ -335,7 +335,7 @@ impl Display for ParentPortIdentity {
 /// - event egress timestamp feedback to [`TxTimestamping`], and
 /// - logging to a [`PortLog`] implementation.
 pub struct DomainPort<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> {
-    local_clock: &'a LocalClock<C>,
+    clock: C,
     port_identity: PortIdentity,
     physical_port: &'a dyn PhysicalPort,
     timer_host: T,
@@ -349,7 +349,7 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog>
 {
     /// Create a new `DomainPort` wired to the given infrastructure collaborators.
     pub fn new(
-        local_clock: &'a LocalClock<C>,
+        clock: C,
         port_identity: PortIdentity,
         physical_port: &'a dyn PhysicalPort,
         timer_host: T,
@@ -358,7 +358,7 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog>
         domain_number: DomainNumber,
     ) -> Self {
         Self {
-            local_clock,
+            clock,
             port_identity,
             physical_port,
             timer_host,
@@ -379,8 +379,8 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> P
         self.port_identity
     }
 
-    fn local_clock(&self) -> &LocalClock<Self::Clock> {
-        self.local_clock
+    fn clock(&self) -> &Self::Clock {
+        &self.clock
     }
 
     fn send_event(&self, msg: EventMessage) -> SendResult {
@@ -574,9 +574,8 @@ mod tests {
     use std::rc::Rc;
 
     use crate::clock::ClockIdentity;
-    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
+    use crate::log::NoopPortLog;
     use crate::message::{DelayRequestMessage, FollowUpMessage};
-    use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{FakeClock, FakeTimerHost, FakeTimestamping};
     use crate::time::LogMessageInterval;
 
@@ -605,17 +604,14 @@ mod tests {
     #[test]
     fn port_sets_domain_and_identity_on_event() {
         let identity = ClockIdentity::new(&[1, 2, 3, 4, 5, 6, 7, 8]);
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();
         let domain_number = DomainNumber::new(3);
         let port_identity = PortIdentity::new(identity, PortNumber::new(5));
 
         let port = DomainPort::new(
-            &local_clock,
+            &clock,
             port_identity,
             &cap_port,
             &timer_host,
@@ -638,17 +634,14 @@ mod tests {
     #[test]
     fn port_sets_domain_and_identity_on_general() {
         let identity = ClockIdentity::new(&[8, 7, 6, 5, 4, 3, 2, 1]);
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
         let (cap_port, sent) = CapturePort::new();
         let timer_host = FakeTimerHost::new();
         let domain_number = DomainNumber::new(9);
         let port_identity = PortIdentity::new(identity, PortNumber::new(2));
 
         let port = DomainPort::new(
-            &local_clock,
+            &clock,
             port_identity,
             &cap_port,
             &timer_host,

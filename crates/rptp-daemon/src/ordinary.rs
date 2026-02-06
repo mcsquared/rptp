@@ -12,13 +12,14 @@
 use tokio::sync::mpsc;
 
 use rptp::{
-    clock::{LocalClock, SynchronizableClock},
+    clock::SynchronizableClock,
     dataset::ClockDS,
     infra::infra_support::ForeignClockRecordsVec,
     message::SystemMessage,
     ordinary::OrdinaryClock,
     port::{DomainNumber, DomainPort},
     portstate::PortState,
+    profile::PortProfile,
     timestamping::TxTimestamping,
 };
 
@@ -34,19 +35,20 @@ pub type TokioPort<'a, C, TS> =
 ///
 /// This type owns the `rptp` ordinary clock domain object and provides convenience methods for
 /// producing a configured [`TokioPort`].
-pub struct OrdinaryTokioClock<C: SynchronizableClock> {
+pub struct OrdinaryTokioClock<C: SynchronizableClock + Clone> {
     ordinary_clock: OrdinaryClock<C, TokioTimeout>,
 }
 
-impl<C: SynchronizableClock> OrdinaryTokioClock<C> {
+impl<C: SynchronizableClock + Clone> OrdinaryTokioClock<C> {
     /// Create a new ordinary clock for a specific domain.
     pub fn new(
-        local_clock: LocalClock<C>,
+        clock: C,
         default_ds: ClockDS,
         domain_number: DomainNumber,
+        profile: PortProfile,
     ) -> Self {
         OrdinaryTokioClock {
-            ordinary_clock: OrdinaryClock::new(local_clock, default_ds, domain_number),
+            ordinary_clock: OrdinaryClock::new(clock, default_ds, domain_number, profile),
         }
     }
 

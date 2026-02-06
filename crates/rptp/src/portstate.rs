@@ -357,12 +357,12 @@ mod tests {
         GrandMasterTrackingBmca, ListeningBmca, ParentTrackingBmca, PassiveBmca,
         QualificationTimeoutPolicy, StateDecisionEventTrigger,
     };
-    use crate::clock::{ClockIdentity, LocalClock};
+    use crate::clock::ClockIdentity;
     use crate::dataset::{ClockDS, StepsRemoved};
     use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
     use crate::foreign::BestForeignRecord;
     use crate::infra::infra_support::ForeignClockRecordsVec;
-    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
+    use crate::log::NoopPortLog;
     use crate::message::{DelayRequestMessage, TimestampMessage, TwoStepSyncMessage};
     use crate::port::{
         AnnounceReceiptTimeout, DomainNumber, DomainPort, ParentPortIdentity, PortIdentity,
@@ -377,10 +377,10 @@ mod tests {
     use crate::time::{Duration, LogInterval, LogMessageInterval, TimeStamp};
 
     type PortStateTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, FakeTimerHost, FakeTimestamping, NoopPortLog>;
+        DomainPort<'a, &'a FakeClock, FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     struct PortStateTestSetup {
-        local_clock: LocalClock<FakeClock>,
+        clock: FakeClock,
         default_ds: ClockDS,
         physical_port: FakePort,
         state_decision_event: FakeStateDecisionEvent,
@@ -389,10 +389,7 @@ mod tests {
     impl PortStateTestSetup {
         fn new(ds: ClockDS) -> Self {
             Self {
-                local_clock: LocalClock::new(
-                    FakeClock::default(),
-                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-                ),
+                clock: FakeClock::default(),
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 state_decision_event: FakeStateDecisionEvent::new(),
@@ -401,7 +398,7 @@ mod tests {
 
         fn domain_port<'a>(&'a self) -> PortStateTestDomainPort<'a> {
             DomainPort::new(
-                &self.local_clock,
+                &self.clock,
                 PortIdentity::fake_on_port(PortNumber::new(1)),
                 &self.physical_port,
                 FakeTimerHost::new(),
@@ -467,7 +464,8 @@ mod tests {
                 best_foreign.snapshot(),
                 port_number,
             );
-            PortProfile::default().slave(
+            let profile = PortProfile::default();
+            profile.slave(
                 domain_port,
                 ParentTrackingBmca::new(
                     BestMasterClockAlgorithm::new(&self.default_ds, port_number),
@@ -480,6 +478,7 @@ mod tests {
                     FakeTimeout::new(SystemMessage::DelayRequestTimeout),
                     LogInterval::new(0),
                 )),
+                Servo::Stepping(SteppingServo::new(&crate::log::NOOP_CLOCK_METRICS)),
             )
         }
 
@@ -1000,10 +999,7 @@ mod tests {
     #[test]
     fn portstate_master_enters_faulty_on_announce_send_failure() {
         let default_ds = TestClockDS::default_high_grade().dataset();
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
         let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
@@ -1015,7 +1011,7 @@ mod tests {
         );
         let mut master = PortProfile::default().master(
             DomainPort::new(
-                &local_clock,
+                &clock,
                 port_identity,
                 &FailingPort, // <-- Failing port to simulate send failure <--
                 FakeTimerHost::new(),
@@ -1039,10 +1035,7 @@ mod tests {
     #[test]
     fn portstate_master_enters_faulty_on_delay_response_send_failure() {
         let default_ds = TestClockDS::default_high_grade().dataset();
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
         let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
@@ -1054,7 +1047,7 @@ mod tests {
         );
         let mut master = PortProfile::default().master(
             DomainPort::new(
-                &local_clock,
+                &clock,
                 port_identity,
                 &FailingPort,
                 FakeTimerHost::new(),
@@ -1082,10 +1075,7 @@ mod tests {
     #[test]
     fn portstate_master_enters_faulty_on_follow_up_send_failure() {
         let default_ds = TestClockDS::default_high_grade().dataset();
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
         let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
@@ -1097,7 +1087,7 @@ mod tests {
         );
         let mut master = PortProfile::default().master(
             DomainPort::new(
-                &local_clock,
+                &clock,
                 port_identity,
                 &FailingPort, // <-- failing port to simulate send failure <--
                 FakeTimerHost::new(),
@@ -1125,10 +1115,7 @@ mod tests {
     #[test]
     fn portstate_master_enters_faulty_on_sync_send_failure() {
         let default_ds = TestClockDS::default_high_grade().dataset();
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
         let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
@@ -1140,7 +1127,7 @@ mod tests {
         );
         let mut master = PortProfile::default().master(
             DomainPort::new(
-                &local_clock,
+                &clock,
                 port_identity,
                 &FailingPort,
                 FakeTimerHost::new(),
@@ -1164,14 +1151,11 @@ mod tests {
     #[test]
     fn portstate_slave_enters_faulty_on_delay_request_send_failure() {
         let default_ds = TestClockDS::default_mid_grade().dataset();
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
 
         let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
         let domain_port = DomainPort::new(
-            &local_clock,
+            &clock,
             port_identity,
             &FailingPort,
             FakeTimerHost::new(),
@@ -1202,12 +1186,14 @@ mod tests {
         let delay_timeout = domain_port.timeout(SystemMessage::DelayRequestTimeout);
         let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
 
+        let profile = PortProfile::default();
         let mut slave = PortState::Slave(SlavePort::new(
             domain_port,
             bmca,
             announce_receipt_timeout,
             EndToEndDelayMechanism::new(delay_cycle),
-            PortProfile::default(),
+            Servo::Stepping(SteppingServo::new(&crate::log::NOOP_CLOCK_METRICS)),
+            profile,
         ));
 
         let transition = slave.dispatch_system(SystemMessage::DelayRequestTimeout);

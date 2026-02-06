@@ -8,7 +8,7 @@
 //! - accepting and processing Sync/FollowUp/DelayResp only from the currently tracked parent,
 //! - driving the end-to-end delay mechanism ([`EndToEndDelayMechanism`]) to produce
 //!   [`crate::servo::ServoSample`]s, and
-//! - feeding samples into the local clock discipline boundary (`LocalClock::discipline`).
+//! - feeding samples into a servo to discipline the local clock backend.
 //!
 //! Periodic DelayReq transmission is triggered by `SystemMessage::DelayRequestTimeout` as handled
 //! by `PortState::dispatch_system`, which calls [`SlavePort::send_delay_request`]. The egress
@@ -26,7 +26,7 @@ use crate::message::{
 use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity, SendResult};
 use crate::portstate::{PortState, StateDecision};
 use crate::profile::PortProfile;
-use crate::servo::ServoState;
+use crate::servo::{Servo, ServoState};
 use crate::time::{Instant, TimeStamp};
 use crate::uncalibrated::UncalibratedPort;
 
@@ -48,13 +48,14 @@ use crate::uncalibrated::UncalibratedPort;
 /// ## Clock discipline
 ///
 /// The E2E delay mechanism combines the Sync-side and Delay-side exchanges into a [`ServoSample`].
-/// Once a sample becomes available, it is fed into `LocalClock::discipline`. If the servo reports a
+/// Once a sample becomes available, it is fed into the state's servo. If the servo reports a
 /// non-locked state, a [`StateDecision::SynchronizationFault`] is produced.
 pub struct SlavePort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
     bmca: ParentTrackingBmca<'a, S>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
+    servo: Servo,
     profile: PortProfile,
 }
 
@@ -68,6 +69,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         bmca: ParentTrackingBmca<'a, S>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
+        servo: Servo,
         profile: PortProfile,
     ) -> Self {
         port.log(PortEvent::Static("Become SlavePort"));
@@ -77,6 +79,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
             bmca,
             announce_receipt_timeout,
             delay_mechanism,
+            servo,
             profile,
         }
     }
@@ -100,8 +103,8 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
     /// Process a received one-step Sync event message.
     ///
     /// The message is ignored unless it originates from the currently tracked parent. When the E2E
-    /// delay mechanism yields a complete sample, it is fed into the local clock discipline
-    /// pipeline.
+    /// delay mechanism yields a complete sample, it is fed into the state's servo to discipline
+    /// the local clock backend.
     pub(crate) fn process_one_step_sync(
         &mut self,
         sync: OneStepSyncMessage,
@@ -116,7 +119,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
         self.delay_mechanism
             .record_one_step_sync(sync, ingress_timestamp);
         if let Some(sample) = self.delay_mechanism.sample() {
-            let servo_state = self.port.local_clock().discipline(sample);
+            let servo_state = self.servo.feed(self.port.clock(), sample);
             match servo_state {
                 ServoState::Locked => None,
                 _ => Some(StateDecision::SynchronizationFault),
@@ -151,7 +154,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
     ///
     /// The message is ignored unless it originates from the currently tracked parent. If the E2E
     /// delay mechanism yields a complete sample after recording the FollowUp, it is fed into the
-    /// local clock discipline pipeline.
+    /// state's servo to discipline the local clock backend.
     pub(crate) fn process_follow_up(
         &mut self,
         follow_up: FollowUpMessage,
@@ -164,7 +167,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
 
         self.delay_mechanism.record_follow_up(follow_up);
         if let Some(sample) = self.delay_mechanism.sample() {
-            let servo_state = self.port.local_clock().discipline(sample);
+            let servo_state = self.servo.feed(self.port.clock(), sample);
             match servo_state {
                 ServoState::Locked => None,
                 _ => Some(StateDecision::SynchronizationFault),
@@ -287,6 +290,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
             self.bmca,
             self.announce_receipt_timeout,
             self.delay_mechanism,
+            self.servo,
             self.profile,
         ))
     }
@@ -304,15 +308,15 @@ mod tests {
     use super::*;
 
     use crate::bmca::{BestMasterClockAlgorithm, StateDecisionEventTrigger};
-    use crate::clock::{ClockIdentity, LocalClock, TimeScale};
+    use crate::clock::{Clock, ClockIdentity, TimeScale};
     use crate::dataset::ClockDS;
     use crate::e2e::DelayCycle;
     use crate::foreign::{BestForeignRecord, BestForeignSnapshot, ForeignClockRecord};
     use crate::infra::infra_support::ForeignClockRecordsVec;
-    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
+    use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortNumber};
-    use crate::servo::{Servo, SteppingServo};
+    use crate::servo::SteppingServo;
     use crate::test_support::{
         FakeClock, FakePort, FakeStateDecisionEvent, FakeTimeout, FakeTimerHost, FakeTimestamping,
         TestClockDS,
@@ -320,12 +324,12 @@ mod tests {
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     type SlaveTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
+        DomainPort<'a, &'a FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type SlaveTestPort<'a> = SlavePort<'a, SlaveTestDomainPort<'a>, ForeignClockRecordsVec>;
 
     struct SlavePortTestSetup {
-        local_clock: LocalClock<FakeClock>,
+        clock: FakeClock,
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
@@ -339,10 +343,7 @@ mod tests {
 
         fn new_with_ds(ds: ClockDS) -> Self {
             Self {
-                local_clock: LocalClock::new(
-                    FakeClock::default(),
-                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-                ),
+                clock: FakeClock::default(),
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
@@ -358,7 +359,7 @@ mod tests {
         ) -> SlaveTestPort<'_> {
             let port_identity = PortIdentity::new(self.default_ds.identity(), port_number);
             let domain_port = DomainPort::new(
-                &self.local_clock,
+                &self.clock,
                 port_identity,
                 &self.physical_port,
                 &self.timer_host,
@@ -380,6 +381,7 @@ mod tests {
                 port_number,
             );
 
+            let profile = PortProfile::default();
             SlavePort::new(
                 domain_port,
                 ParentTrackingBmca::new(
@@ -397,7 +399,8 @@ mod tests {
                     delay_request_timeout,
                     LogInterval::new(0),
                 )),
-                PortProfile::default(),
+                Servo::Stepping(SteppingServo::new(&crate::log::NoopClockMetrics)),
+                profile,
             )
         }
     }
@@ -438,7 +441,7 @@ mod tests {
             PortIdentity::fake(),
         );
 
-        assert_eq!(setup.local_clock.now(), TimeStamp::new(2, 0));
+        assert_eq!(setup.clock.now(), TimeStamp::new(2, 0));
     }
 
     #[test]
@@ -463,7 +466,7 @@ mod tests {
             TimeStamp::new(1, 0),
         );
 
-        assert_eq!(setup.local_clock.now(), TimeStamp::new(2, 0));
+        assert_eq!(setup.clock.now(), TimeStamp::new(2, 0));
     }
 
     #[test]
@@ -574,7 +577,7 @@ mod tests {
         assert!(transition.is_none());
 
         // With correct filtering, the local clock should remain unchanged
-        assert_eq!(setup.local_clock.now(), TimeStamp::new(0, 0));
+        assert_eq!(setup.clock.now(), TimeStamp::new(0, 0));
     }
 
     #[test]
@@ -626,7 +629,7 @@ mod tests {
         assert!(transition.is_none());
 
         // Local clock remains unchanged
-        assert_eq!(setup.local_clock.now(), TimeStamp::new(0, 0));
+        assert_eq!(setup.clock.now(), TimeStamp::new(0, 0));
     }
 
     #[test]
@@ -670,7 +673,7 @@ mod tests {
         assert!(transition.is_none());
 
         // Local clock disciplined to 2s
-        assert_eq!(setup.local_clock.now(), TimeStamp::new(2, 0));
+        assert_eq!(setup.clock.now(), TimeStamp::new(2, 0));
     }
 
     #[test]

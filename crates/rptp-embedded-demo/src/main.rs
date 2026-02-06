@@ -12,8 +12,8 @@ use heapless::{Deque, Vec};
 use panic_halt as _;
 use rptp::{
     clock::{
-        Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, LocalClock,
-        SynchronizableClock, TimeScale,
+        Clock, ClockAccuracy, ClockClass, ClockIdentity, ClockQuality, SynchronizableClock,
+        TimeScale,
     },
     dataset::{ClockDS, Priority1, Priority2, StepsRemoved},
     heapless::HeaplessForeignClockRecords,
@@ -24,8 +24,9 @@ use rptp::{
         DomainNumber, PhysicalPort, PortIdentity, PortMap, PortNumber, SendResult,
         SingleDomainPortMap, Timeout, TimerHost,
     },
+    profile::PortProfile,
     result::Error as RptpError,
-    servo::{Servo, SteppingServo},
+    servo::ServoConfig,
     time::{Duration, Instant, TimeInterval, TimeStamp},
     timestamping::TxTimestamping,
 };
@@ -233,16 +234,6 @@ impl Clock for CycleClock {
 
     fn time_scale(&self) -> TimeScale {
         TimeScale::Ptp
-    }
-}
-
-impl Clock for &CycleClock {
-    fn now(&self) -> TimeStamp {
-        (*self).now()
-    }
-
-    fn time_scale(&self) -> TimeScale {
-        (*self).time_scale()
     }
 }
 
@@ -512,14 +503,11 @@ fn main() -> ! {
 
     let default_ds = demo_default_ds();
 
-    let mut ordinary_clock = OrdinaryClock::new(
-        LocalClock::new(
-            &demo_clock,
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        ),
-        default_ds,
-        DomainNumber::new(0),
-    );
+    let profile = PortProfile::default().with_servo_config(ServoConfig::Stepping {
+        metrics: &NOOP_CLOCK_METRICS,
+    });
+    let mut ordinary_clock =
+        OrdinaryClock::new(&demo_clock, default_ds, DomainNumber::new(0), profile);
 
     let domain_number = ordinary_clock.domain_number();
     let physical_port = DemoPhysicalPort {

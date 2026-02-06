@@ -14,7 +14,7 @@
 //! [`SyncCycle`]. Both schedule their next activation by restarting a `Timeout` handle.
 
 use crate::bmca::{Bmca, BmcaMasterDecision, GrandMaster, GrandMasterTrackingBmca};
-use crate::clock::{LocalClock, SynchronizableClock};
+use crate::clock::SynchronizableClock;
 use crate::foreign::{BestForeignSnapshot, ForeignClockRecords};
 use crate::log::PortEvent;
 use crate::message::{
@@ -75,11 +75,10 @@ impl<'a, P: Port, S: ForeignClockRecords> MasterPort<'a, P, S> {
     ///
     /// The announce payload is produced from the currently tracked grandmaster dataset.
     pub(crate) fn send_announce(&mut self) -> SendResult {
-        let local_clock = self.port.local_clock();
         let announce_cycle = &mut self.announce_cycle;
         let announce_message = self
             .bmca
-            .using_grandmaster(|gm| announce_cycle.announce(local_clock, gm));
+            .using_grandmaster(|gm| announce_cycle.announce(self.port.clock(), gm));
         self.port
             .send_general(GeneralMessage::Announce(announce_message))?;
         self.announce_cycle.next();
@@ -242,13 +241,13 @@ impl<T: Timeout> AnnounceCycle<T> {
     /// - the current time scale of the local clock.
     pub fn announce<C: SynchronizableClock>(
         &self,
-        local_clock: &LocalClock<C>,
+        clock: &C,
         grandmaster: GrandMaster,
     ) -> AnnounceMessage {
         grandmaster.announce(
             self.sequence_id,
             self.log_interval.log_message_interval(),
-            local_clock.time_scale(),
+            clock.time_scale(),
         )
     }
 }
@@ -292,17 +291,16 @@ mod tests {
     use crate::bmca::{
         BestMasterClockAlgorithm, GrandMasterTrackingBmca, StateDecisionEventTrigger,
     };
-    use crate::clock::{LocalClock, TimeScale};
+    use crate::clock::TimeScale;
     use crate::dataset::ClockDS;
     use crate::foreign::{BestForeignRecord, BestForeignSnapshot, ForeignClockRecord};
     use crate::infra::infra_support::ForeignClockRecordsVec;
-    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
+    use crate::log::NoopPortLog;
     use crate::message::{
         DelayResponseMessage, EventMessage, FollowUpMessage, GeneralMessage, SystemMessage,
         TwoStepSyncMessage,
     };
     use crate::port::{DomainNumber, DomainPort, PortNumber};
-    use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{
         FakeClock, FakePort, FakeStateDecisionEvent, FakeTimeout, FakeTimerHost, FakeTimestamping,
         TestClockDS,
@@ -310,12 +308,12 @@ mod tests {
     use crate::time::{Instant, LogInterval, LogMessageInterval};
 
     type MasterTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
+        DomainPort<'a, &'a FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type MasterTestPort<'a> = MasterPort<'a, MasterTestDomainPort<'a>, ForeignClockRecordsVec>;
 
     struct MasterPortTestSetup {
-        local_clock: LocalClock<FakeClock>,
+        clock: FakeClock,
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
@@ -329,10 +327,7 @@ mod tests {
 
         fn new_with_time(ds: ClockDS, now: TimeStamp) -> Self {
             Self {
-                local_clock: LocalClock::new(
-                    FakeClock::new(now, TimeScale::Ptp),
-                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-                ),
+                clock: FakeClock::new(now, TimeScale::Ptp),
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
@@ -348,7 +343,7 @@ mod tests {
             let port_identity = PortIdentity::fake_on_port(port_number);
 
             let domain_port = DomainPort::new(
-                &self.local_clock,
+                &self.clock,
                 port_identity,
                 &self.physical_port,
                 &self.timer_host,
@@ -676,10 +671,7 @@ mod tests {
     #[test]
     fn announce_cycle_produces_announce_messages_with_monotonic_sequence_ids() {
         let clock_ds = TestClockDS::default_high_grade().dataset();
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
         let bmca = BestMasterClockAlgorithm::new(&clock_ds, PortNumber::new(1));
 
         let mut cycle = AnnounceCycle::new(
@@ -687,9 +679,9 @@ mod tests {
             FakeTimeout::new(SystemMessage::AnnounceSendTimeout),
             LogInterval::new(0),
         );
-        let msg1 = bmca.using_grandmaster(|gm| cycle.announce(&local_clock, gm));
+        let msg1 = bmca.using_grandmaster(|gm| cycle.announce(&clock, gm));
         cycle.next();
-        let msg2 = bmca.using_grandmaster(|gm| cycle.announce(&local_clock, gm));
+        let msg2 = bmca.using_grandmaster(|gm| cycle.announce(&clock, gm));
 
         assert_eq!(
             msg1,

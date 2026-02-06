@@ -87,12 +87,10 @@ impl<'a, P: Port, S: ForeignClockRecords> InitializingPort<'a, P, S> {
 mod tests {
     use super::*;
 
-    use crate::clock::LocalClock;
     use crate::infra::infra_support::ForeignClockRecordsVec;
-    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
+    use crate::log::NoopPortLog;
     use crate::port::{DomainNumber, DomainPort, PortIdentity, PortNumber};
     use crate::portstate::PortState;
-    use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{
         FakeClock, FakePort, FakeStateDecisionEvent, FakeTimerHost, FakeTimestamping, TestClockDS,
     };
@@ -100,10 +98,7 @@ mod tests {
     #[test]
     fn initializing_port_to_listening_transition() {
         let default_ds = TestClockDS::default_mid_grade().dataset();
-        let local_clock = LocalClock::new(
-            FakeClock::default(),
-            Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-        );
+        let clock = FakeClock::default();
         let physical_port = FakePort::new();
         let state_decision_event = FakeStateDecisionEvent::new();
         let port_identity = PortIdentity::fake_on_port(PortNumber::new(1));
@@ -115,7 +110,7 @@ mod tests {
         );
         let initializing = InitializingPort::new(
             DomainPort::new(
-                &local_clock,
+                &clock,
                 port_identity,
                 &physical_port,
                 FakeTimerHost::new(),

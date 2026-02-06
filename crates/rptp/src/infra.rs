@@ -22,7 +22,7 @@ pub mod infra_support {
     use std::collections::BTreeMap;
     use std::rc::Rc;
 
-    use crate::clock::{Clock, LocalClock, SynchronizableClock, TimeScale};
+    use crate::clock::{Clock, SynchronizableClock, TimeScale};
     use crate::foreign::{
         BestForeignSnapshot, ForeignClockRecord, ForeignClockRecords, ForeignGrandMasterCandidates,
     };
@@ -49,8 +49,8 @@ pub mod infra_support {
             self.as_ref().identity()
         }
 
-        fn local_clock(&self) -> &LocalClock<Self::Clock> {
-            self.as_ref().local_clock()
+        fn clock(&self) -> &Self::Clock {
+            self.as_ref().clock()
         }
 
         fn send_event(&self, msg: EventMessage) -> SendResult {

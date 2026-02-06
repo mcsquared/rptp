@@ -5,7 +5,8 @@
 //!
 //! - observe message exchanges (Sync + FollowUp, DelayReq + DelayResp),
 //! - derive an offset estimate, and
-//! - expose it as a [`ServoSample`] that port roles can feed into [`crate::clock::LocalClock`].
+//! - expose it as a [`ServoSample`] that port roles feed into their servo to discipline the local
+//!   clock backend.
 //!
 //! ## Exchange model
 //!

@@ -149,26 +149,25 @@ mod tests {
     use super::*;
 
     use crate::bmca::{BestMasterClockAlgorithm, PassiveBmca, StateDecisionEventTrigger};
-    use crate::clock::{LocalClock, TimeScale};
+    use crate::clock::TimeScale;
     use crate::dataset::ClockDS;
     use crate::foreign::{BestForeignRecord, BestForeignSnapshot, ForeignClockRecord};
     use crate::infra::infra_support::ForeignClockRecordsVec;
-    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
+    use crate::log::NoopPortLog;
     use crate::message::SystemMessage;
     use crate::port::{DomainNumber, DomainPort, PortNumber};
-    use crate::servo::{Servo, SteppingServo};
     use crate::test_support::{
         FakeClock, FakePort, FakeStateDecisionEvent, FakeTimerHost, FakeTimestamping, TestClockDS,
     };
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     type PassiveTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
+        DomainPort<'a, &'a FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type PassiveTestPort<'a> = PassivePort<'a, PassiveTestDomainPort<'a>, ForeignClockRecordsVec>;
 
     struct PassivePortTestSetup {
-        local_clock: LocalClock<FakeClock>,
+        clock: FakeClock,
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
@@ -178,10 +177,7 @@ mod tests {
     impl PassivePortTestSetup {
         fn new(ds: ClockDS) -> Self {
             Self {
-                local_clock: LocalClock::new(
-                    FakeClock::default(),
-                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-                ),
+                clock: FakeClock::default(),
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
@@ -196,7 +192,7 @@ mod tests {
         ) -> PassiveTestPort<'_> {
             let port_identity = PortIdentity::new(self.default_ds.identity(), port_number);
             let domain_port = DomainPort::new(
-                &self.local_clock,
+                &self.clock,
                 port_identity,
                 &self.physical_port,
                 &self.timer_host,

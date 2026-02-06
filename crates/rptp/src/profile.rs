@@ -26,6 +26,7 @@ use crate::passive::PassivePort;
 use crate::port::{AnnounceReceiptTimeout, Port, Timeout};
 use crate::portstate::PortState;
 use crate::premaster::PreMasterPort;
+use crate::servo::{Servo, ServoConfig};
 use crate::slave::SlavePort;
 use crate::time::{Duration, LogInterval};
 use crate::uncalibrated::UncalibratedPort;
@@ -43,11 +44,13 @@ use crate::uncalibrated::UncalibratedPort;
 ///   (`logSyncInterval`).
 /// - `log_min_delay_request_interval`: log2 interval used to schedule DelayReq transmissions when
 ///   acting as slave (`logMinDelayReqInterval`).
+#[derive(Clone, Copy)]
 pub struct PortProfile {
     announce_receipt_timeout_interval: Duration,
     log_announce_interval: LogInterval,
     log_sync_interval: LogInterval,
     log_min_delay_request_interval: LogInterval,
+    servo_config: ServoConfig,
 }
 
 impl PortProfile {
@@ -61,13 +64,23 @@ impl PortProfile {
         log_announce_interval: LogInterval,
         log_sync_interval: LogInterval,
         log_min_delay_request_interval: LogInterval,
+        servo_config: ServoConfig,
     ) -> Self {
         Self {
             announce_receipt_timeout_interval,
             log_announce_interval,
             log_sync_interval,
             log_min_delay_request_interval,
+            servo_config,
         }
+    }
+
+    /// Override the servo strategy used when entering `UNCALIBRATED`.
+    ///
+    /// Each entry into `UNCALIBRATED` builds a fresh servo instance with reset internal state.
+    pub fn with_servo_config(mut self, servo_config: ServoConfig) -> Self {
+        self.servo_config = servo_config;
+        self
     }
 }
 
@@ -82,6 +95,9 @@ impl Default for PortProfile {
             log_announce_interval: LogInterval::new(0),
             log_sync_interval: LogInterval::new(0),
             log_min_delay_request_interval: LogInterval::new(0),
+            servo_config: ServoConfig::Stepping {
+                metrics: &crate::log::NOOP_CLOCK_METRICS,
+            },
         }
     }
 }
@@ -165,6 +181,7 @@ impl PortProfile {
         port: P,
         bmca: ParentTrackingBmca<S>,
         delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
+        servo: Servo,
     ) -> PortState<P, S> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
             port.timeout(SystemMessage::AnnounceReceiptTimeout),
@@ -177,6 +194,7 @@ impl PortProfile {
             bmca,
             announce_receipt_timeout,
             delay_mechanism,
+            servo,
             self,
         ))
     }
@@ -226,6 +244,7 @@ impl PortProfile {
             bmca,
             announce_receipt_timeout,
             EndToEndDelayMechanism::new(delay_cycle),
+            self.servo_config.servo(),
             self,
         ))
     }

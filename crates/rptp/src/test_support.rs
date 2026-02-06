@@ -36,6 +36,8 @@ use crate::port::{
 use crate::portstate::PortState;
 use crate::profile::PortProfile;
 use crate::result::Result;
+use crate::servo::Servo;
+use crate::servo::SteppingServo;
 use crate::time::{Duration, LogInterval, TimeStamp};
 use crate::timestamping::TxTimestamping;
 use crate::wire::{MessageHeader, UnvalidatedMessage};
@@ -289,16 +291,6 @@ impl Clock for FakeClock {
     }
 }
 
-impl Clock for &FakeClock {
-    fn now(&self) -> TimeStamp {
-        (*self).now()
-    }
-
-    fn time_scale(&self) -> TimeScale {
-        (*self).time_scale()
-    }
-}
-
 impl SynchronizableClock for FakeClock {
     fn step(&self, to: TimeStamp) {
         self.now.set(to);
@@ -361,17 +353,8 @@ pub fn slave_test_port<'a, P: Port, S: ForeignClockRecords>(
     delay_timeout.restart(Duration::from_secs(0));
     let delay_cycle = DelayCycle::new(0.into(), delay_timeout, LogInterval::new(0));
     let e2e = EndToEndDelayMechanism::new(delay_cycle);
-    profile.slave(port, bmca, e2e)
-}
-
-impl SynchronizableClock for &FakeClock {
-    fn step(&self, to: TimeStamp) {
-        (*self).step(to);
-    }
-
-    fn adjust(&self, rate: f64) {
-        (*self).adjust(rate);
-    }
+    let servo = Servo::Stepping(SteppingServo::new(&crate::log::NOOP_CLOCK_METRICS));
+    profile.slave(port, bmca, e2e, servo)
 }
 
 impl Clock for Rc<FakeClock> {

@@ -9,7 +9,7 @@
 //! - accepting synchronization-related messages (Sync/FollowUp/DelayResp) only from that parent,
 //! - driving the end-to-end delay mechanism ([`EndToEndDelayMechanism`]) to produce
 //!   [`crate::servo::ServoSample`]s, and
-//! - feeding samples into the local clock discipline boundary (`LocalClock::discipline`).
+//! - feeding samples into a servo to discipline the local clock backend.
 //!
 //! When the servo reports a locked state for a completed sample, this state emits
 //! [`StateDecision::MasterClockSelected`], which transitions the port into `SLAVE`.
@@ -30,7 +30,7 @@ use crate::message::{
 use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity, SendResult};
 use crate::portstate::{PortState, StateDecision};
 use crate::profile::PortProfile;
-use crate::servo::ServoState;
+use crate::servo::{Servo, ServoState};
 use crate::time::{Instant, TimeStamp};
 
 /// Port role for the `UNCALIBRATED` state.
@@ -55,6 +55,7 @@ pub struct UncalibratedPort<'a, P: Port, S: ForeignClockRecords> {
     bmca: ParentTrackingBmca<'a, S>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
+    servo: Servo,
     profile: PortProfile,
 }
 
@@ -68,6 +69,7 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
         bmca: ParentTrackingBmca<'a, S>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
+        servo: Servo,
         profile: PortProfile,
     ) -> Self {
         port.log(PortEvent::Static("Become UncalibratedPort"));
@@ -77,6 +79,7 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
             bmca,
             announce_receipt_timeout,
             delay_mechanism,
+            servo,
             profile,
         }
     }
@@ -100,8 +103,8 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
     /// Process a received one-step Sync event message.
     ///
     /// The message is ignored unless it originates from the currently tracked parent. When the E2E
-    /// delay mechanism yields a complete sample, it is fed into the local clock discipline
-    /// pipeline. If the servo reports [`ServoState::Locked`], this emits
+    /// delay mechanism yields a complete sample, it is fed into the state's servo to discipline
+    /// the local clock backend. If the servo reports [`ServoState::Locked`], this emits
     /// [`StateDecision::MasterClockSelected`] to transition into `SLAVE`.
     pub(crate) fn process_one_step_sync(
         &mut self,
@@ -117,7 +120,7 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
         self.delay_mechanism
             .record_one_step_sync(sync, ingress_timestamp);
         if let Some(sample) = self.delay_mechanism.sample() {
-            let state = self.port.local_clock().discipline(sample);
+            let state = self.servo.feed(self.port.clock(), sample);
 
             match state {
                 ServoState::Locked => Some(StateDecision::MasterClockSelected(
@@ -155,8 +158,9 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
     ///
     /// The message is ignored unless it originates from the currently tracked parent. If the E2E
     /// delay mechanism yields a complete sample after recording the FollowUp, it is fed into the
-    /// local clock discipline pipeline. If the servo reports [`ServoState::Locked`], this emits
-    /// [`StateDecision::MasterClockSelected`] to transition into `SLAVE`.
+    /// state's servo to discipline the local clock backend. If the servo reports
+    /// [`ServoState::Locked`], this emits [`StateDecision::MasterClockSelected`]
+    /// to transition into `SLAVE`.
     pub(crate) fn process_follow_up(
         &mut self,
         follow_up: FollowUpMessage,
@@ -169,7 +173,7 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
 
         self.delay_mechanism.record_follow_up(follow_up);
         if let Some(sample) = self.delay_mechanism.sample() {
-            let servo_state = self.port.local_clock().discipline(sample);
+            let servo_state = self.servo.feed(self.port.clock(), sample);
             match servo_state {
                 ServoState::Locked => Some(StateDecision::MasterClockSelected(
                     ParentPortIdentity::new(source_port_identity),
@@ -236,7 +240,7 @@ impl<'a, P: Port, S: ForeignClockRecords> UncalibratedPort<'a, P, S> {
     pub(crate) fn master_clock_selected(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
         self.port.log(PortEvent::MasterClockSelected { parent });
         self.profile
-            .slave(self.port, self.bmca, self.delay_mechanism)
+            .slave(self.port, self.bmca, self.delay_mechanism, self.servo)
     }
 
     /// Process a state decision event.
@@ -307,28 +311,28 @@ mod tests {
     use super::*;
 
     use crate::bmca::{BestMasterClockAlgorithm, StateDecisionEventTrigger};
-    use crate::clock::{ClockIdentity, LocalClock, TimeScale};
+    use crate::clock::{ClockIdentity, TimeScale};
     use crate::dataset::ClockDS;
     use crate::e2e::DelayCycle;
     use crate::foreign::{BestForeignRecord, BestForeignSnapshot, ForeignClockRecord};
     use crate::infra::infra_support::ForeignClockRecordsVec;
-    use crate::log::{NOOP_CLOCK_METRICS, NoopPortLog};
+    use crate::log::NoopPortLog;
     use crate::message::{DelayRequestMessage, DelayResponseMessage, SystemMessage};
     use crate::port::{DomainNumber, DomainPort, ParentPortIdentity, PortIdentity, PortNumber};
-    use crate::servo::{Servo, SteppingServo};
+    use crate::servo::SteppingServo;
     use crate::test_support::{
         FakeClock, FakePort, FakeStateDecisionEvent, FakeTimerHost, FakeTimestamping, TestClockDS,
     };
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     type UncalibratedTestDomainPort<'a> =
-        DomainPort<'a, FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
+        DomainPort<'a, &'a FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type UncalibratedTestPort<'a> =
         UncalibratedPort<'a, UncalibratedTestDomainPort<'a>, ForeignClockRecordsVec>;
 
     struct UncalibratedPortTestSetup {
-        local_clock: LocalClock<FakeClock>,
+        clock: FakeClock,
         default_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
@@ -338,10 +342,7 @@ mod tests {
     impl UncalibratedPortTestSetup {
         fn new(ds: ClockDS) -> Self {
             Self {
-                local_clock: LocalClock::new(
-                    FakeClock::default(),
-                    Servo::Stepping(SteppingServo::new(&NOOP_CLOCK_METRICS)),
-                ),
+                clock: FakeClock::default(),
                 default_ds: ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
@@ -357,7 +358,7 @@ mod tests {
         ) -> UncalibratedTestPort<'_> {
             let port_identity = PortIdentity::new(self.default_ds.identity(), port_number);
             let domain_port = DomainPort::new(
-                &self.local_clock,
+                &self.clock,
                 port_identity,
                 &self.physical_port,
                 &self.timer_host,
@@ -385,6 +386,7 @@ mod tests {
                 port_number,
             );
 
+            let profile = PortProfile::default();
             UncalibratedPort::new(
                 domain_port,
                 ParentTrackingBmca::new(
@@ -395,7 +397,8 @@ mod tests {
                 ),
                 announce_receipt_timeout,
                 EndToEndDelayMechanism::new(delay_cycle),
-                PortProfile::default(),
+                Servo::Stepping(SteppingServo::new(&crate::log::NOOP_CLOCK_METRICS)),
+                profile,
             )
         }
     }

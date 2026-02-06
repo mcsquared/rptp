@@ -194,17 +194,16 @@ Internally, this is decomposed into exchange objects (rather than a single “co
 
 The output is a `ServoSample(ingress_timestamp, offset)`, representing “at ingress time T, we think our clock was offset by X”.
 
-#### Feeding the local clock (the discipline boundary)
+#### Clock discipline: servo + clock backend
 
-Port roles like `SlavePort` and `UncalibratedPort` call `LocalClock::discipline(sample)` when a sample becomes available (`crates/rptp/src/slave.rs`, `crates/rptp/src/uncalibrated.rs`).
+Port roles like `SlavePort` and `UncalibratedPort` feed samples into a servo when a sample becomes available (`crates/rptp/src/slave.rs`, `crates/rptp/src/uncalibrated.rs`).
 
-`LocalClock` (`crates/rptp/src/clock.rs`) is the capability boundary for clock control:
+Clock discipline uses two collaborators:
 
-- it owns a `SynchronizableClock` backend (how to `now()`, `step()`, `adjust()`),
-- it owns a `Servo` strategy (how to turn samples into actions),
-- and it returns a `ServoState` (`Unlocked`/`Calibrating`/`Locked`) back to the port role.
+- the port exposes a `SynchronizableClock` backend via `Port::clock()` (how to `now()`, `step()`, `adjust()`), and
+- the port state owns a `Servo` strategy (how to turn samples into actions).
 
-That makes “discipline the clock” a single explicit operation, independent of the runtime or clock backend.
+The servo returns a `ServoState` (`Unlocked`/`Calibrating`/`Locked`) back to the port role, which uses it for state transition decisions.
 
 ```
 Sync/FollowUp + DelayReq/DelayResp
@@ -216,10 +215,7 @@ EndToEndDelayMechanism::sample()
 ServoSample(ingress_timestamp, offset)
               |
               v
-LocalClock::discipline(sample)
-              |
-              v
-Servo::feed(...)  ->  step/adjust + ServoState
+Servo::feed(port.clock(), sample)  ->  step/adjust + ServoState
 ```
 
 #### Servo strategies as collaborators
@@ -371,7 +367,7 @@ Say we did a structural analysis and decomposition of the problem domain:
 +--------------------------------+
 | BoundaryClock                  |
 |--------------------------------|
-| local_clock                    |
+| clock_backend                  |
 | foreign_grandmaster_candidates |
 | ...                            |
 | ports: Vec<Port>               |
@@ -394,7 +390,7 @@ The clocks become merely owners of shared state the ports refer to on BMCA decis
 +-------------------------------------------------+
 | BoundaryClock                                   |
 |-------------------------------------------------|
-| local_clock                                     |
+| clock_backend                                   |
 | foreign_grandmaster_candidates                  |
 | other_shared_port_collaborators                 |
 +-------------------------------------------------+
@@ -417,7 +413,7 @@ Each port is bound to the corresponding interface (and thus to distinct event/ge
   +----------------------------------+              +----------------------------------+
   | BoundaryClock (domain 0)         |              | BoundaryClock (domain 1)         |
   |----------------------------------|              |----------------------------------|
-  | LocalClock (shared across ports) |              | LocalClock (shared across ports) |
+  | Clock backend (shared across ports)            | Clock backend (shared across ports) |
   | datasets / BMCA context          |              | datasets / BMCA context          |
   +-----------------+----------------+              +-----------------+----------------+
                     |                                                 |
@@ -471,8 +467,8 @@ let eth1 = TokioPhysicalPort(eth1_event, eth1_general);
 // other adapters ...
 
 // create domain clock objects
-let clock_d0 = BoundaryClock::new(LocalClock::new(...), DomainNumber::new(0));
-let clock_d1 = BoundaryClock::new(LocalClock::new(...), DomainNumber::new(1));
+let clock_d0 = BoundaryClock::new(/* clock backend */, DomainNumber::new(0), PortProfile::default());
+let clock_d1 = BoundaryClock::new(/* clock backend */, DomainNumber::new(1), PortProfile::default());
 
 // Actual port(-state) storage is an infra-*structure* decision.
 let port_map_eth0 = HashMap::new();
