@@ -165,7 +165,19 @@ pub enum SystemMessage {
     FaultCleared,
     AnnounceReceiptTimeout,
     QualificationTimeout,
-    StateDecisionEvent(BestForeignSnapshot),
+    StateDecisionEvent(StateDecisionSnapshot),
+}
+
+/// Consistent state decision inputs broadcast to all ports in a domain.
+///
+/// This payload is delivered via [`SystemMessage::StateDecisionEvent`]. It enables boundary clock
+/// scenarios where all ports should evaluate BMCA against the same:
+/// - local dataset snapshot (`D_0`), and
+/// - aggregated best foreign snapshot (`E_best`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateDecisionSnapshot {
+    pub d_0: ClockDS,
+    pub e_best: BestForeignSnapshot,
 }
 
 impl EventMessage {

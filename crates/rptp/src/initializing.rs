@@ -39,7 +39,7 @@ use crate::profile::PortProfile;
 /// first decision gating rule ("only decide once a qualified foreign dataset exists").
 pub struct InitializingPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
-    bmca: BestMasterClockAlgorithm<'a>,
+    bmca: BestMasterClockAlgorithm,
     best_foreign: BestForeignRecord<S>,
     state_decision_trigger: StateDecisionEventTrigger<'a>,
     profile: PortProfile,
@@ -53,7 +53,7 @@ impl<'a, P: Port, S: ForeignClockRecords> InitializingPort<'a, P, S> {
     /// ready to transition as soon as infrastructure reports that initialization has completed.
     pub(crate) fn new(
         port: P,
-        bmca: BestMasterClockAlgorithm<'a>,
+        bmca: BestMasterClockAlgorithm,
         best_foreign: BestForeignRecord<S>,
         state_decision_trigger: StateDecisionEventTrigger<'a>,
         profile: PortProfile,
@@ -118,7 +118,7 @@ mod tests {
                 NoopPortLog,
                 DomainNumber::new(0),
             ),
-            BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
+            BestMasterClockAlgorithm::new(default_ds, port_identity.port_number()),
             best_foreign,
             state_decision_trigger,
             PortProfile::default(),

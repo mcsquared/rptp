@@ -22,9 +22,9 @@ use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
 use crate::clock::{ClockIdentity, SynchronizableClock};
-use crate::foreign::{BestForeignSnapshot, ForeignClockRecords};
+use crate::foreign::ForeignClockRecords;
 use crate::log::{PortEvent, PortLog};
-use crate::message::{EventMessage, GeneralMessage, SystemMessage};
+use crate::message::{EventMessage, GeneralMessage, StateDecisionSnapshot, SystemMessage};
 use crate::portstate::{PortState, StateDecision};
 use crate::result::{ProtocolError, Result};
 use crate::time::{Duration, Instant, TimeStamp};
@@ -82,9 +82,9 @@ pub trait PortNotification<T: Timeout> {
 
     /// Notify all registered ports of a state decision event.
     ///
-    /// Sends `SystemMessage::StateDecisionEvent(e_best)` to each port,
-    /// ensuring they all evaluate BMCA with the same snapshot.
-    fn notify_all(&self, e_best: BestForeignSnapshot);
+    /// Sends `SystemMessage::StateDecisionEvent(snapshot)` to each port,
+    /// ensuring they all evaluate BMCA with the same inputs.
+    fn notify_all(&self, snapshot: StateDecisionSnapshot);
 }
 
 /// Factory for domain timeouts.

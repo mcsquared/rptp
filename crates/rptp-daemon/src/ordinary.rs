@@ -28,11 +28,8 @@ use crate::net::NetworkSocket;
 use crate::node::{TokioPhysicalPort, TokioTimeout, TokioTimerHost};
 
 /// Type alias for a fully wired Tokio-backed port state machine.
-pub type TokioPort<'a, C, P, TS> = PortState<
-    'a,
-    DomainPort<C, P, TokioTimerHost, TS, TracingPortLog>,
-    ForeignClockRecordsVec,
->;
+pub type TokioPort<'a, C, P, TS> =
+    PortState<'a, DomainPort<C, P, TokioTimerHost, TS, TracingPortLog>, ForeignClockRecordsVec>;
 
 /// Wrapper around [`OrdinaryClock`] that produces Tokio-wired ports.
 ///

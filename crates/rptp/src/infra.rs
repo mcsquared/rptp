@@ -27,7 +27,7 @@ pub mod infra_support {
         BestForeignSnapshot, ForeignClockRecord, ForeignClockRecords, ForeignGrandMasterCandidates,
     };
     use crate::log::PortEvent;
-    use crate::message::{EventMessage, GeneralMessage, SystemMessage};
+    use crate::message::{EventMessage, GeneralMessage, StateDecisionSnapshot, SystemMessage};
     use crate::port::{Port, PortIdentity, PortNotification, PortNumber, SendResult, Timeout};
     use crate::time::{Duration, TimeStamp};
 
@@ -239,8 +239,8 @@ pub mod infra_support {
             self.timeouts.get_mut().push(timeout);
         }
 
-        fn notify_all(&self, e_best: BestForeignSnapshot) {
-            let msg = SystemMessage::StateDecisionEvent(e_best);
+        fn notify_all(&self, snapshot: StateDecisionSnapshot) {
+            let msg = SystemMessage::StateDecisionEvent(snapshot);
             let delay = Duration::from_secs(0);
             for timeout in self.timeouts.borrow().iter() {
                 timeout.restart_with_message(msg, delay);
@@ -558,7 +558,10 @@ pub mod infra_support {
 
         #[test]
         fn multi_port_notification_delivers_to_all_registered_ports() {
-            let snapshot = BestForeignSnapshot::Empty;
+            let snapshot = StateDecisionSnapshot {
+                d_0: TestClockDS::default_mid_grade().dataset(),
+                e_best: BestForeignSnapshot::Empty,
+            };
 
             let timeout1 = Rc::new(FakeTimeout::new(SystemMessage::StateDecisionEvent(
                 snapshot,
@@ -571,8 +574,7 @@ pub mod infra_support {
             notification.add_port(timeout1.clone());
             notification.add_port(timeout2.clone());
 
-            let e_best = BestForeignSnapshot::Empty;
-            notification.notify_all(e_best);
+            notification.notify_all(snapshot);
 
             assert_eq!(
                 timeout1.take_system_messages()[0],

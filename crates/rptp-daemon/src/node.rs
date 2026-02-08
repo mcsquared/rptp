@@ -464,7 +464,7 @@ mod tests {
     impl<'a, C: SynchronizableClock, N: NetworkSocket> MasterTestNode<'a, C, N> {
         async fn new(
             clock: C,
-            default_ds: &'a ClockDS,
+            default_ds: ClockDS,
             event_socket: Rc<N>,
             general_socket: Rc<N>,
             physical_port: &'a TokioPhysicalPort<N>,
@@ -620,7 +620,7 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let port_state = master_test_port(
             domain_port,
-            &default_ds,
+            default_ds,
             ForeignClockRecordsVec::new(),
             &state_decision_event,
             PortProfile::default(),
@@ -714,7 +714,7 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let port_state = slave_test_port(
             domain_port,
-            &default_ds,
+            default_ds,
             ForeignClockRecordsVec::new(),
             &state_decision_event,
             parent_port_identity,
@@ -790,7 +790,7 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
             &clock,
-            &default_ds,
+            default_ds,
             event_socket,
             general_socket,
             &physical_port,
@@ -831,7 +831,7 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
             &clock,
-            &default_ds,
+            default_ds,
             event_socket,
             general_socket,
             &physical_port,
@@ -869,7 +869,7 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
             &clock,
-            &default_ds,
+            default_ds,
             event_socket,
             general_socket,
             &physical_port,
@@ -908,7 +908,7 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
             &clock,
-            &default_ds,
+            default_ds,
             event_socket,
             general_socket,
             &physical_port,
@@ -949,7 +949,7 @@ mod tests {
         let state_decision_event = FakeStateDecisionEvent::new();
         let node = MasterTestNode::new(
             &clock,
-            &default_ds,
+            default_ds,
             event_socket,
             general_socket,
             &physical_port,

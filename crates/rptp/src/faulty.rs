@@ -22,7 +22,7 @@ use crate::profile::PortProfile;
 /// is cleared.
 pub struct FaultyPort<'a, P: Port, S: ForeignClockRecords> {
     port: P,
-    bmca: BestMasterClockAlgorithm<'a>,
+    bmca: BestMasterClockAlgorithm,
     best_foreign: BestForeignRecord<S>,
     state_decision_trigger: StateDecisionEventTrigger<'a>,
     profile: PortProfile,
@@ -31,7 +31,7 @@ pub struct FaultyPort<'a, P: Port, S: ForeignClockRecords> {
 impl<'a, P: Port, S: ForeignClockRecords> FaultyPort<'a, P, S> {
     pub(crate) fn new(
         port: P,
-        bmca: BestMasterClockAlgorithm<'a>,
+        bmca: BestMasterClockAlgorithm,
         best_foreign: BestForeignRecord<S>,
         state_decision_trigger: StateDecisionEventTrigger<'a>,
         profile: PortProfile,

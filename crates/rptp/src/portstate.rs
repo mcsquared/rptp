@@ -325,24 +325,14 @@ impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
                 Some(StateDecision::QualificationTimeoutExpired)
             }
             (Faulty(_), FaultCleared) => Some(StateDecision::FaultCleared),
-            (Listening(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(&e_best_snapshot)
+            (Listening(port), StateDecisionEvent(snapshot)) => port.state_decision_event(snapshot),
+            (Slave(port), StateDecisionEvent(snapshot)) => port.state_decision_event(snapshot),
+            (Master(port), StateDecisionEvent(snapshot)) => port.state_decision_event(snapshot),
+            (Uncalibrated(port), StateDecisionEvent(snapshot)) => {
+                port.state_decision_event(snapshot)
             }
-            (Slave(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(&e_best_snapshot)
-            }
-            (Master(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(&e_best_snapshot)
-            }
-            (Uncalibrated(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(&e_best_snapshot)
-            }
-            (Passive(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(&e_best_snapshot)
-            }
-            (PreMaster(port), StateDecisionEvent(e_best_snapshot)) => {
-                port.state_decision_event(&e_best_snapshot)
-            }
+            (Passive(port), StateDecisionEvent(snapshot)) => port.state_decision_event(snapshot),
+            (PreMaster(port), StateDecisionEvent(snapshot)) => port.state_decision_event(snapshot),
             _ => None,
         }
     }
@@ -426,7 +416,7 @@ mod tests {
             );
             PortProfile::default().initializing(
                 domain_port,
-                BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                BestMasterClockAlgorithm::new(self.default_ds, port_number),
                 best_foreign,
                 state_decision_trigger,
             )
@@ -447,7 +437,7 @@ mod tests {
             PortProfile::default().listening(
                 domain_port,
                 ListeningBmca::new(
-                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                    BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign,
                     state_decision_trigger,
                 ),
@@ -468,7 +458,7 @@ mod tests {
             profile.slave(
                 domain_port,
                 ParentTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                    BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign,
                     ParentPortIdentity::new(PortIdentity::fake()),
                     state_decision_trigger,
@@ -498,7 +488,7 @@ mod tests {
             PortProfile::default().master(
                 domain_port,
                 GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                    BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign,
                     grandmaster_id,
                     state_decision_trigger,
@@ -522,7 +512,7 @@ mod tests {
             PortProfile::default().pre_master(
                 domain_port,
                 GrandMasterTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                    BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign,
                     grandmaster_id,
                     state_decision_trigger,
@@ -546,7 +536,7 @@ mod tests {
             PortProfile::default().uncalibrated(
                 domain_port,
                 ParentTrackingBmca::new(
-                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                    BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign,
                     ParentPortIdentity::new(PortIdentity::fake()),
                     state_decision_trigger,
@@ -568,7 +558,7 @@ mod tests {
             );
             PortProfile::default().faulty(
                 domain_port,
-                BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                BestMasterClockAlgorithm::new(self.default_ds, port_number),
                 best_foreign,
                 state_decision_trigger,
             )
@@ -589,7 +579,7 @@ mod tests {
             PortProfile::default().passive(
                 domain_port,
                 PassiveBmca::new(
-                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                    BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign,
                     state_decision_trigger,
                 ),
@@ -1020,7 +1010,7 @@ mod tests {
                 DomainNumber::new(0),
             ),
             GrandMasterTrackingBmca::new(
-                BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
+                BestMasterClockAlgorithm::new(default_ds, port_identity.port_number()),
                 best_foreign,
                 default_ds.identity(),
                 state_decision_trigger,
@@ -1056,7 +1046,7 @@ mod tests {
                 DomainNumber::new(0),
             ),
             GrandMasterTrackingBmca::new(
-                BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
+                BestMasterClockAlgorithm::new(default_ds, port_identity.port_number()),
                 best_foreign,
                 default_ds.identity(),
                 state_decision_trigger,
@@ -1096,7 +1086,7 @@ mod tests {
                 DomainNumber::new(0),
             ),
             GrandMasterTrackingBmca::new(
-                BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
+                BestMasterClockAlgorithm::new(default_ds, port_identity.port_number()),
                 best_foreign,
                 default_ds.identity(),
                 state_decision_trigger,
@@ -1136,7 +1126,7 @@ mod tests {
                 DomainNumber::new(0),
             ),
             GrandMasterTrackingBmca::new(
-                BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
+                BestMasterClockAlgorithm::new(default_ds, port_identity.port_number()),
                 best_foreign,
                 default_ds.identity(),
                 state_decision_trigger,
@@ -1173,7 +1163,7 @@ mod tests {
         );
         let parent_port_identity = ParentPortIdentity::new(PortIdentity::fake());
         let bmca = ParentTrackingBmca::new(
-            BestMasterClockAlgorithm::new(&default_ds, port_identity.port_number()),
+            BestMasterClockAlgorithm::new(default_ds, port_identity.port_number()),
             best_foreign,
             parent_port_identity,
             state_decision_trigger,

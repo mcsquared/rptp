@@ -24,9 +24,9 @@
 //! processing (Sync/DelayReq/…) is handled in other states.
 
 use crate::bmca::{Bmca, BmcaMasterDecision, PassiveBmca};
-use crate::foreign::{BestForeignSnapshot, ForeignClockRecords};
+use crate::foreign::ForeignClockRecords;
 use crate::log::PortEvent;
-use crate::message::AnnounceMessage;
+use crate::message::{AnnounceMessage, StateDecisionSnapshot};
 use crate::port::{AnnounceReceiptTimeout, ParentPortIdentity, Port, PortIdentity};
 use crate::portstate::{PortState, StateDecision};
 use crate::profile::PortProfile;
@@ -134,10 +134,10 @@ impl<'a, P: Port, S: ForeignClockRecords> PassivePort<'a, P, S> {
 
     /// Process a state decision event.
     pub(crate) fn state_decision_event(
-        &self,
-        best_master_clock: &BestForeignSnapshot,
+        &mut self,
+        snapshot: StateDecisionSnapshot,
     ) -> Option<StateDecision> {
-        match self.bmca.decision(best_master_clock) {
+        match self.bmca.decision(snapshot.d_0, &snapshot.e_best) {
             Some(decision) => decision.to_state_decision(),
             None => None,
         }
@@ -220,7 +220,7 @@ mod tests {
             PassivePort::new(
                 domain_port,
                 PassiveBmca::new(
-                    BestMasterClockAlgorithm::new(&self.default_ds, port_number),
+                    BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign_record,
                     state_decision_trigger,
                 ),

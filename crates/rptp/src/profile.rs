@@ -109,7 +109,7 @@ impl PortProfile {
     pub(crate) fn initializing<'a, P: Port, S: ForeignClockRecords>(
         self,
         port: P,
-        bmca: BestMasterClockAlgorithm<'a>,
+        bmca: BestMasterClockAlgorithm,
         best_foreign: BestForeignRecord<S>,
         state_decision_trigger: StateDecisionEventTrigger<'a>,
     ) -> PortState<'a, P, S> {
@@ -255,7 +255,7 @@ impl PortProfile {
     pub(crate) fn faulty<'a, P: Port, S: ForeignClockRecords>(
         self,
         port: P,
-        bmca: BestMasterClockAlgorithm<'a>,
+        bmca: BestMasterClockAlgorithm,
         best_foreign: BestForeignRecord<S>,
         state_decision_trigger: StateDecisionEventTrigger<'a>,
     ) -> PortState<'a, P, S> {

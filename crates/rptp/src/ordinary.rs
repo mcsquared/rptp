@@ -19,7 +19,7 @@ use crate::foreign::{
     BestForeignRecord, BestForeignSnapshot, ForeignClockRecords, ForeignGrandMasterCandidates,
 };
 use crate::log::PortLog;
-use crate::message::SystemMessage;
+use crate::message::{StateDecisionSnapshot, SystemMessage};
 use crate::port::{
     DomainNumber, DomainPort, PhysicalPort, PortEnumeration, PortIdentity, PortNotification,
     PortNumber, Timeout, TimerHost,
@@ -30,8 +30,7 @@ use crate::time::Duration;
 use crate::timestamping::TxTimestamping;
 
 /// Fully wired port state machine returned by [`OrdinaryClock::port`].
-pub type OrdinaryPortState<'a, C, P, TH, TS, L, S> =
-    PortState<'a, DomainPort<C, P, TH, TS, L>, S>;
+pub type OrdinaryPortState<'a, C, P, TH, TS, L, S> = PortState<'a, DomainPort<C, P, TH, TS, L>, S>;
 
 /// An ordinary clock: one clock, one domain, one port.
 ///
@@ -123,9 +122,11 @@ impl<C: SynchronizableClock + Clone, T: Timeout> OrdinaryClock<C, T> {
         let port_identity = PortIdentity::new(self.default_ds.identity(), port_number);
 
         // Register port with notification before creating port state
-        let state_decision_timeout = timer_host.timeout(SystemMessage::StateDecisionEvent(
-            BestForeignSnapshot::Empty,
-        ));
+        let state_decision_timeout =
+            timer_host.timeout(SystemMessage::StateDecisionEvent(StateDecisionSnapshot {
+                d_0: self.default_ds,
+                e_best: BestForeignSnapshot::Empty,
+            }));
         self.port_notification.add_port(state_decision_timeout);
 
         let domain_port = DomainPort::new(
@@ -138,8 +139,7 @@ impl<C: SynchronizableClock + Clone, T: Timeout> OrdinaryClock<C, T> {
             self.domain_number,
         );
 
-        let default_ds = &self.default_ds;
-        let bmca = BestMasterClockAlgorithm::new(default_ds, port_number);
+        let bmca = BestMasterClockAlgorithm::new(self.default_ds, port_number);
         let best_foreign = BestForeignRecord::new(port_identity, foreign_clock_records);
         let state_decision_trigger =
             StateDecisionEventTrigger::new(self, best_foreign.snapshot(), port_number);
@@ -158,7 +158,10 @@ impl<C: SynchronizableClock + Clone, T: Timeout> StateDecisionEvent for Ordinary
         let e_best = self.foreign_candidates.best();
 
         // Notify all ports (for ordinary clocks, this is just one port)
-        self.port_notification.notify_all(e_best);
+        self.port_notification.notify_all(StateDecisionSnapshot {
+            d_0: self.default_ds,
+            e_best,
+        });
     }
 }
 
@@ -179,10 +182,10 @@ impl<T: Timeout> PortNotification<T> for SinglePortNotification<T> {
         *self.timeout.borrow_mut() = Some(timeout);
     }
 
-    fn notify_all(&self, e_best: BestForeignSnapshot) {
+    fn notify_all(&self, snapshot: StateDecisionSnapshot) {
         if let Some(timeout) = self.timeout.borrow().as_ref() {
             timeout.restart_with_message(
-                SystemMessage::StateDecisionEvent(e_best),
+                SystemMessage::StateDecisionEvent(snapshot),
                 Duration::from_secs(0),
             );
         }
