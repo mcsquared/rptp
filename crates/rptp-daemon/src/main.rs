@@ -79,7 +79,7 @@ async fn main() -> std::io::Result<()> {
 
     let port = ordinary_clock
         .port(
-            &physical_port,
+            physical_port,
             system_tx.clone(),
             ClockTxTimestamping::new(&virtual_clock, system_tx.clone(), domain_number),
         )

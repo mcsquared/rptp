@@ -516,7 +516,7 @@ fn main() -> ! {
     let port_identity = PortIdentity::new(default_ds.identity(), PortNumber::new(1));
     let port = ordinary_clock
         .port(
-            &physical_port,
+            physical_port,
             DemoTimerHost::new(&instant_clock),
             DemoTimestamping::new(&demo_clock),
             DemoPortLog,

@@ -58,7 +58,7 @@ async fn main() -> std::io::Result<()> {
     let physical_port = TokioPhysicalPort::new(event_socket.clone(), general_socket.clone());
     let port = ordinary_clock
         .port(
-            &physical_port,
+            physical_port,
             system_tx.clone(),
             ClockTxTimestamping::new(&virtual_clock, system_tx.clone(), domain_number),
         )

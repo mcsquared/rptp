@@ -41,12 +41,17 @@ use rptp_daemon::virtualclock::{SharedVirtualClock, VirtualClock};
 use tokio::sync::mpsc;
 
 /// Inner port type for the loop (DomainPort). Used in [`NodePortsLoop`].
-type DomainPortInner<'a, C> =
-    DomainPort<'a, C, TokioTimerHost, ClockTxTimestamping<C>, TracingPortLog>;
+type DomainPortInner<C> = DomainPort<
+    C,
+    TokioPhysicalPort<LoopbackSocket>,
+    TokioTimerHost,
+    ClockTxTimestamping<C>,
+    TracingPortLog,
+>;
 
 /// Ports loop type returned by [`Node::build_loop`].
 type NodePortsLoop<'a> = TokioPortsLoop<
-    SingleDomainPortMap<'a, DomainPortInner<'a, SharedVirtualClock>, ForeignClockRecordsVec>,
+    SingleDomainPortMap<'a, DomainPortInner<SharedVirtualClock>, ForeignClockRecordsVec>,
     LoopbackSocket,
     ClockRxTimestamping<SharedVirtualClock>,
 >;
@@ -97,7 +102,7 @@ impl Node {
             ClockTxTimestamping::new(self.shared_clock.clone(), system_tx.clone(), domain);
         let port = self
             .ordinary
-            .port(&self.physical_port, system_tx, timestamping)
+            .port(self.physical_port.clone(), system_tx, timestamping)
             .expect("ordinary clock has one port");
         let portmap = SingleDomainPortMap::new(domain, port);
         let rx_timestamping = ClockRxTimestamping::new(self.shared_clock.clone());

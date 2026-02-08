@@ -377,7 +377,7 @@ mod tests {
     use crate::time::{Duration, LogInterval, LogMessageInterval, TimeStamp};
 
     type PortStateTestDomainPort<'a> =
-        DomainPort<'a, &'a FakeClock, FakeTimerHost, FakeTimestamping, NoopPortLog>;
+        DomainPort<&'a FakeClock, &'a FakePort, FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     struct PortStateTestSetup {
         clock: FakeClock,

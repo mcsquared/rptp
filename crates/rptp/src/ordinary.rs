@@ -29,6 +29,10 @@ use crate::profile::PortProfile;
 use crate::time::Duration;
 use crate::timestamping::TxTimestamping;
 
+/// Fully wired port state machine returned by [`OrdinaryClock::port`].
+pub type OrdinaryPortState<'a, C, P, TH, TS, L, S> =
+    PortState<'a, DomainPort<C, P, TH, TS, L>, S>;
+
 /// An ordinary clock: one clock, one domain, one port.
 ///
 /// This type owns the immutable configuration and shared collaborators that are reused when
@@ -100,15 +104,16 @@ impl<C: SynchronizableClock + Clone, T: Timeout> OrdinaryClock<C, T> {
     /// The initial state is `INITIALIZING` as assembled by the default [`PortProfile`]. The caller
     /// is responsible for delivering `SystemMessage::Initialized` to start the state machine (see
     /// `PortState::dispatch_system`).
-    pub fn port<'a, TH, TS, S, L>(
+    pub fn port<'a, P, TH, TS, S, L>(
         &'a mut self,
-        physical_port: &'a dyn PhysicalPort,
+        physical_port: P,
         timer_host: TH,
         timestamping: TS,
         log: L,
         foreign_clock_records: S,
-    ) -> Option<PortState<'a, DomainPort<'a, C, TH, TS, L>, S>>
+    ) -> Option<OrdinaryPortState<'a, C, P, TH, TS, L, S>>
     where
+        P: PhysicalPort,
         TH: TimerHost<Timeout = T>,
         TS: TxTimestamping,
         S: ForeignClockRecords,

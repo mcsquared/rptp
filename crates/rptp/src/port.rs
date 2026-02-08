@@ -109,6 +109,7 @@ pub trait TimerHost {
 /// - emit logging events.
 pub trait Port {
     type Clock: SynchronizableClock;
+    type PhysicalPort: PhysicalPort;
     type Timeout: Timeout;
 
     /// Return this port's PTP identity (clock identity + port number).
@@ -334,24 +335,30 @@ impl Display for ParentPortIdentity {
 /// - timeout creation to a [`TimerHost`],
 /// - event egress timestamp feedback to [`TxTimestamping`], and
 /// - logging to a [`PortLog`] implementation.
-pub struct DomainPort<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> {
+pub struct DomainPort<
+    C: SynchronizableClock,
+    P: PhysicalPort,
+    T: TimerHost,
+    TS: TxTimestamping,
+    L: PortLog,
+> {
     clock: C,
     port_identity: PortIdentity,
-    physical_port: &'a dyn PhysicalPort,
+    physical_port: P,
     timer_host: T,
     timestamping: TS,
     log: L,
     domain_number: DomainNumber,
 }
 
-impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog>
-    DomainPort<'a, C, T, TS, L>
+impl<C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestamping, L: PortLog>
+    DomainPort<C, P, T, TS, L>
 {
     /// Create a new `DomainPort` wired to the given infrastructure collaborators.
     pub fn new(
         clock: C,
         port_identity: PortIdentity,
-        physical_port: &'a dyn PhysicalPort,
+        physical_port: P,
         timer_host: T,
         timestamping: TS,
         log: L,
@@ -369,10 +376,11 @@ impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog>
     }
 }
 
-impl<'a, C: SynchronizableClock, T: TimerHost, TS: TxTimestamping, L: PortLog> Port
-    for DomainPort<'a, C, T, TS, L>
+impl<C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestamping, L: PortLog> Port
+    for DomainPort<C, P, T, TS, L>
 {
     type Clock = C;
+    type PhysicalPort = P;
     type Timeout = T::Timeout;
 
     fn identity(&self) -> PortIdentity {
@@ -590,7 +598,7 @@ mod tests {
         }
     }
 
-    impl PhysicalPort for CapturePort {
+    impl PhysicalPort for &CapturePort {
         fn send_event(&self, buf: &[u8]) -> SendResult {
             self.sent.borrow_mut().push(buf.to_vec());
             Ok(())

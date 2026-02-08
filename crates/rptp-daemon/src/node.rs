@@ -157,6 +157,15 @@ pub struct TokioPhysicalPort<N: NetworkSocket> {
     general_socket: Rc<N>,
 }
 
+impl<N: NetworkSocket> Clone for TokioPhysicalPort<N> {
+    fn clone(&self) -> Self {
+        Self {
+            event_socket: self.event_socket.clone(),
+            general_socket: self.general_socket.clone(),
+        }
+    }
+}
+
 impl<N: NetworkSocket> TokioPhysicalPort<N> {
     /// Create a new physical port over the provided event and general sockets.
     pub fn new(event_socket: Rc<N>, general_socket: Rc<N>) -> Self {
@@ -412,13 +421,13 @@ mod tests {
     use std::net::SocketAddr;
     use std::time::Duration as StdDuration;
 
-    type TestPortMap<'a, C> = SingleDomainPortMap<
+    type TestPortMap<'a, C, N> = SingleDomainPortMap<
         'a,
-        Box<DomainPort<'a, C, TokioTimerHost, FakeTimestamping, TracingPortLog>>,
+        Box<DomainPort<C, TokioPhysicalPort<N>, TokioTimerHost, FakeTimestamping, TracingPortLog>>,
         ForeignClockRecordsVec,
     >;
 
-    type TestPortsLoop<'a, C, N> = TokioPortsLoop<TestPortMap<'a, C>, N, FakeTimestamping>;
+    type TestPortsLoop<'a, C, N> = TokioPortsLoop<TestPortMap<'a, C, N>, N, FakeTimestamping>;
 
     // Prebuilt PTPv2 Sync frames used by error-handling tests.
     const DOMAIN_SEVEN_SYNC: [u8; 44] = [
@@ -469,7 +478,7 @@ mod tests {
             let domain_port = Box::new(DomainPort::new(
                 clock,
                 port_identity,
-                physical_port,
+                physical_port.clone(),
                 TokioTimerHost::new(domain_number, system_tx.clone()),
                 tx_timestamping,
                 TracingPortLog::new(),
@@ -511,10 +520,11 @@ mod tests {
         use std::mem::size_of;
         let s = size_of::<
             PortState<
+                'static,
                 Box<
                     DomainPort<
-                        'static,
                         FakeClock,
+                        TokioPhysicalPort<FakeNetworkSocket>,
                         TokioTimerHost,
                         ClockTxTimestamping<FakeClock>,
                         TracingPortLog,
@@ -601,7 +611,7 @@ mod tests {
         let domain_port = Box::new(DomainPort::new(
             &virtual_clock,
             port_identity,
-            &physical_port,
+            physical_port,
             TokioTimerHost::new(domain_number, system_tx.clone()),
             &timestamping,
             TracingPortLog::new(),
@@ -691,7 +701,7 @@ mod tests {
         let domain_port = Box::new(DomainPort::new(
             &clock,
             port_identity,
-            &physical_port,
+            physical_port,
             timer_host,
             FakeTimestamping::new(),
             TracingPortLog::new(),

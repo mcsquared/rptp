@@ -308,7 +308,7 @@ mod tests {
     use crate::time::{Instant, LogInterval, LogMessageInterval};
 
     type MasterTestDomainPort<'a> =
-        DomainPort<'a, &'a FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
+        DomainPort<&'a FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type MasterTestPort<'a> = MasterPort<'a, MasterTestDomainPort<'a>, ForeignClockRecordsVec>;
 

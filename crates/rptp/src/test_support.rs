@@ -653,7 +653,7 @@ impl PhysicalPort for &FakePort {
 /// Useful for tests that validate fault handling on send failure paths.
 pub struct FailingPort;
 
-impl PhysicalPort for FailingPort {
+impl PhysicalPort for &FailingPort {
     fn send_event(&self, _buf: &[u8]) -> SendResult {
         Err(SendError)
     }

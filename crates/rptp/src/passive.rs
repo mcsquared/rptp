@@ -162,7 +162,7 @@ mod tests {
     use crate::time::{Duration, Instant, LogInterval, LogMessageInterval};
 
     type PassiveTestDomainPort<'a> =
-        DomainPort<'a, &'a FakeClock, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
+        DomainPort<&'a FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
     type PassiveTestPort<'a> = PassivePort<'a, PassiveTestDomainPort<'a>, ForeignClockRecordsVec>;
 
