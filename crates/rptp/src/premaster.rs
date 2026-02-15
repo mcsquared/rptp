@@ -11,7 +11,7 @@
 //! master is detected during that window, the port can still transition away (e.g. to
 //! `UNCALIBRATED`).
 
-use crate::bmca::{Bmca, BmcaMasterDecision, GrandMasterTrackingBmca};
+use crate::bmca::{Bmca, BmcaMasterDecision, GrandMasterTrackingBmca, StateDecisionEvent};
 use crate::foreign::ForeignClockRecords;
 use crate::log::PortEvent;
 use crate::message::{AnnounceMessage, StateDecisionSnapshot};
@@ -34,21 +34,21 @@ use crate::time::Instant;
 ///
 /// The `_qualification_timeout` field is intentionally stored (even if not read directly) so the
 /// underlying timeout handle is kept alive for the lifetime of the state.
-pub struct PreMasterPort<'a, P: Port, S: ForeignClockRecords> {
+pub struct PreMasterPort<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> {
     port: P,
-    bmca: GrandMasterTrackingBmca<'a, S>,
+    bmca: GrandMasterTrackingBmca<R, SDE>,
     _qualification_timeout: P::Timeout,
     profile: PortProfile,
 }
 
-impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
+impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> PreMasterPort<P, R, SDE> {
     /// Create a new `PreMasterPort`.
     ///
     /// `PortProfile::pre_master` is the usual constructor call site; it is responsible for
     /// restarting `_qualification_timeout` according to the active qualification policy.
     pub(crate) fn new(
         port: P,
-        bmca: GrandMasterTrackingBmca<'a, S>,
+        bmca: GrandMasterTrackingBmca<R, SDE>,
         _qualification_timeout: P::Timeout,
         profile: PortProfile,
     ) -> Self {
@@ -77,7 +77,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
     }
 
     /// Transition from `PRE_MASTER` to `MASTER` after the qualification timeout expires.
-    pub(crate) fn qualified(self) -> PortState<'a, P, S> {
+    pub(crate) fn qualified(self) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::QualifiedMaster);
         self.profile.master(self.port, self.bmca)
     }
@@ -86,7 +86,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
     ///
     /// This remains in `PRE_MASTER`, but updates the tracked grandmaster identity and (via the
     /// profile) restarts the qualification timeout according to the decision policy.
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::RecommendedMaster);
 
         decision.apply(|qualification_timeout_policy, grandmaster_id| {
@@ -101,7 +101,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
     ///
     /// This transitions into `UNCALIBRATED` and switches the BMCA wrapper to parent tracking so
     /// that message acceptance and subsequent decisions can be gated by the selected parent.
-    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
+    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
         let bmca = self.bmca.into_parent_tracking(parent);
@@ -112,14 +112,14 @@ impl<'a, P: Port, S: ForeignClockRecords> PreMasterPort<'a, P, S> {
     /// Apply a BMCA recommendation to become passive.
     ///
     /// This transitions into `PASSIVE` while preserving the BMCA state.
-    pub(crate) fn recommended_passive(self) -> PortState<'a, P, S> {
+    pub(crate) fn recommended_passive(self) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::Static("RecommendedPassive"));
         let bmca = self.bmca.into_passive();
         self.profile.passive(self.port, bmca)
     }
 
     /// Transition to `FAULTY` upon fault detection.
-    pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
+    pub(crate) fn fault_detected(self) -> PortState<P, R, SDE> {
         let (bmca, best_foreign, state_decision_trigger) = self.bmca.into_parts();
         self.profile
             .faulty(self.port, bmca, best_foreign, state_decision_trigger)
@@ -160,8 +160,11 @@ mod tests {
     type PreMasterTestDomainPort<'a> =
         DomainPort<&'a FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type PreMasterTestPort<'a> =
-        PreMasterPort<'a, PreMasterTestDomainPort<'a>, ForeignClockRecordsVec>;
+    type PreMasterTestPort<'a> = PreMasterPort<
+        PreMasterTestDomainPort<'a>,
+        ForeignClockRecordsVec,
+        &'a FakeStateDecisionEvent,
+    >;
 
     struct PreMasterPortTestSetup {
         clock: FakeClock,

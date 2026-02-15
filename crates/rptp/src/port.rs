@@ -22,6 +22,7 @@ use core::cell::Cell;
 use core::fmt::{Display, Formatter};
 use core::ops::Range;
 
+use crate::bmca::StateDecisionEvent;
 use crate::clock::{ClockIdentity, SynchronizableClock};
 use crate::foreign::ForeignClockRecords;
 use crate::log::{PortEvent, PortLog};
@@ -440,14 +441,14 @@ pub trait PortMap {
 ///
 /// This is the common wiring for current single-domain / single-port topologies used by
 /// `rptp-daemon` and many tests.
-pub struct SingleDomainPortMap<'a, P: Port, S: ForeignClockRecords> {
+pub struct SingleDomainPortMap<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> {
     domain_number: DomainNumber,
-    port_fsm: PortFsm<'a, P, S>,
+    port_fsm: PortFsm<P, R, SDE>,
 }
 
-impl<'a, P: Port, S: ForeignClockRecords> SingleDomainPortMap<'a, P, S> {
+impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> SingleDomainPortMap<P, R, SDE> {
     /// Create a map for `domain_number` that dispatches into the given port state machine.
-    pub fn new(domain_number: DomainNumber, port_state: PortState<'a, P, S>) -> Self {
+    pub fn new(domain_number: DomainNumber, port_state: PortState<P, R, SDE>) -> Self {
         Self {
             domain_number,
             port_fsm: PortFsm::new(port_state),
@@ -455,7 +456,9 @@ impl<'a, P: Port, S: ForeignClockRecords> SingleDomainPortMap<'a, P, S> {
     }
 }
 
-impl<'a, P: Port, S: ForeignClockRecords> PortMap for SingleDomainPortMap<'a, P, S> {
+impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> PortMap
+    for SingleDomainPortMap<P, R, SDE>
+{
     fn port_by_domain(&mut self, domain_number: DomainNumber) -> Result<&mut dyn PortIngress> {
         if self.domain_number == domain_number {
             Ok(&mut self.port_fsm)
@@ -495,13 +498,13 @@ pub trait PortIngress {
 /// transitions can move ownership of the current state value (take/apply/replace pattern). The
 /// `Option` itself is never expected to remain `None` in normal operation; the representation
 /// exists to express transitions as by-value moves without requiring interior mutability.
-pub struct PortFsm<'a, P: Port, S: ForeignClockRecords> {
-    state: Option<PortState<'a, P, S>>,
+pub struct PortFsm<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> {
+    state: Option<PortState<P, R, SDE>>,
 }
 
-impl<'a, P: Port, S: ForeignClockRecords> PortFsm<'a, P, S> {
+impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> PortFsm<P, R, SDE> {
     /// Create a new port FSM from an initial port state.
-    pub fn new(state: PortState<'a, P, S>) -> Self {
+    pub fn new(state: PortState<P, R, SDE>) -> Self {
         Self { state: Some(state) }
     }
 
@@ -513,7 +516,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PortFsm<'a, P, S> {
     }
 }
 
-impl<'a, P: Port, S: ForeignClockRecords> PortIngress for PortFsm<'a, P, S> {
+impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> PortIngress for PortFsm<P, R, SDE> {
     fn process_event_message(
         &mut self,
         source_port_identity: PortIdentity,

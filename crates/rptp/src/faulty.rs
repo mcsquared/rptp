@@ -7,7 +7,7 @@
 //! - it preserves the ownership of the minimal set of port collaborators required to
 //!   re-initialize the port when the fault is cleared.
 
-use crate::bmca::{BestMasterClockAlgorithm, StateDecisionEventTrigger};
+use crate::bmca::{BestMasterClockAlgorithm, StateDecisionEvent, StateDecisionEventTrigger};
 use crate::foreign::{BestForeignRecord, ForeignClockRecords};
 use crate::log::PortEvent;
 use crate::port::Port;
@@ -20,20 +20,20 @@ use crate::profile::PortProfile;
 /// While in this state, the port does not send or process any messages. It preserves ownership
 /// of the underlying [`Port`] to allow for logging and recovery into initialization when the fault
 /// is cleared.
-pub struct FaultyPort<'a, P: Port, S: ForeignClockRecords> {
+pub struct FaultyPort<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> {
     port: P,
     bmca: BestMasterClockAlgorithm,
-    best_foreign: BestForeignRecord<S>,
-    state_decision_trigger: StateDecisionEventTrigger<'a>,
+    best_foreign: BestForeignRecord<R>,
+    state_decision_trigger: StateDecisionEventTrigger<SDE>,
     profile: PortProfile,
 }
 
-impl<'a, P: Port, S: ForeignClockRecords> FaultyPort<'a, P, S> {
+impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> FaultyPort<P, R, SDE> {
     pub(crate) fn new(
         port: P,
         bmca: BestMasterClockAlgorithm,
-        best_foreign: BestForeignRecord<S>,
-        state_decision_trigger: StateDecisionEventTrigger<'a>,
+        best_foreign: BestForeignRecord<R>,
+        state_decision_trigger: StateDecisionEventTrigger<SDE>,
         profile: PortProfile,
     ) -> Self {
         port.log(PortEvent::Static("Become FaultyPort"));
@@ -47,7 +47,7 @@ impl<'a, P: Port, S: ForeignClockRecords> FaultyPort<'a, P, S> {
         }
     }
 
-    pub(crate) fn fault_cleared(self) -> PortState<'a, P, S> {
+    pub(crate) fn fault_cleared(self) -> PortState<P, R, SDE> {
         self.profile.initializing(
             self.port,
             self.bmca,

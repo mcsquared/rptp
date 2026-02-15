@@ -15,7 +15,9 @@
 //! decides when sockets/timers/clocks are ready, and the domain state machine decides what that
 //! means for behaviour.
 
-use crate::bmca::{BestMasterClockAlgorithm, ListeningBmca, StateDecisionEventTrigger};
+use crate::bmca::{
+    BestMasterClockAlgorithm, ListeningBmca, StateDecisionEvent, StateDecisionEventTrigger,
+};
 use crate::foreign::{BestForeignRecord, ForeignClockRecords};
 use crate::log::PortEvent;
 use crate::port::Port;
@@ -37,15 +39,15 @@ use crate::profile::PortProfile;
 ///
 /// On transition to `Listening`, the BMCA pieces are wrapped into [`ListeningBmca`] to encode the
 /// first decision gating rule ("only decide once a qualified foreign dataset exists").
-pub struct InitializingPort<'a, P: Port, S: ForeignClockRecords> {
+pub struct InitializingPort<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> {
     port: P,
     bmca: BestMasterClockAlgorithm,
-    best_foreign: BestForeignRecord<S>,
-    state_decision_trigger: StateDecisionEventTrigger<'a>,
+    best_foreign: BestForeignRecord<R>,
+    state_decision_trigger: StateDecisionEventTrigger<SDE>,
     profile: PortProfile,
 }
 
-impl<'a, P: Port, S: ForeignClockRecords> InitializingPort<'a, P, S> {
+impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> InitializingPort<P, R, SDE> {
     /// Create a new `InitializingPort` role.
     ///
     /// This is typically constructed by [`PortProfile::initializing`] as part of wiring an
@@ -54,8 +56,8 @@ impl<'a, P: Port, S: ForeignClockRecords> InitializingPort<'a, P, S> {
     pub(crate) fn new(
         port: P,
         bmca: BestMasterClockAlgorithm,
-        best_foreign: BestForeignRecord<S>,
-        state_decision_trigger: StateDecisionEventTrigger<'a>,
+        best_foreign: BestForeignRecord<R>,
+        state_decision_trigger: StateDecisionEventTrigger<SDE>,
         profile: PortProfile,
     ) -> Self {
         port.log(PortEvent::Static("Become InitializingPort"));
@@ -74,7 +76,7 @@ impl<'a, P: Port, S: ForeignClockRecords> InitializingPort<'a, P, S> {
     /// This applies the IEEE 1588 "INITIALIZING → LISTENING" transition by switching to the
     /// listening BMCA role and letting the [`PortProfile`] assemble the resulting
     /// [`crate::listening::ListeningPort`].
-    pub(crate) fn initialized(self) -> PortState<'a, P, S> {
+    pub(crate) fn initialized(self) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::Initialized);
 
         let bmca = ListeningBmca::new(self.bmca, self.best_foreign, self.state_decision_trigger);

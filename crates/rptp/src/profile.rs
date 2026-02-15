@@ -13,7 +13,7 @@
 
 use crate::bmca::{
     BestMasterClockAlgorithm, GrandMasterTrackingBmca, ListeningBmca, ParentTrackingBmca,
-    PassiveBmca, QualificationTimeoutPolicy, StateDecisionEventTrigger,
+    PassiveBmca, QualificationTimeoutPolicy, StateDecisionEvent, StateDecisionEventTrigger,
 };
 use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
 use crate::faulty::FaultyPort;
@@ -106,13 +106,13 @@ impl PortProfile {
     /// Construct the `INITIALIZING` state.
     ///
     /// This variant is used while infrastructure and BMCA bookkeeping are being brought up.
-    pub(crate) fn initializing<'a, P: Port, S: ForeignClockRecords>(
+    pub(crate) fn initializing<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent>(
         self,
         port: P,
         bmca: BestMasterClockAlgorithm,
-        best_foreign: BestForeignRecord<S>,
-        state_decision_trigger: StateDecisionEventTrigger<'a>,
-    ) -> PortState<'a, P, S> {
+        best_foreign: BestForeignRecord<R>,
+        state_decision_trigger: StateDecisionEventTrigger<SDE>,
+    ) -> PortState<P, R, SDE> {
         PortState::Initializing(InitializingPort::new(
             port,
             bmca,
@@ -126,11 +126,11 @@ impl PortProfile {
     ///
     /// The announce receipt timer is restarted immediately so the port can transition away from
     /// listening if no Announce messages arrive within the configured interval.
-    pub(crate) fn listening<P: Port, S: ForeignClockRecords>(
+    pub(crate) fn listening<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent>(
         self,
         port: P,
-        bmca: ListeningBmca<S>,
-    ) -> PortState<P, S> {
+        bmca: ListeningBmca<R, SDE>,
+    ) -> PortState<P, R, SDE> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
             port.timeout(SystemMessage::AnnounceReceiptTimeout),
             self.announce_receipt_timeout_interval,
@@ -149,11 +149,11 @@ impl PortProfile {
     ///
     /// Both cycles are started with an initial "send immediately" timeout (`0s`) so a newly
     /// elected master begins announcing and synchronizing without waiting for a full interval.
-    pub(crate) fn master<P: Port, S: ForeignClockRecords>(
+    pub(crate) fn master<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent>(
         self,
         port: P,
-        bmca: GrandMasterTrackingBmca<S>,
-    ) -> PortState<P, S> {
+        bmca: GrandMasterTrackingBmca<R, SDE>,
+    ) -> PortState<P, R, SDE> {
         let announce_send_timeout = port.timeout(SystemMessage::AnnounceSendTimeout);
         announce_send_timeout.restart(Duration::from_secs(0));
         let announce_cycle =
@@ -176,13 +176,13 @@ impl PortProfile {
     ///
     /// The provided delay mechanism defines how DelayReq/DelayResp exchanges are scheduled and
     /// combined with Sync/FollowUp to yield offset measurements for the servo.
-    pub(crate) fn slave<P: Port, S: ForeignClockRecords>(
+    pub(crate) fn slave<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent>(
         self,
         port: P,
-        bmca: ParentTrackingBmca<S>,
+        bmca: ParentTrackingBmca<R, SDE>,
         delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
         servo: Servo,
-    ) -> PortState<P, S> {
+    ) -> PortState<P, R, SDE> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
             port.timeout(SystemMessage::AnnounceReceiptTimeout),
             self.announce_receipt_timeout_interval,
@@ -203,12 +203,12 @@ impl PortProfile {
     ///
     /// The qualification timeout duration is derived from the profile’s announce interval and
     /// the provided [`QualificationTimeoutPolicy`].
-    pub(crate) fn pre_master<P: Port, S: ForeignClockRecords>(
+    pub(crate) fn pre_master<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent>(
         self,
         port: P,
-        bmca: GrandMasterTrackingBmca<S>,
+        bmca: GrandMasterTrackingBmca<R, SDE>,
         qualification_timeout_policy: QualificationTimeoutPolicy,
-    ) -> PortState<P, S> {
+    ) -> PortState<P, R, SDE> {
         let qualification_timeout = port.timeout(SystemMessage::QualificationTimeout);
         qualification_timeout
             .restart(qualification_timeout_policy.duration(self.log_announce_interval));
@@ -222,11 +222,11 @@ impl PortProfile {
     /// It starts both:
     /// - the announce receipt timeout (to detect loss of announces), and
     /// - the delay-request schedule (initially immediate) to begin collecting delay samples.
-    pub(crate) fn uncalibrated<P: Port, S: ForeignClockRecords>(
+    pub(crate) fn uncalibrated<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent>(
         self,
         port: P,
-        bmca: ParentTrackingBmca<S>,
-    ) -> PortState<P, S> {
+        bmca: ParentTrackingBmca<R, SDE>,
+    ) -> PortState<P, R, SDE> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
             port.timeout(SystemMessage::AnnounceReceiptTimeout),
             self.announce_receipt_timeout_interval,
@@ -252,13 +252,13 @@ impl PortProfile {
     /// Construct the `FAULTY` state.
     ///
     /// This variant is used when the port has detected a fault condition and is not operational.
-    pub(crate) fn faulty<'a, P: Port, S: ForeignClockRecords>(
+    pub(crate) fn faulty<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent>(
         self,
         port: P,
         bmca: BestMasterClockAlgorithm,
-        best_foreign: BestForeignRecord<S>,
-        state_decision_trigger: StateDecisionEventTrigger<'a>,
-    ) -> PortState<'a, P, S> {
+        best_foreign: BestForeignRecord<R>,
+        state_decision_trigger: StateDecisionEventTrigger<SDE>,
+    ) -> PortState<P, R, SDE> {
         PortState::Faulty(FaultyPort::new(
             port,
             bmca,
@@ -272,11 +272,11 @@ impl PortProfile {
     ///
     /// The announce receipt timer is restarted immediately so the port can transition away from
     /// passive if no Announce messages arrive within the configured interval.
-    pub(crate) fn passive<P: Port, S: ForeignClockRecords>(
+    pub(crate) fn passive<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent>(
         self,
         port: P,
-        bmca: PassiveBmca<S>,
-    ) -> PortState<P, S> {
+        bmca: PassiveBmca<R, SDE>,
+    ) -> PortState<P, R, SDE> {
         let announce_receipt_timeout = AnnounceReceiptTimeout::new(
             port.timeout(SystemMessage::AnnounceReceiptTimeout),
             self.announce_receipt_timeout_interval,

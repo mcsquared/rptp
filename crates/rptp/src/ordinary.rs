@@ -30,7 +30,8 @@ use crate::time::Duration;
 use crate::timestamping::TxTimestamping;
 
 /// Fully wired port state machine returned by [`OrdinaryClock::port`].
-pub type OrdinaryPortState<'a, C, P, TH, TS, L, S> = PortState<'a, DomainPort<C, P, TH, TS, L>, S>;
+pub type OrdinaryPortState<C, P, TH, TS, L, R, SDE> =
+    PortState<DomainPort<C, P, TH, TS, L>, R, SDE>;
 
 /// An ordinary clock: one clock, one domain, one port.
 ///
@@ -103,19 +104,19 @@ impl<C: SynchronizableClock + Clone, T: Timeout> OrdinaryClock<C, T> {
     /// The initial state is `INITIALIZING` as assembled by the default [`PortProfile`]. The caller
     /// is responsible for delivering `SystemMessage::Initialized` to start the state machine (see
     /// `PortState::dispatch_system`).
-    pub fn port<'a, P, TH, TS, S, L>(
-        &'a self,
+    pub fn port<P, TH, TS, R, L>(
+        &self,
         physical_port: P,
         timer_host: TH,
         timestamping: TS,
         log: L,
-        foreign_clock_records: S,
-    ) -> Option<OrdinaryPortState<'a, C, P, TH, TS, L, S>>
+        foreign_clock_records: R,
+    ) -> Option<OrdinaryPortState<C, P, TH, TS, L, R, &Self>>
     where
         P: PhysicalPort,
         TH: TimerHost<Timeout = T>,
         TS: TxTimestamping,
-        S: ForeignClockRecords,
+        R: ForeignClockRecords,
         L: PortLog,
     {
         let port_number = self.port_enumeration.next()?;

@@ -34,7 +34,8 @@ use crate::profile::PortProfile;
 use crate::timestamping::TxTimestamping;
 
 /// Fully wired port state machine returned by [`BoundaryClock::port`].
-pub type BoundaryPortState<'a, C, P, TH, TS, L, S> = PortState<'a, DomainPort<C, P, TH, TS, L>, S>;
+pub type BoundaryPortState<C, P, TH, TS, L, R, SDE> =
+    PortState<DomainPort<C, P, TH, TS, L>, R, SDE>;
 
 /// A boundary clock: one clock, one domain, multiple ports.
 ///
@@ -119,19 +120,19 @@ where
     ///
     /// The initial state is `INITIALIZING`. The caller must deliver
     /// `SystemMessage::Initialized` to start the state machine.
-    pub fn port<'a, P, TH, TS, S, L>(
-        &'a self,
+    pub fn port<P, TH, TS, R, L>(
+        &self,
         physical_port: P,
         timer_host: TH,
         timestamping: TS,
         log: L,
-        foreign_clock_records: S,
-    ) -> Option<BoundaryPortState<'a, C, P, TH, TS, L, S>>
+        foreign_clock_records: R,
+    ) -> Option<BoundaryPortState<C, P, TH, TS, L, R, &Self>>
     where
         P: PhysicalPort,
         TH: TimerHost<Timeout = T>,
         TS: TxTimestamping,
-        S: ForeignClockRecords,
+        R: ForeignClockRecords,
         L: PortLog,
     {
         let port_number = self.port_enumeration.next()?;

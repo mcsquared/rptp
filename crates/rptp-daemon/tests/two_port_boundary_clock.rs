@@ -42,7 +42,7 @@ use rptp::{
 use rptp_daemon::boundary::BoundaryTokioClock;
 use rptp_daemon::log::TracingPortLog;
 use rptp_daemon::net::LoopbackSocket;
-use rptp_daemon::node::{TokioPhysicalPort, TokioPortsLoop, TokioTimerHost};
+use rptp_daemon::node::{TokioPhysicalPort, TokioPortsLoop, TokioTimeout, TokioTimerHost};
 use rptp_daemon::ordinary::OrdinaryTokioClock;
 use rptp_daemon::timestamping::{ClockRxTimestamping, ClockTxTimestamping};
 use rptp_daemon::virtualclock::{SharedVirtualClock, VirtualClock};
@@ -62,8 +62,8 @@ type DomainPortInner<C> = DomainPort<
 >;
 
 /// Ports loop type for GM and Slave nodes.
-type NodePortsLoop<'a> = TokioPortsLoop<
-    SingleDomainPortMap<'a, DomainPortInner<SharedVirtualClock>, ForeignClockRecordsVec>,
+type NodePortsLoop<'a, SDE> = TokioPortsLoop<
+    SingleDomainPortMap<DomainPortInner<SharedVirtualClock>, ForeignClockRecordsVec, SDE>,
     LoopbackSocket,
     ClockRxTimestamping<SharedVirtualClock>,
 >;
@@ -105,7 +105,11 @@ impl OrdinaryNode {
         self.clock.clone()
     }
 
-    async fn build_loop<'a>(&'a mut self) -> std::io::Result<NodePortsLoop<'a>> {
+    async fn build_loop<'a>(
+        &'a mut self,
+    ) -> std::io::Result<
+        NodePortsLoop<'a, &'a rptp::ordinary::OrdinaryClock<SharedVirtualClock, TokioTimeout>>,
+    > {
         let (system_tx, system_rx) = mpsc::unbounded_channel();
         let timestamping = ClockTxTimestamping::new(self.clock.clone(), system_tx.clone(), DOMAIN);
         let port = self
@@ -211,7 +215,7 @@ async fn time_propagates_through_two_port_boundary_clock() -> std::io::Result<()
     let bc_port_1 = bc_port_1.expect("BC port 1");
     let bc_port_2 = bc_port_2.expect("BC port 2");
 
-    let bc_up_loop: NodePortsLoop<'_> = TokioPortsLoop::new(
+    let bc_up_loop = TokioPortsLoop::new(
         SingleDomainPortMap::new(DOMAIN, bc_port_1),
         bc_up_ev.clone(),
         bc_up_gen.clone(),
@@ -220,7 +224,7 @@ async fn time_propagates_through_two_port_boundary_clock() -> std::io::Result<()
     )
     .await?;
 
-    let bc_down_loop: NodePortsLoop<'_> = TokioPortsLoop::new(
+    let bc_down_loop = TokioPortsLoop::new(
         SingleDomainPortMap::new(DOMAIN, bc_port_2),
         bc_down_ev,
         bc_down_gen,

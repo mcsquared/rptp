@@ -422,9 +422,9 @@ mod tests {
     use std::time::Duration as StdDuration;
 
     type TestPortMap<'a, C, N> = SingleDomainPortMap<
-        'a,
         Box<DomainPort<C, TokioPhysicalPort<N>, TokioTimerHost, FakeTimestamping, TracingPortLog>>,
         ForeignClockRecordsVec,
+        &'a FakeStateDecisionEvent,
     >;
 
     type TestPortsLoop<'a, C, N> = TokioPortsLoop<TestPortMap<'a, C, N>, N, FakeTimestamping>;
@@ -520,7 +520,6 @@ mod tests {
         use std::mem::size_of;
         let s = size_of::<
             PortState<
-                'static,
                 Box<
                     DomainPort<
                         FakeClock,
@@ -531,6 +530,7 @@ mod tests {
                     >,
                 >,
                 ForeignClockRecordsVec,
+                &'static FakeStateDecisionEvent,
             >,
         >();
         println!("PortState<Box<TokioPort>> size: {}", s);

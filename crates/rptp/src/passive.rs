@@ -23,7 +23,7 @@
 //! Announce reception is the only message-processing responsibility of this state; event message
 //! processing (Sync/DelayReq/…) is handled in other states.
 
-use crate::bmca::{Bmca, BmcaMasterDecision, PassiveBmca};
+use crate::bmca::{Bmca, BmcaMasterDecision, PassiveBmca, StateDecisionEvent};
 use crate::foreign::ForeignClockRecords;
 use crate::log::PortEvent;
 use crate::message::{AnnounceMessage, StateDecisionSnapshot};
@@ -41,14 +41,14 @@ use crate::time::Instant;
 /// - the `Port` boundary (logging and message reception),
 /// - a [`PassiveBmca`] instance for Announce-driven recommendation, and
 /// - an [`AnnounceReceiptTimeout`] that is restarted on each received Announce.
-pub struct PassivePort<'a, P: Port, S: ForeignClockRecords> {
+pub struct PassivePort<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> {
     port: P,
-    bmca: PassiveBmca<'a, S>,
+    bmca: PassiveBmca<R, SDE>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     profile: PortProfile,
 }
 
-impl<'a, P: Port, S: ForeignClockRecords> PassivePort<'a, P, S> {
+impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> PassivePort<P, R, SDE> {
     /// Create a new `PassivePort`.
     ///
     /// `announce_receipt_timeout` is expected to be configured with the profile's
@@ -56,7 +56,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PassivePort<'a, P, S> {
     /// state.
     pub(crate) fn new(
         port: P,
-        bmca: PassiveBmca<'a, S>,
+        bmca: PassiveBmca<R, SDE>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         profile: PortProfile,
     ) -> Self {
@@ -74,7 +74,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PassivePort<'a, P, S> {
     ///
     /// This transitions into `UNCALIBRATED` and switches the BMCA wrapper to parent tracking so
     /// that subsequent decisions and message acceptance can be gated by the selected parent.
-    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
+    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
         let bmca = self.bmca.into_parent_tracking(parent);
@@ -87,7 +87,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PassivePort<'a, P, S> {
     /// This transitions into `PRE_MASTER` and switches the BMCA wrapper to grandmaster tracking.
     /// The `BmcaMasterDecision` carries the qualification timeout policy that determines how long
     /// the port must remain in `PRE_MASTER` before becoming `MASTER`.
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::RecommendedMaster);
 
         decision.apply(|qualification_timeout_policy, grandmaster_id| {
@@ -102,7 +102,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PassivePort<'a, P, S> {
     ///
     /// This transitions to `MASTER` using "current grandmaster tracking", which (in current
     /// single-port setups) resolves to the local grandmaster identity.
-    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
+    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
@@ -126,7 +126,7 @@ impl<'a, P: Port, S: ForeignClockRecords> PassivePort<'a, P, S> {
     }
 
     /// Transition to `FAULTY` upon fault detection.
-    pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
+    pub(crate) fn fault_detected(self) -> PortState<P, R, SDE> {
         let (bmca, best_foreign, state_decision_trigger) = self.bmca.into_parts();
         self.profile
             .faulty(self.port, bmca, best_foreign, state_decision_trigger)
@@ -164,7 +164,8 @@ mod tests {
     type PassiveTestDomainPort<'a> =
         DomainPort<&'a FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type PassiveTestPort<'a> = PassivePort<'a, PassiveTestDomainPort<'a>, ForeignClockRecordsVec>;
+    type PassiveTestPort<'a> =
+        PassivePort<PassiveTestDomainPort<'a>, ForeignClockRecordsVec, &'a FakeStateDecisionEvent>;
 
     struct PassivePortTestSetup {
         clock: FakeClock,

@@ -143,8 +143,8 @@ pub mod infra_support {
         }
     }
 
-    /// Blanket impl to allow passing `&mut S` where an owned `S: ForeignClockRecords` is expected.
-    impl<S: ForeignClockRecords> ForeignClockRecords for &mut S {
+    /// Blanket impl to allow passing `&mut R` where an owned `R: ForeignClockRecords` is expected.
+    impl<R: ForeignClockRecords> ForeignClockRecords for &mut R {
         fn remember(&mut self, record: ForeignClockRecord) {
             (*self).remember(record);
         }

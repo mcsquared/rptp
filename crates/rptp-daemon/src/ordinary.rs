@@ -28,8 +28,10 @@ use crate::net::NetworkSocket;
 use crate::node::{TokioPhysicalPort, TokioTimeout, TokioTimerHost};
 
 /// Type alias for a fully wired Tokio-backed port state machine.
-pub type TokioPort<'a, C, P, TS> =
-    PortState<'a, DomainPort<C, P, TokioTimerHost, TS, TracingPortLog>, ForeignClockRecordsVec>;
+pub type TokioPort<C, P, TS, SDE> =
+    PortState<DomainPort<C, P, TokioTimerHost, TS, TracingPortLog>, ForeignClockRecordsVec, SDE>;
+type OrdinaryEvent<'a, C> = &'a OrdinaryClock<C, TokioTimeout>;
+type OrdinaryTokioPort<'a, C, N, T> = TokioPort<C, TokioPhysicalPort<N>, T, OrdinaryEvent<'a, C>>;
 
 /// Wrapper around [`OrdinaryClock`] that produces Tokio-wired ports.
 ///
@@ -64,12 +66,12 @@ impl<C: SynchronizableClock + Clone> OrdinaryTokioClock<C> {
     /// - uses the provided `physical_port` for UDP transmission,
     /// - schedules timeouts by sending `(DomainNumber, SystemMessage)` through `system_tx`, and
     /// - uses `timestamping` for egress timestamp feedback integration.
-    pub fn port<'a, N, T>(
-        &'a self,
+    pub fn port<N, T>(
+        &self,
         physical_port: TokioPhysicalPort<N>,
         system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
         timestamping: T,
-    ) -> Option<TokioPort<'a, C, TokioPhysicalPort<N>, T>>
+    ) -> Option<OrdinaryTokioPort<'_, C, N, T>>
     where
         N: NetworkSocket,
         T: TxTimestamping,

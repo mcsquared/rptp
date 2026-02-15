@@ -35,7 +35,7 @@
 
 use core::panic;
 
-use crate::bmca::BmcaMasterDecision;
+use crate::bmca::{BmcaMasterDecision, StateDecisionEvent};
 use crate::faulty::FaultyPort;
 use crate::foreign::ForeignClockRecords;
 use crate::initializing::InitializingPort;
@@ -85,18 +85,18 @@ pub(crate) enum StateDecision {
 /// Each variant wraps a concrete state type that owns its collaborators and implements
 /// state-specific message handling.
 #[allow(clippy::large_enum_variant)]
-pub enum PortState<'a, P: Port, S: ForeignClockRecords> {
-    Initializing(InitializingPort<'a, P, S>),
-    Listening(ListeningPort<'a, P, S>),
-    Slave(SlavePort<'a, P, S>),
-    Master(MasterPort<'a, P, S>),
-    PreMaster(PreMasterPort<'a, P, S>),
-    Uncalibrated(UncalibratedPort<'a, P, S>),
-    Passive(PassivePort<'a, P, S>),
-    Faulty(FaultyPort<'a, P, S>),
+pub enum PortState<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> {
+    Initializing(InitializingPort<P, R, SDE>),
+    Listening(ListeningPort<P, R, SDE>),
+    Slave(SlavePort<P, R, SDE>),
+    Master(MasterPort<P, R, SDE>),
+    PreMaster(PreMasterPort<P, R, SDE>),
+    Uncalibrated(UncalibratedPort<P, R, SDE>),
+    Passive(PassivePort<P, R, SDE>),
+    Faulty(FaultyPort<P, R, SDE>),
 }
 
-impl<'a, P: Port, S: ForeignClockRecords> PortState<'a, P, S> {
+impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> PortState<P, R, SDE> {
     /// Apply a transition decision, producing the next port state.
     ///
     /// This is the only place where cross-state transition rules are centralized. Most decisions
@@ -404,7 +404,8 @@ mod tests {
 
         fn initializing_port(
             &self,
-        ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+        ) -> PortState<PortStateTestDomainPort<'_>, ForeignClockRecordsVec, &FakeStateDecisionEvent>
+        {
             let domain_port = self.domain_port();
             let port_identity = domain_port.identity();
             let port_number = port_identity.port_number();
@@ -424,7 +425,8 @@ mod tests {
 
         fn listening_port(
             &self,
-        ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+        ) -> PortState<PortStateTestDomainPort<'_>, ForeignClockRecordsVec, &FakeStateDecisionEvent>
+        {
             let domain_port = self.domain_port();
             let port_identity = domain_port.identity();
             let port_number = port_identity.port_number();
@@ -444,7 +446,10 @@ mod tests {
             )
         }
 
-        fn slave_port(&self) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+        fn slave_port(
+            &self,
+        ) -> PortState<PortStateTestDomainPort<'_>, ForeignClockRecordsVec, &FakeStateDecisionEvent>
+        {
             let domain_port = self.domain_port();
             let port_identity = domain_port.identity();
             let port_number = port_identity.port_number();
@@ -474,7 +479,8 @@ mod tests {
 
         fn master_port(
             &self,
-        ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+        ) -> PortState<PortStateTestDomainPort<'_>, ForeignClockRecordsVec, &FakeStateDecisionEvent>
+        {
             let domain_port = self.domain_port();
             let port_identity = domain_port.identity();
             let port_number = port_identity.port_number();
@@ -498,7 +504,8 @@ mod tests {
 
         fn pre_master_port(
             &self,
-        ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+        ) -> PortState<PortStateTestDomainPort<'_>, ForeignClockRecordsVec, &FakeStateDecisionEvent>
+        {
             let domain_port = self.domain_port();
             let port_identity = domain_port.identity();
             let port_number = port_identity.port_number();
@@ -523,7 +530,8 @@ mod tests {
 
         fn uncalibrated_port(
             &self,
-        ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+        ) -> PortState<PortStateTestDomainPort<'_>, ForeignClockRecordsVec, &FakeStateDecisionEvent>
+        {
             let domain_port = self.domain_port();
             let port_identity = domain_port.identity();
             let port_number = port_identity.port_number();
@@ -546,7 +554,8 @@ mod tests {
 
         fn faulty_port(
             &self,
-        ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+        ) -> PortState<PortStateTestDomainPort<'_>, ForeignClockRecordsVec, &FakeStateDecisionEvent>
+        {
             let domain_port = self.domain_port();
             let port_identity = domain_port.identity();
             let port_number = port_identity.port_number();
@@ -566,7 +575,8 @@ mod tests {
 
         fn passive_port(
             &self,
-        ) -> PortState<'_, PortStateTestDomainPort<'_>, ForeignClockRecordsVec> {
+        ) -> PortState<PortStateTestDomainPort<'_>, ForeignClockRecordsVec, &FakeStateDecisionEvent>
+        {
             let domain_port = self.domain_port();
             let port_identity = domain_port.identity();
             let port_number = port_identity.port_number();

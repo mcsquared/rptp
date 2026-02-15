@@ -15,7 +15,7 @@
 //! timestamp of that DelayReq is later reported back via `SystemMessage::Timestamp` and recorded
 //! using [`SlavePort::process_delay_request`].
 
-use crate::bmca::{Bmca, BmcaMasterDecision, ParentTrackingBmca};
+use crate::bmca::{Bmca, BmcaMasterDecision, ParentTrackingBmca, StateDecisionEvent};
 use crate::e2e::EndToEndDelayMechanism;
 use crate::foreign::ForeignClockRecords;
 use crate::log::PortEvent;
@@ -50,23 +50,23 @@ use crate::uncalibrated::UncalibratedPort;
 /// The E2E delay mechanism combines the Sync-side and Delay-side exchanges into a [`ServoSample`].
 /// Once a sample becomes available, it is fed into the state's servo. If the servo reports a
 /// non-locked state, a [`StateDecision::SynchronizationFault`] is produced.
-pub struct SlavePort<'a, P: Port, S: ForeignClockRecords> {
+pub struct SlavePort<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> {
     port: P,
-    bmca: ParentTrackingBmca<'a, S>,
+    bmca: ParentTrackingBmca<R, SDE>,
     announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
     delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
     servo: Servo,
     profile: PortProfile,
 }
 
-impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
+impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> SlavePort<P, R, SDE> {
     /// Create a new `SlavePort`.
     ///
     /// `announce_receipt_timeout` is expected to be configured with the profile’s
     /// AnnounceReceiptTimeout interval and started by the profile before entering this state.
     pub(crate) fn new(
         port: P,
-        bmca: ParentTrackingBmca<'a, S>,
+        bmca: ParentTrackingBmca<R, SDE>,
         announce_receipt_timeout: AnnounceReceiptTimeout<P::Timeout>,
         delay_mechanism: EndToEndDelayMechanism<P::Timeout>,
         servo: Servo,
@@ -239,7 +239,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
     ///
     /// This transitions to `MASTER` using "current grandmaster tracking", which (in current
     /// single-port setups) resolves to the local grandmaster identity.
-    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<'a, P, S> {
+    pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
         let bmca = self.bmca.into_current_grandmaster_tracking();
         self.profile.master(self.port, bmca)
@@ -248,7 +248,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
     /// Apply a BMCA recommendation to become a slave of `parent`.
     ///
     /// This transitions into `UNCALIBRATED` while keeping parent tracking enabled.
-    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<'a, P, S> {
+    pub(crate) fn recommended_slave(self, parent: ParentPortIdentity) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::RecommendedSlave { parent });
 
         let bmca = self.bmca.with_parent(parent);
@@ -259,7 +259,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
     /// Apply a BMCA recommendation to become (pre-)master.
     ///
     /// This transitions into `PRE_MASTER` and switches the BMCA wrapper to grandmaster tracking.
-    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<'a, P, S> {
+    pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::RecommendedMaster);
 
         decision.apply(|qualification_timeout_policy, grandmaster_id| {
@@ -273,7 +273,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
     /// Apply a BMCA recommendation to become passive.
     ///
     /// This transitions into `PASSIVE` while preserving the BMCA state.
-    pub(crate) fn recommended_passive(self) -> PortState<'a, P, S> {
+    pub(crate) fn recommended_passive(self) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::Static("RecommendedPassive"));
         let bmca = self.bmca.into_passive();
         self.profile.passive(self.port, bmca)
@@ -283,7 +283,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
     ///
     /// This transitions from `SLAVE` to `UNCALIBRATED` while preserving the currently tracked
     /// parent, the announce receipt timeout, and the delay mechanism state.
-    pub(crate) fn synchronization_fault(self) -> PortState<'a, P, S> {
+    pub(crate) fn synchronization_fault(self) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::SynchronizationFault);
         PortState::Uncalibrated(UncalibratedPort::new(
             self.port,
@@ -296,7 +296,7 @@ impl<'a, P: Port, S: ForeignClockRecords> SlavePort<'a, P, S> {
     }
 
     /// Transition to `FAULTY` upon fault detection.
-    pub(crate) fn fault_detected(self) -> PortState<'a, P, S> {
+    pub(crate) fn fault_detected(self) -> PortState<P, R, SDE> {
         let (bmca, best_foreign, state_decision_trigger) = self.bmca.into_parts();
         self.profile
             .faulty(self.port, bmca, best_foreign, state_decision_trigger)
@@ -326,7 +326,8 @@ mod tests {
     type SlaveTestDomainPort<'a> =
         DomainPort<&'a FakeClock, &'a FakePort, &'a FakeTimerHost, FakeTimestamping, NoopPortLog>;
 
-    type SlaveTestPort<'a> = SlavePort<'a, SlaveTestDomainPort<'a>, ForeignClockRecordsVec>;
+    type SlaveTestPort<'a> =
+        SlavePort<SlaveTestDomainPort<'a>, ForeignClockRecordsVec, &'a FakeStateDecisionEvent>;
 
     struct SlavePortTestSetup {
         clock: FakeClock,

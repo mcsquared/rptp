@@ -33,8 +33,12 @@ use crate::node::{TokioPhysicalPort, TokioTimeout, TokioTimerHost};
 use rptp::boundary::BoundaryClock;
 
 /// Type alias for a fully wired Tokio-backed port state machine (shared with ordinary clock).
-pub type TokioPort<'a, C, P, TS> =
-    PortState<'a, DomainPort<C, P, TokioTimerHost, TS, TracingPortLog>, ForeignClockRecordsVec>;
+pub type TokioPort<C, P, TS, SDE> =
+    PortState<DomainPort<C, P, TokioTimerHost, TS, TracingPortLog>, ForeignClockRecordsVec, SDE>;
+type BoundaryInner<C> =
+    BoundaryClock<C, TokioTimeout, MultiPortForeignCandidates, MultiPortNotification<TokioTimeout>>;
+type BoundaryEvent<'a, C> = &'a BoundaryInner<C>;
+type BoundaryTokioPort<'a, C, N, T> = TokioPort<C, TokioPhysicalPort<N>, T, BoundaryEvent<'a, C>>;
 
 /// Wrapper around [`BoundaryClock`] that produces Tokio-wired ports.
 ///
@@ -42,12 +46,7 @@ pub type TokioPort<'a, C, P, TS> =
 /// producing configured [`TokioPort`] instances. Uses [`MultiPortForeignCandidates`] and
 /// [`MultiPortNotification`] for the std-based daemon environment.
 pub struct BoundaryTokioClock<C: SynchronizableClock + Clone> {
-    boundary_clock: BoundaryClock<
-        C,
-        TokioTimeout,
-        MultiPortForeignCandidates,
-        MultiPortNotification<TokioTimeout>,
-    >,
+    boundary_clock: BoundaryInner<C>,
 }
 
 impl<C: SynchronizableClock + Clone> BoundaryTokioClock<C> {
@@ -78,12 +77,12 @@ impl<C: SynchronizableClock + Clone> BoundaryTokioClock<C> {
     /// Returns `Some(port)` for each port (1..=num_ports) and `None` once exhausted.
     /// The returned port uses the provided `physical_port` for UDP transmission, schedules
     /// timeouts via `system_tx`, and uses `timestamping` for egress timestamp feedback.
-    pub fn port<'a, N, T>(
-        &'a self,
+    pub fn port<N, T>(
+        &self,
         physical_port: TokioPhysicalPort<N>,
         system_tx: mpsc::UnboundedSender<(DomainNumber, SystemMessage)>,
         timestamping: T,
-    ) -> Option<TokioPort<'a, C, TokioPhysicalPort<N>, T>>
+    ) -> Option<BoundaryTokioPort<'_, C, N, T>>
     where
         N: NetworkSocket,
         T: TxTimestamping,

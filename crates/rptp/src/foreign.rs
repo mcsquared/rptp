@@ -183,17 +183,17 @@ impl<'a> QualifiedForeignSnapshot<'a> {
 
 /// Notion of the best foreign clock record determined over a collection of foreign clock records
 /// per port.
-pub struct BestForeignRecord<S: ForeignClockRecords> {
+pub struct BestForeignRecord<R: ForeignClockRecords> {
     receiver: PortIdentity,
-    foreign_clock_records: S,
+    foreign_clock_records: R,
 }
 
-impl<S: ForeignClockRecords> BestForeignRecord<S> {
+impl<R: ForeignClockRecords> BestForeignRecord<R> {
     /// Create a new best foreign record collection.
     ///
     /// `receiver` identifies the port this record collection is associated with.
     /// It is used when creating snapshots to identify which port received the foreign clock data.
-    pub fn new(receiver: PortIdentity, foreign_clock_records: S) -> Self {
+    pub fn new(receiver: PortIdentity, foreign_clock_records: R) -> Self {
         Self {
             receiver,
             foreign_clock_records,

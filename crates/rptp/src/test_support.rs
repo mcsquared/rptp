@@ -305,13 +305,13 @@ impl SynchronizableClock for FakeClock {
 ///
 /// This wires a [`GrandMasterTrackingBmca`] with an initial `BestForeignRecord` and returns a
 /// [`PortState::Master`] built via the provided [`PortProfile`].
-pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
+pub fn master_test_port<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent>(
     port: P,
     local_ds: ClockDS,
-    foreign_clock_records: S,
-    state_decision_event: &'a dyn StateDecisionEvent,
+    foreign_clock_records: R,
+    state_decision_event: SDE,
     profile: PortProfile,
-) -> PortState<'a, P, S> {
+) -> PortState<P, R, SDE> {
     let port_identity = port.identity();
     let port_number = port_identity.port_number();
     let best_foreign = BestForeignRecord::new(port_identity, foreign_clock_records);
@@ -330,14 +330,14 @@ pub fn master_test_port<'a, P: Port, S: ForeignClockRecords>(
 ///
 /// This wires a [`ParentTrackingBmca`] and a default end-to-end delay mechanism. The delay request
 /// timeout is started immediately so tests can drive `DelayRequestTimeout` behaviour.
-pub fn slave_test_port<'a, P: Port, S: ForeignClockRecords>(
+pub fn slave_test_port<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent>(
     port: P,
     local_ds: ClockDS,
-    foreign_clock_records: S,
-    state_decision_event: &'a dyn StateDecisionEvent,
+    foreign_clock_records: R,
+    state_decision_event: SDE,
     parent_port_identity: ParentPortIdentity,
     profile: PortProfile,
-) -> PortState<'a, P, S> {
+) -> PortState<P, R, SDE> {
     let port_identity = port.identity();
     let port_number = port_identity.port_number();
     let best_foreign = BestForeignRecord::new(port_identity, foreign_clock_records);

@@ -78,6 +78,12 @@ pub trait StateDecisionEvent {
     fn trigger(&self, port_number: PortNumber, e_rbest: BestForeignSnapshot);
 }
 
+impl<T: StateDecisionEvent + ?Sized> StateDecisionEvent for &T {
+    fn trigger(&self, port_number: PortNumber, e_rbest: BestForeignSnapshot) {
+        (*self).trigger(port_number, e_rbest);
+    }
+}
+
 /// High‑level BMCA outcome for a given port.
 ///
 /// This is the “so what?” result that the port state machine can act upon, matching the state
@@ -130,7 +136,7 @@ impl BestMasterClockAlgorithm {
     }
 
     /// Access the currently known grandmaster via the given closure.
-    pub(crate) fn using_grandmaster<R>(&self, f: impl FnOnce(GrandMaster<'_>) -> R) -> R {
+    pub(crate) fn using_grandmaster<Out>(&self, f: impl FnOnce(GrandMaster<'_>) -> Out) -> Out {
         // TODO: once multi-port is supported, this should return the grandmaster, whether local or
         // foreign. With only single port support atm, it's always local d_0.
         f(GrandMaster::new(&self.d_0))
@@ -337,13 +343,13 @@ impl<'a> BetterByTopologyDecision<'a> {
 /// Tracks the previous `e_rbest` snapshot and triggers a state decision event
 /// when the snapshot changes. Also provides a plain `trigger()` method for
 /// manual triggering with the current snapshot.
-pub(crate) struct StateDecisionEventTrigger<'a> {
+pub(crate) struct StateDecisionEventTrigger<SDE: StateDecisionEvent> {
     previous_best_foreign: BestForeignSnapshot,
-    state_decision_event: &'a dyn StateDecisionEvent,
+    state_decision_event: SDE,
     received_on_port: PortNumber,
 }
 
-impl<'a> StateDecisionEventTrigger<'a> {
+impl<SDE: StateDecisionEvent> StateDecisionEventTrigger<SDE> {
     /// Create a new trigger starting from the given previous snapshot.
     ///
     /// `previous_best_foreign` is the initial snapshot state. Use `BestForeignSnapshot::Empty`
@@ -352,7 +358,7 @@ impl<'a> StateDecisionEventTrigger<'a> {
     ///
     /// `received_on_port` identifies the port this trigger is associated with.
     pub fn new(
-        state_decision_event: &'a dyn StateDecisionEvent,
+        state_decision_event: SDE,
         previous_best_foreign: BestForeignSnapshot,
         received_on_port: PortNumber,
     ) -> Self {
@@ -404,17 +410,17 @@ impl<'a> StateDecisionEventTrigger<'a> {
 ///
 /// Represents the first diamond in the BMCA decision flow chart,
 /// see IEEE 1588-2019 §9.3.3; Fig. 33.
-pub(crate) struct ListeningBmca<'a, S: ForeignClockRecords> {
+pub(crate) struct ListeningBmca<R: ForeignClockRecords, SDE: StateDecisionEvent> {
     bmca: BestMasterClockAlgorithm,
-    best_foreign: BestForeignRecord<S>,
-    state_decision_trigger: StateDecisionEventTrigger<'a>,
+    best_foreign: BestForeignRecord<R>,
+    state_decision_trigger: StateDecisionEventTrigger<SDE>,
 }
 
-impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
+impl<R: ForeignClockRecords, SDE: StateDecisionEvent> ListeningBmca<R, SDE> {
     pub fn new(
         bmca: BestMasterClockAlgorithm,
-        best_foreign: BestForeignRecord<S>,
-        state_decision_trigger: StateDecisionEventTrigger<'a>,
+        best_foreign: BestForeignRecord<R>,
+        state_decision_trigger: StateDecisionEventTrigger<SDE>,
     ) -> Self {
         Self {
             bmca,
@@ -427,7 +433,7 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
     pub(crate) fn into_parent_tracking(
         self,
         parent_port_identity: ParentPortIdentity,
-    ) -> ParentTrackingBmca<'a, S> {
+    ) -> ParentTrackingBmca<R, SDE> {
         ParentTrackingBmca::new(
             self.bmca,
             self.best_foreign,
@@ -440,7 +446,7 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
     pub(crate) fn into_grandmaster_tracking(
         self,
         grandmaster_id: ClockIdentity,
-    ) -> GrandMasterTrackingBmca<'a, S> {
+    ) -> GrandMasterTrackingBmca<R, SDE> {
         GrandMasterTrackingBmca::new(
             self.bmca,
             self.best_foreign,
@@ -453,7 +459,7 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
     ///
     /// Triggers a state decision event before converting to ensure the clock is notified
     /// of the current best foreign snapshot.
-    pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<'a, S> {
+    pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<R, SDE> {
         let current = self.best_foreign.snapshot();
         self.state_decision_trigger.trigger(current);
         let current_grandmaster_id = self.bmca.using_grandmaster(|gm| gm.identity());
@@ -461,7 +467,7 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
     }
 
     /// Convert to a PassiveBmca for transitioning to passive state.
-    pub(crate) fn into_passive(self) -> PassiveBmca<'a, S> {
+    pub(crate) fn into_passive(self) -> PassiveBmca<R, SDE> {
         PassiveBmca::new(self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 
@@ -470,14 +476,14 @@ impl<'a, S: ForeignClockRecords> ListeningBmca<'a, S> {
         self,
     ) -> (
         BestMasterClockAlgorithm,
-        BestForeignRecord<S>,
-        StateDecisionEventTrigger<'a>,
+        BestForeignRecord<R>,
+        StateDecisionEventTrigger<SDE>,
     ) {
         (self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 }
 
-impl<'a, S: ForeignClockRecords> Bmca for ListeningBmca<'a, S> {
+impl<R: ForeignClockRecords, SDE: StateDecisionEvent> Bmca for ListeningBmca<R, SDE> {
     fn consider(
         &mut self,
         source_port_identity: PortIdentity,
@@ -541,19 +547,19 @@ impl<'a> GrandMaster<'a> {
 /// returns `None` from `decision()` to avoid repeatedly re-emitting identical transitions.
 /// If the underlying BMCA selects a different grandmaster (or decides slave/passive), the
 /// decision is emitted.
-pub(crate) struct GrandMasterTrackingBmca<'a, S: ForeignClockRecords> {
+pub(crate) struct GrandMasterTrackingBmca<R: ForeignClockRecords, SDE: StateDecisionEvent> {
     bmca: BestMasterClockAlgorithm,
-    best_foreign: BestForeignRecord<S>,
+    best_foreign: BestForeignRecord<R>,
     grandmaster_id: ClockIdentity,
-    state_decision_trigger: StateDecisionEventTrigger<'a>,
+    state_decision_trigger: StateDecisionEventTrigger<SDE>,
 }
 
-impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
+impl<R: ForeignClockRecords, SDE: StateDecisionEvent> GrandMasterTrackingBmca<R, SDE> {
     pub fn new(
         bmca: BestMasterClockAlgorithm,
-        best_foreign: BestForeignRecord<S>,
+        best_foreign: BestForeignRecord<R>,
         grandmaster_id: ClockIdentity,
-        state_decision_trigger: StateDecisionEventTrigger<'a>,
+        state_decision_trigger: StateDecisionEventTrigger<SDE>,
     ) -> Self {
         Self {
             bmca,
@@ -564,7 +570,7 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
     }
 
     /// Access the currently tracked grandmaster via the given closure.
-    pub(crate) fn using_grandmaster<R>(&self, f: impl FnOnce(GrandMaster<'_>) -> R) -> R {
+    pub(crate) fn using_grandmaster<Out>(&self, f: impl FnOnce(GrandMaster<'_>) -> Out) -> Out {
         self.bmca.using_grandmaster(f)
     }
 
@@ -580,7 +586,7 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
     pub(crate) fn into_parent_tracking(
         self,
         parent_port_identity: ParentPortIdentity,
-    ) -> ParentTrackingBmca<'a, S> {
+    ) -> ParentTrackingBmca<R, SDE> {
         ParentTrackingBmca::new(
             self.bmca,
             self.best_foreign,
@@ -590,7 +596,7 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
     }
 
     /// Convert to a PassiveBmca for transitioning to passive state.
-    pub(crate) fn into_passive(self) -> PassiveBmca<'a, S> {
+    pub(crate) fn into_passive(self) -> PassiveBmca<R, SDE> {
         PassiveBmca::new(self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 
@@ -599,14 +605,14 @@ impl<'a, S: ForeignClockRecords> GrandMasterTrackingBmca<'a, S> {
         self,
     ) -> (
         BestMasterClockAlgorithm,
-        BestForeignRecord<S>,
-        StateDecisionEventTrigger<'a>,
+        BestForeignRecord<R>,
+        StateDecisionEventTrigger<SDE>,
     ) {
         (self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 }
 
-impl<'a, S: ForeignClockRecords> Bmca for GrandMasterTrackingBmca<'a, S> {
+impl<R: ForeignClockRecords, SDE: StateDecisionEvent> Bmca for GrandMasterTrackingBmca<R, SDE> {
     fn consider(
         &mut self,
         source_port_identity: PortIdentity,
@@ -651,19 +657,19 @@ impl<'a, S: ForeignClockRecords> Bmca for GrandMasterTrackingBmca<'a, S> {
 /// transitions. If a different parent is selected, the decision is emitted.
 ///
 /// Encodes the transition gating (new_master != old_master) in IEEE 1588-2019 §9.2.5; Fig. 30 & 31.
-pub(crate) struct ParentTrackingBmca<'a, S: ForeignClockRecords> {
+pub(crate) struct ParentTrackingBmca<R: ForeignClockRecords, SDE: StateDecisionEvent> {
     bmca: BestMasterClockAlgorithm,
-    best_foreign: BestForeignRecord<S>,
+    best_foreign: BestForeignRecord<R>,
     parent_port_identity: ParentPortIdentity,
-    state_decision_trigger: StateDecisionEventTrigger<'a>,
+    state_decision_trigger: StateDecisionEventTrigger<SDE>,
 }
 
-impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
+impl<R: ForeignClockRecords, SDE: StateDecisionEvent> ParentTrackingBmca<R, SDE> {
     pub fn new(
         bmca: BestMasterClockAlgorithm,
-        best_foreign: BestForeignRecord<S>,
+        best_foreign: BestForeignRecord<R>,
         parent_port_identity: ParentPortIdentity,
-        state_decision_trigger: StateDecisionEventTrigger<'a>,
+        state_decision_trigger: StateDecisionEventTrigger<SDE>,
     ) -> Self {
         Self {
             bmca,
@@ -691,7 +697,7 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
     pub(crate) fn into_grandmaster_tracking(
         self,
         grandmaster_id: ClockIdentity,
-    ) -> GrandMasterTrackingBmca<'a, S> {
+    ) -> GrandMasterTrackingBmca<R, SDE> {
         GrandMasterTrackingBmca::new(
             self.bmca,
             self.best_foreign,
@@ -704,7 +710,7 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
     ///
     /// Triggers a state decision event before converting to ensure the clock is notified
     /// of the current best foreign snapshot.
-    pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<'a, S> {
+    pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<R, SDE> {
         let current = self.best_foreign.snapshot();
         self.state_decision_trigger.trigger(current);
         let current_grandmaster_id = self.bmca.using_grandmaster(|gm| gm.identity());
@@ -712,7 +718,7 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
     }
 
     /// Convert to a PassiveBmca for transitioning to passive state.
-    pub(crate) fn into_passive(self) -> PassiveBmca<'a, S> {
+    pub(crate) fn into_passive(self) -> PassiveBmca<R, SDE> {
         PassiveBmca::new(self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 
@@ -721,14 +727,14 @@ impl<'a, S: ForeignClockRecords> ParentTrackingBmca<'a, S> {
         self,
     ) -> (
         BestMasterClockAlgorithm,
-        BestForeignRecord<S>,
-        StateDecisionEventTrigger<'a>,
+        BestForeignRecord<R>,
+        StateDecisionEventTrigger<SDE>,
     ) {
         (self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 }
 
-impl<'a, S: ForeignClockRecords> Bmca for ParentTrackingBmca<'a, S> {
+impl<R: ForeignClockRecords, SDE: StateDecisionEvent> Bmca for ParentTrackingBmca<R, SDE> {
     fn consider(
         &mut self,
         source_port_identity: PortIdentity,
@@ -773,17 +779,17 @@ impl<'a, S: ForeignClockRecords> Bmca for ParentTrackingBmca<'a, S> {
 /// decisions are always emitted to allow transitions away from passive state.
 ///
 /// Encodes the transition gating for passive state in IEEE 1588-2019 §9.2.5.
-pub(crate) struct PassiveBmca<'a, S: ForeignClockRecords> {
+pub(crate) struct PassiveBmca<R: ForeignClockRecords, SDE: StateDecisionEvent> {
     bmca: BestMasterClockAlgorithm,
-    best_foreign: BestForeignRecord<S>,
-    state_decision_trigger: StateDecisionEventTrigger<'a>,
+    best_foreign: BestForeignRecord<R>,
+    state_decision_trigger: StateDecisionEventTrigger<SDE>,
 }
 
-impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
+impl<R: ForeignClockRecords, SDE: StateDecisionEvent> PassiveBmca<R, SDE> {
     pub fn new(
         bmca: BestMasterClockAlgorithm,
-        best_foreign: BestForeignRecord<S>,
-        state_decision_trigger: StateDecisionEventTrigger<'a>,
+        best_foreign: BestForeignRecord<R>,
+        state_decision_trigger: StateDecisionEventTrigger<SDE>,
     ) -> Self {
         Self {
             bmca,
@@ -796,7 +802,7 @@ impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
     pub(crate) fn into_parent_tracking(
         self,
         parent_port_identity: ParentPortIdentity,
-    ) -> ParentTrackingBmca<'a, S> {
+    ) -> ParentTrackingBmca<R, SDE> {
         ParentTrackingBmca::new(
             self.bmca,
             self.best_foreign,
@@ -809,7 +815,7 @@ impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
     pub(crate) fn into_grandmaster_tracking(
         self,
         grandmaster_id: ClockIdentity,
-    ) -> GrandMasterTrackingBmca<'a, S> {
+    ) -> GrandMasterTrackingBmca<R, SDE> {
         GrandMasterTrackingBmca::new(
             self.bmca,
             self.best_foreign,
@@ -822,7 +828,7 @@ impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
     ///
     /// Triggers a state decision event before converting to ensure the clock is notified
     /// of the current best foreign snapshot.
-    pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<'a, S> {
+    pub(crate) fn into_current_grandmaster_tracking(mut self) -> GrandMasterTrackingBmca<R, SDE> {
         let current = self.best_foreign.snapshot();
         self.state_decision_trigger.trigger(current);
         let current_grandmaster_id = self.bmca.using_grandmaster(|gm| gm.identity());
@@ -834,14 +840,14 @@ impl<'a, S: ForeignClockRecords> PassiveBmca<'a, S> {
         self,
     ) -> (
         BestMasterClockAlgorithm,
-        BestForeignRecord<S>,
-        StateDecisionEventTrigger<'a>,
+        BestForeignRecord<R>,
+        StateDecisionEventTrigger<SDE>,
     ) {
         (self.bmca, self.best_foreign, self.state_decision_trigger)
     }
 }
 
-impl<'a, S: ForeignClockRecords> Bmca for PassiveBmca<'a, S> {
+impl<R: ForeignClockRecords, SDE: StateDecisionEvent> Bmca for PassiveBmca<R, SDE> {
     fn consider(
         &mut self,
         source_port_identity: PortIdentity,
@@ -943,11 +949,12 @@ impl BmcaMasterDecision {
 
     /// Apply this master decision to a [`Port`], producing a new [`PortState`] using the given
     /// `new_port_state` constructor closure that caller provide to choose the new state.
-    pub(crate) fn apply<'a, F, P, S>(&self, new_port_state: F) -> PortState<'a, P, S>
+    pub(crate) fn apply<F, P, R, SDE>(&self, new_port_state: F) -> PortState<P, R, SDE>
     where
         P: Port,
-        S: ForeignClockRecords,
-        F: FnOnce(QualificationTimeoutPolicy, ClockIdentity) -> PortState<'a, P, S>,
+        R: ForeignClockRecords,
+        SDE: StateDecisionEvent,
+        F: FnOnce(QualificationTimeoutPolicy, ClockIdentity) -> PortState<P, R, SDE>,
     {
         let qualification_timeout_policy =
             QualificationTimeoutPolicy::new(self.decision_point, self.steps_removed);
