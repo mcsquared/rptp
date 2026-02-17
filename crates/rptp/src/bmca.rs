@@ -22,8 +22,8 @@
 //!
 //! - Multi-port / boundary-clock scenarios are still evolving; some collaborators are intentionally
 //!   modeled as traits so that storage and topology can be swapped without changing core logic.
-//! - Some topology-only comparisons are currently simplified; TODOs in this module mark those
-//!   places explicitly.
+//! - Topology-only branches intentionally treat Error1/Error2 outcomes as "not better"
+//!   (conservative behavior) rather than introducing separate error states.
 
 use crate::clock::TimeScale;
 use crate::dataset::{ClockDS, StepsRemoved, TopologyDS};
@@ -118,10 +118,6 @@ impl BmcaDecision {
 /// Clock-level shared storage surfaces for local and foreign candidates are injected via trait
 /// objects which represent the cross-port shared state (`D_0` and `E_best` in spec).
 ///
-/// ## Known limitations:
-///  - M3 decision logic is still simplified: the current implementation does not yet plumb the
-///    correct `stepsRemoved` value into the M3 master decision; see TODO in
-///    [`BetterByTopologyDecision::decision`].
 pub(crate) struct BestMasterClockAlgorithm {
     d_0: ClockDS,
     port_number: PortNumber,
@@ -187,7 +183,7 @@ impl<'a> LocalDS<'a> {
 
     /// Compare this local dataset against a foreign snapshot with topology awareness.
     ///
-    /// Returns `Ok(local_clock_id)` if this dataset is better than the foreign snapshot according
+    /// Returns `Ok(local_clock_ds)` if this dataset is better than the foreign snapshot according
     /// to BMCA rules including topology tie-breaks.
     ///
     /// Returns `Err(qualified_foreign)` if the foreign snapshot is qualified and not beaten by the
@@ -237,11 +233,10 @@ impl<'a> AuthoritativeDecision<'a> {
     fn decision(&self) -> BmcaDecision {
         self.d_0
             .is_better_or_better_by_topology(self.e_rbest)
-            .map(|local_clock_id| {
+            .map(|local_clock_ds| {
                 BmcaDecision::Master(BmcaMasterDecision::new(
                     BmcaMasterDecisionPoint::M1,
-                    StepsRemoved::new(0), // IEEE 1588-2019 §3.9.5; Tbl. 30 (stepsRemoved=0 when acting as GM)
-                    local_clock_id,
+                    local_clock_ds,
                 ))
             })
             .unwrap_or(BmcaDecision::Passive) // Passive decision point P1
@@ -274,7 +269,6 @@ impl<'a> NonAuthoritativeDecision<'a> {
             .map(|local_clock_ds| {
                 BmcaDecision::Master(BmcaMasterDecision::new(
                     BmcaMasterDecisionPoint::M2,
-                    StepsRemoved::new(0), // IEEE 1588-2019 §9.3.5; Tbl. 30 (stepsRemoved=0 when acting as master)
                     local_clock_ds,
                 ))
             })
@@ -324,8 +318,7 @@ impl<'a> BetterByTopologyDecision<'a> {
         } else {
             BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M3,
-                StepsRemoved::new(0), // TODO: use currently used steps removed field here
-                e_best.into_dataset(),
+                e_best.into_grandmaster_ds(),
             ))
         }
     }
@@ -910,27 +903,20 @@ pub enum BmcaMasterDecisionPoint {
 /// BMCA decision for entering a master/pre‑master state.
 ///
 /// The master decision includes:
-/// - the decision point (useful for qualification timing rules),
-/// - the `stepsRemoved` value to apply, and
-/// - the selected grandmaster dataset.
+/// - the decision point (useful for qualification timing rules)
+/// - the selected grandmaster dataset
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BmcaMasterDecision {
     decision_point: BmcaMasterDecisionPoint,
-    steps_removed: StepsRemoved,
     grandmaster_ds: ClockDS,
 }
 
 impl BmcaMasterDecision {
-    /// Create a new master decision for the given decision point and
-    /// `stepsRemoved`.
-    pub(crate) fn new(
-        decision_point: BmcaMasterDecisionPoint,
-        steps_removed: StepsRemoved,
-        grandmaster_ds: ClockDS,
-    ) -> Self {
+    /// Create a new master decision for the given decision point and selected
+    /// grandmaster dataset.
+    pub(crate) fn new(decision_point: BmcaMasterDecisionPoint, grandmaster_ds: ClockDS) -> Self {
         Self {
             decision_point,
-            steps_removed,
             grandmaster_ds,
         }
     }
@@ -948,8 +934,10 @@ impl BmcaMasterDecision {
         SDE: StateDecisionEvent,
         F: FnOnce(QualificationTimeoutPolicy, ClockDS) -> PortState<P, R, SDE>,
     {
-        let qualification_timeout_policy =
-            QualificationTimeoutPolicy::new(self.decision_point, self.steps_removed);
+        let qualification_timeout_policy = QualificationTimeoutPolicy::new(
+            self.decision_point,
+            self.grandmaster_ds.steps_removed(),
+        );
 
         new_port_state(qualification_timeout_policy, self.grandmaster_ds)
     }
@@ -1353,8 +1341,7 @@ mod tests {
             bmca.decision(d_0, &e_best, &e_rbest),
             BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M3,
-                StepsRemoved::new(0),
-                e_best_ds,
+                e_best_ds.with_added_step(),
             ))
         );
     }
@@ -1546,7 +1533,6 @@ mod tests {
             bmca.decision(default_ds, &BestForeignSnapshot::Empty),
             Some(BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M1,
-                StepsRemoved::new(0),
                 default_ds,
             )))
         );
@@ -1580,7 +1566,6 @@ mod tests {
             bmca.decision(default_ds, &BestForeignSnapshot::Empty),
             Some(BmcaDecision::Master(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M2,
-                StepsRemoved::new(0),
                 default_ds,
             )))
         );

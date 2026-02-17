@@ -175,8 +175,20 @@ impl<'a> QualifiedForeignSnapshot<'a> {
             .then(|| ParentPortIdentity::new(*self.source_port_identity))
     }
 
-    pub(crate) fn into_dataset(self) -> ClockDS {
-        *self.dataset
+    /// Transform this qualified snapshot into a grandmaster dataset to be announced with one
+    /// additional step removed from the grandmaster to signal that increased distance introduced
+    /// in boundary clock scenarios.
+    ///
+    /// This reflects IEEE 1588-2019 §9.3.5; Tbl. 31 & Tbl. 33, especially Tbl. 33 which mandates
+    /// setting `currentDS.stepsRemoved = e_best.stepsRemoved + 1` by the port which becomes slave
+    /// on a boundary clock. In IEEE 1588-2019 this is obviously for all M3 master ports to
+    /// implicitly catch up and announce that increased grandmaster distance. However, in this
+    /// implmentation this is made more explicit and is based on snapshots, not shared mutable
+    /// state. So here each master port essentially gets it's private dataset with increased
+    /// stepsRemoved instead of having the slave port write the shared currentDS and master ports
+    /// reading it.
+    pub(crate) fn into_grandmaster_ds(self) -> ClockDS {
+        self.dataset.with_added_step()
     }
 }
 

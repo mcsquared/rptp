@@ -681,12 +681,9 @@ mod tests {
 
         let listening = setup.listening_port();
 
-        let pre_master =
-            listening.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
-                BmcaMasterDecisionPoint::M1,
-                StepsRemoved::new(0),
-                setup.local_clock_ds(),
-            )));
+        let pre_master = listening.apply(StateDecision::RecommendedMaster(
+            BmcaMasterDecision::new(BmcaMasterDecisionPoint::M1, setup.local_clock_ds()),
+        ));
 
         assert!(matches!(pre_master, PortState::PreMaster(_)));
     }
@@ -841,7 +838,6 @@ mod tests {
 
         let result = initializing.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
-            StepsRemoved::new(0),
             setup.local_clock_ds(),
         )));
 
@@ -856,7 +852,6 @@ mod tests {
 
         let result = slave.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
-            StepsRemoved::new(0),
             setup.local_clock_ds(),
         )));
 
@@ -871,7 +866,6 @@ mod tests {
 
         let result = master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
-            StepsRemoved::new(0),
             setup.local_clock_ds(),
         )));
 
@@ -886,7 +880,6 @@ mod tests {
 
         let result = pre_master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
-            StepsRemoved::new(0),
             setup.local_clock_ds(),
         )));
 
@@ -901,7 +894,6 @@ mod tests {
 
         let result = uncalibrated.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
-            StepsRemoved::new(0),
             setup.local_clock_ds(),
         )));
 
@@ -1316,7 +1308,6 @@ mod tests {
 
         let pre_master = passive.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
-            StepsRemoved::new(0),
             setup.local_clock_ds(),
         )));
 

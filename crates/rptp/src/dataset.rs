@@ -223,6 +223,15 @@ impl ClockDS {
         }
     }
 
+    /// Transform this dataset into a dataset with one additional step in the distance to the
+    /// grandmaster as represented by `stepsRemoved` values in IEEE 1588-2019.
+    pub(crate) fn with_added_step(self) -> Self {
+        Self {
+            steps_removed: self.steps_removed.incremented(),
+            ..self
+        }
+    }
+
     /// Return the clock identity of this dataset.
     pub fn identity(&self) -> ClockIdentity {
         self.identity
@@ -237,6 +246,12 @@ impl ClockDS {
     /// - IEEE 1588-2019 §9.3.3; Fig. 33
     pub(crate) fn is_authoritative(&self) -> bool {
         self.quality.is_authoritative()
+    }
+
+    /// Return the `stepsRemoved` value of this dataset, representing
+    /// the distance to the grandmaster.
+    pub(crate) fn steps_removed(&self) -> StepsRemoved {
+        self.steps_removed
     }
 
     /// Parse a `ClockDS` from the binary representation used on the
@@ -375,6 +390,10 @@ impl StepsRemoved {
     /// Create a `StepsRemoved` value from the raw counter.
     pub fn new(steps_removed: u16) -> Self {
         Self(steps_removed)
+    }
+
+    pub(crate) fn incremented(self) -> Self {
+        Self(self.0.saturating_add(1))
     }
 
     /// Compare this `StepsRemoved` against `other` according to the BMCA rules.
