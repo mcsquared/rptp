@@ -21,7 +21,6 @@
 
 use core::cell::Cell;
 
-use crate::clock::ClockIdentity;
 use crate::dataset::{ClockDS, TopologyDS};
 use crate::port::{ParentPortIdentity, PortIdentity, PortNumber};
 use crate::time::{Duration, Instant, LogInterval};
@@ -147,10 +146,6 @@ impl<'a> QualifiedForeignSnapshot<'a> {
         }
     }
 
-    pub(crate) fn grandmaster_id(&self) -> ClockIdentity {
-        self.dataset.identity()
-    }
-
     /// Return `true` if `self` is better than `other` *only* due to topology.
     ///
     /// This returns `true` only when the datasets are equivalent by priority/quality/identity
@@ -178,6 +173,10 @@ impl<'a> QualifiedForeignSnapshot<'a> {
     ) -> Option<ParentPortIdentity> {
         (self.receiver.port_number() == port)
             .then(|| ParentPortIdentity::new(*self.source_port_identity))
+    }
+
+    pub(crate) fn into_dataset(self) -> ClockDS {
+        *self.dataset
     }
 }
 
@@ -488,6 +487,7 @@ impl SlidingWindowQualification {
 mod tests {
     use super::*;
 
+    use crate::clock::ClockIdentity;
     use crate::dataset::Priority1;
     use crate::dataset::StepsRemoved;
     use crate::test_support::TestClockDS;

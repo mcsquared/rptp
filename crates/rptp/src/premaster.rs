@@ -84,13 +84,13 @@ impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> PreMasterPort<P, 
 
     /// Apply a BMCA recommendation to become (pre-)master.
     ///
-    /// This remains in `PRE_MASTER`, but updates the tracked grandmaster identity and (via the
+    /// This remains in `PRE_MASTER`, but updates the tracked grandmaster dataset and (via the
     /// profile) restarts the qualification timeout according to the decision policy.
     pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::RecommendedMaster);
 
-        decision.apply(|qualification_timeout_policy, grandmaster_id| {
-            let bmca = self.bmca.with_grandmaster_id(grandmaster_id);
+        decision.apply(|qualification_timeout_policy, grandmaster_ds| {
+            let bmca = self.bmca.with_grandmaster_ds(grandmaster_ds);
 
             self.profile
                 .pre_master(self.port, bmca, qualification_timeout_policy)
@@ -202,7 +202,6 @@ mod tests {
             );
 
             let qualification_timeout = domain_port.timeout(SystemMessage::QualificationTimeout);
-            let grandmaster_id = self.default_ds.identity();
 
             // Initialize initial state from the provided records
             let best_foreign_record = BestForeignRecord::new(
@@ -220,7 +219,7 @@ mod tests {
                 GrandMasterTrackingBmca::new(
                     BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign_record,
-                    grandmaster_id,
+                    self.default_ds,
                     state_decision_trigger,
                 ),
                 qualification_timeout,

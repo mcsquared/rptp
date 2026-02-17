@@ -347,7 +347,6 @@ mod tests {
         GrandMasterTrackingBmca, ListeningBmca, ParentTrackingBmca, PassiveBmca,
         QualificationTimeoutPolicy, StateDecisionEventTrigger,
     };
-    use crate::clock::ClockIdentity;
     use crate::dataset::{ClockDS, StepsRemoved};
     use crate::e2e::{DelayCycle, EndToEndDelayMechanism};
     use crate::foreign::BestForeignRecord;
@@ -398,8 +397,8 @@ mod tests {
             )
         }
 
-        fn local_clock_identity(&self) -> ClockIdentity {
-            self.default_ds.identity()
+        fn local_clock_ds(&self) -> ClockDS {
+            self.default_ds
         }
 
         fn initializing_port(
@@ -484,7 +483,6 @@ mod tests {
             let domain_port = self.domain_port();
             let port_identity = domain_port.identity();
             let port_number = port_identity.port_number();
-            let grandmaster_id = self.default_ds.identity();
             let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
@@ -496,7 +494,7 @@ mod tests {
                 GrandMasterTrackingBmca::new(
                     BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign,
-                    grandmaster_id,
+                    self.default_ds,
                     state_decision_trigger,
                 ),
             )
@@ -509,7 +507,6 @@ mod tests {
             let domain_port = self.domain_port();
             let port_identity = domain_port.identity();
             let port_number = port_identity.port_number();
-            let grandmaster_id = self.default_ds.identity();
             let best_foreign = BestForeignRecord::new(port_identity, ForeignClockRecordsVec::new());
             let state_decision_trigger = StateDecisionEventTrigger::new(
                 &self.state_decision_event,
@@ -521,7 +518,7 @@ mod tests {
                 GrandMasterTrackingBmca::new(
                     BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign,
-                    grandmaster_id,
+                    self.default_ds,
                     state_decision_trigger,
                 ),
                 QualificationTimeoutPolicy::new(BmcaMasterDecisionPoint::M1, StepsRemoved::new(0)),
@@ -688,7 +685,7 @@ mod tests {
             listening.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
                 BmcaMasterDecisionPoint::M1,
                 StepsRemoved::new(0),
-                setup.local_clock_identity(),
+                setup.local_clock_ds(),
             )));
 
         assert!(matches!(pre_master, PortState::PreMaster(_)));
@@ -845,7 +842,7 @@ mod tests {
         let result = initializing.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            setup.local_clock_identity(),
+            setup.local_clock_ds(),
         )));
 
         assert!(matches!(result, PortState::Faulty(_)));
@@ -860,7 +857,7 @@ mod tests {
         let result = slave.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            setup.local_clock_identity(),
+            setup.local_clock_ds(),
         )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
@@ -875,7 +872,7 @@ mod tests {
         let result = master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            setup.local_clock_identity(),
+            setup.local_clock_ds(),
         )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
@@ -890,7 +887,7 @@ mod tests {
         let result = pre_master.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            setup.local_clock_identity(),
+            setup.local_clock_ds(),
         )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
@@ -905,7 +902,7 @@ mod tests {
         let result = uncalibrated.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            setup.local_clock_identity(),
+            setup.local_clock_ds(),
         )));
 
         assert!(matches!(result, PortState::PreMaster(_)));
@@ -1022,7 +1019,7 @@ mod tests {
             GrandMasterTrackingBmca::new(
                 BestMasterClockAlgorithm::new(default_ds, port_identity.port_number()),
                 best_foreign,
-                default_ds.identity(),
+                default_ds,
                 state_decision_trigger,
             ),
         );
@@ -1058,7 +1055,7 @@ mod tests {
             GrandMasterTrackingBmca::new(
                 BestMasterClockAlgorithm::new(default_ds, port_identity.port_number()),
                 best_foreign,
-                default_ds.identity(),
+                default_ds,
                 state_decision_trigger,
             ),
         );
@@ -1098,7 +1095,7 @@ mod tests {
             GrandMasterTrackingBmca::new(
                 BestMasterClockAlgorithm::new(default_ds, port_identity.port_number()),
                 best_foreign,
-                default_ds.identity(),
+                default_ds,
                 state_decision_trigger,
             ),
         );
@@ -1138,7 +1135,7 @@ mod tests {
             GrandMasterTrackingBmca::new(
                 BestMasterClockAlgorithm::new(default_ds, port_identity.port_number()),
                 best_foreign,
-                default_ds.identity(),
+                default_ds,
                 state_decision_trigger,
             ),
         );
@@ -1320,7 +1317,7 @@ mod tests {
         let pre_master = passive.apply(StateDecision::RecommendedMaster(BmcaMasterDecision::new(
             BmcaMasterDecisionPoint::M1,
             StepsRemoved::new(0),
-            setup.local_clock_identity(),
+            setup.local_clock_ds(),
         )));
 
         assert!(matches!(pre_master, PortState::PreMaster(_)));

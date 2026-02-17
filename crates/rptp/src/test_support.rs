@@ -320,7 +320,7 @@ pub fn master_test_port<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent
     let bmca = GrandMasterTrackingBmca::new(
         BestMasterClockAlgorithm::new(local_ds, port_number),
         best_foreign,
-        local_ds.identity(),
+        local_ds,
         state_decision_trigger,
     );
     profile.master(port, bmca)

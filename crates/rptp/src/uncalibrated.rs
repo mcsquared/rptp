@@ -257,10 +257,10 @@ impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> UncalibratedPort<
     /// Handle Announce receipt timeout expiry while in `UNCALIBRATED`.
     ///
     /// This transitions to `MASTER` using "current grandmaster tracking", which (in current
-    /// single-port setups) resolves to the local grandmaster identity.
+    /// single-port setups) resolves to the local grandmaster dataset.
     pub(crate) fn announce_receipt_timeout_expired(self) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::AnnounceReceiptTimeout);
-        let bmca = self.bmca.into_current_grandmaster_tracking();
+        let bmca = self.bmca.into_local_grandmaster_tracking();
         self.profile.master(self.port, bmca)
     }
 
@@ -270,8 +270,8 @@ impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> UncalibratedPort<
     pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::RecommendedMaster);
 
-        decision.apply(|qualification_timeout_policy, grandmaster_id| {
-            let bmca = self.bmca.into_grandmaster_tracking(grandmaster_id);
+        decision.apply(|qualification_timeout_policy, grandmaster_ds| {
+            let bmca = self.bmca.into_grandmaster_tracking(grandmaster_ds);
 
             self.profile
                 .pre_master(self.port, bmca, qualification_timeout_policy)

@@ -77,13 +77,11 @@ impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> MasterPort<P, R, 
     ///
     /// The announce payload is produced from the currently tracked grandmaster dataset.
     pub(crate) fn send_announce(&mut self) -> SendResult {
-        let announce_cycle = &mut self.announce_cycle;
-        let announce_message = self
-            .bmca
-            .using_grandmaster(|gm| announce_cycle.announce(self.port.clock(), gm));
-        self.port
-            .send_general(GeneralMessage::Announce(announce_message))?;
+        let grandmaster = self.bmca.grandmaster();
+        let msg = self.announce_cycle.announce(self.port.clock(), grandmaster);
+        self.port.send_general(GeneralMessage::Announce(msg))?;
         self.announce_cycle.next();
+
         self.port.log(PortEvent::MessageSent("Announce"));
         Ok(())
     }
@@ -155,13 +153,13 @@ impl<P: Port, R: ForeignClockRecords, SDE: StateDecisionEvent> MasterPort<P, R, 
 
     /// Apply a BMCA recommendation to become (pre-)master.
     ///
-    /// This transitions into `PRE_MASTER` and updates the tracked grandmaster identity according to
+    /// This transitions into `PRE_MASTER` and updates the tracked grandmaster dataset according to
     /// `decision`.
     pub(crate) fn recommended_master(self, decision: BmcaMasterDecision) -> PortState<P, R, SDE> {
         self.port.log(PortEvent::RecommendedMaster);
 
-        decision.apply(|qualification_timeout_policy, grandmaster_id| {
-            let bmca = self.bmca.with_grandmaster_id(grandmaster_id);
+        decision.apply(|qualification_timeout_policy, grandmaster_ds| {
+            let bmca = self.bmca.with_grandmaster_ds(grandmaster_ds);
 
             self.profile
                 .pre_master(self.port, bmca, qualification_timeout_policy)
@@ -318,6 +316,7 @@ mod tests {
     struct MasterPortTestSetup {
         clock: FakeClock,
         default_ds: ClockDS,
+        tracked_ds: ClockDS,
         physical_port: FakePort,
         timer_host: FakeTimerHost,
         state_decision_event: FakeStateDecisionEvent,
@@ -332,6 +331,18 @@ mod tests {
             Self {
                 clock: FakeClock::new(now, TimeScale::Ptp),
                 default_ds: ds,
+                tracked_ds: ds,
+                physical_port: FakePort::new(),
+                timer_host: FakeTimerHost::new(),
+                state_decision_event: FakeStateDecisionEvent::new(),
+            }
+        }
+
+        fn new_with_tracked_ds(local_ds: ClockDS, tracked_ds: ClockDS) -> Self {
+            Self {
+                clock: FakeClock::new(TimeStamp::new(0, 0), TimeScale::Ptp),
+                default_ds: local_ds,
+                tracked_ds,
                 physical_port: FakePort::new(),
                 timer_host: FakeTimerHost::new(),
                 state_decision_event: FakeStateDecisionEvent::new(),
@@ -364,7 +375,6 @@ mod tests {
                 domain_port.timeout(SystemMessage::SyncTimeout),
                 LogInterval::new(0),
             );
-            let grandmaster_id = self.default_ds.identity();
 
             let default_profile = PortProfile::default();
 
@@ -384,7 +394,7 @@ mod tests {
                 GrandMasterTrackingBmca::new(
                     BestMasterClockAlgorithm::new(self.default_ds, port_number),
                     best_foreign_record,
-                    grandmaster_id,
+                    self.tracked_ds,
                     state_decision_trigger,
                 ),
                 announce_cycle,
@@ -517,6 +527,43 @@ mod tests {
                     TestClockDS::default_high_grade().dataset(),
                     TimeScale::Ptp,
                 )))
+        );
+    }
+
+    #[test]
+    fn master_port_announces_tracked_dataset_not_local_default_dataset() {
+        let local_ds = TestClockDS::default_mid_grade().dataset();
+        let tracked_ds = TestClockDS::gps_grandmaster().dataset();
+        assert_ne!(
+            local_ds, tracked_ds,
+            "precondition: tracked dataset must differ from local/default dataset"
+        );
+
+        let setup = MasterPortTestSetup::new_with_tracked_ds(local_ds, tracked_ds);
+        let mut master = setup.port_under_test(PortNumber::new(1), &[]);
+
+        master.send_announce().unwrap();
+
+        assert!(
+            setup
+                .physical_port
+                .contains_general_message(&GeneralMessage::Announce(AnnounceMessage::new(
+                    0.into(),
+                    LogMessageInterval::new(0),
+                    tracked_ds,
+                    TimeScale::Ptp,
+                )))
+        );
+        assert!(
+            !setup
+                .physical_port
+                .contains_general_message(&GeneralMessage::Announce(AnnounceMessage::new(
+                    0.into(),
+                    LogMessageInterval::new(0),
+                    local_ds,
+                    TimeScale::Ptp,
+                ))),
+            "Announce should carry tracked dataset, not local/default dataset"
         );
     }
 
@@ -675,16 +722,15 @@ mod tests {
     fn announce_cycle_produces_announce_messages_with_monotonic_sequence_ids() {
         let clock_ds = TestClockDS::default_high_grade().dataset();
         let clock = FakeClock::default();
-        let bmca = BestMasterClockAlgorithm::new(clock_ds, PortNumber::new(1));
 
         let mut cycle = AnnounceCycle::new(
             0.into(),
             FakeTimeout::new(SystemMessage::AnnounceSendTimeout),
             LogInterval::new(0),
         );
-        let msg1 = bmca.using_grandmaster(|gm| cycle.announce(&clock, gm));
+        let msg1 = cycle.announce(&clock, GrandMaster::new(&clock_ds));
         cycle.next();
-        let msg2 = bmca.using_grandmaster(|gm| cycle.announce(&clock, gm));
+        let msg2 = cycle.announce(&clock, GrandMaster::new(&clock_ds));
 
         assert_eq!(
             msg1,
