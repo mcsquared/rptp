@@ -114,7 +114,6 @@ pub trait TimerHost {
 /// - emit logging events.
 pub trait Port {
     type Clock: SynchronizableClock;
-    type PhysicalPort: PhysicalPort;
     type Timeout: Timeout;
 
     /// Return this port's PTP identity (clock identity + port number).
@@ -383,7 +382,6 @@ impl<C: SynchronizableClock, P: PhysicalPort, T: TimerHost, TS: TxTimestamping, 
     for DomainPort<C, P, T, TS, L>
 {
     type Clock = C;
-    type PhysicalPort = P;
     type Timeout = T::Timeout;
 
     fn identity(&self) -> PortIdentity {
